@@ -34,6 +34,8 @@ jobs:
       - name: Initialize Android Platform Wrapper
         run: |
           flutter create . --platforms=android --org id.nusacommerce --project-name nusacommerce_mobile
+          # Pastikan package attribute tidak ada di AndroidManifest untuk AGP 8
+          sed -i 's/package="id.nusacommerce.mobile"//g' android/app/src/main/AndroidManifest.xml
 
       # 5. Ambil dependensi pubspec
       - name: Install Dependencies
