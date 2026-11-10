@@ -14,13 +14,15 @@ class ApiEndpoints {
   static const String switchStore = '/auth/switch-store';
   static const String logout = '/auth/logout';
 
-  // 2. Products, Variants, FEFO Batches & Categories
+  // 2. Products, Variants, FEFO Batches, Stock Opname & Categories
   static const String products = '/products';
   static String productDetail(int id) => '/products/$id';
+  static String adjustProductStock(int id) => '/products/$id/adjust-stock';
   static const String categories = '/categories';
 
-  // 3. POS Checkout, Hold Cart, Sales History, Void & Restaurant Tables
+  // 3. POS Checkout, Hold Cart, Sales History, Refund, Void, Online Orders & Restaurant Tables
   static const String paymentMethods = '/pos/payment-methods';
+  static const String returnReasons = '/pos/return-reasons';
   static const String priceCart = '/pos/price-cart';
   static const String checkout = '/pos/checkout';
   static const String holdCart = '/pos/hold';
@@ -28,7 +30,10 @@ class ApiEndpoints {
   static const String salesHistory = '/pos/sales';
   static String saleDetail(int id) => '/pos/sales/$id';
   static String voidSale(int id) => '/pos/sales/$id/void';
+  static String refundSale(int id) => '/pos/sales/$id/refund';
   static const String restaurantTables = '/pos/tables';
+  static const String onlineOrders = '/online-orders';
+  static String updateOnlineOrderStatus(int id) => '/online-orders/$id/status';
 
   // 4. Cashier Shift & Cash Drawer (Open, Cash Entry, Close Z-Report)
   static const String currentShift = '/shifts/current';

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/constants/api_endpoints.dart';
@@ -117,9 +118,10 @@ class AuthCubit extends Cubit<AuthState> {
       ));
       return true;
     } catch (e) {
-      // If user is testing on an emulator/device before starting `php artisan serve`,
-      // allow instant offline-first entry while flagging offline status in ApiClient.
-      if (email.trim().isNotEmpty && password.isNotEmpty) {
+      // Only fall back to offline demo mode when the backend is unreachable (no HTTP response).
+      // If the server explicitly rejected credentials (401/403/404/422), surface the exact error.
+      final isNetworkOffline = e is DioException && e.response == null;
+      if (isNetworkOffline && email.trim().isNotEmpty && password.isNotEmpty) {
         final fallbackSession = AuthSessionModel.defaultOwnerDemo();
         await _apiClient.saveToken('offline_hmac_session_token');
         await _apiClient.setActiveStoreId(fallbackSession.activeStore.id);

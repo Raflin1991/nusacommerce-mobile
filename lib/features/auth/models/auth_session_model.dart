@@ -82,9 +82,12 @@ class AuthSessionModel extends Equatable {
             ? storesList.first
             : const StoreBranchModel(id: 1, name: 'Toko Kemang', code: 'KMG', city: 'Jakarta Selatan'));
 
-    final roles = (user['roles'] as List<dynamic>? ?? ['Pemilik Usaha']).map((e) => e.toString()).toList();
+    final roles = (user['roles'] as List<dynamic>? ?? [user['role'] ?? 'Pemilik Usaha'])
+        .map((e) => e.toString())
+        .toList();
     final roleLabel = roles.isNotEmpty ? roles.first : 'Pemilik Usaha';
-    final isOwner = roleLabel.toLowerCase().contains('admin') ||
+    final isOwner = (user['is_owner'] == true) ||
+        roleLabel.toLowerCase().contains('admin') ||
         roleLabel.toLowerCase().contains('owner') ||
         roleLabel.toLowerCase().contains('pemilik') ||
         (user['is_super_admin'] == true);

@@ -83,42 +83,67 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
             if (!isVoided) ...[
               const Divider(height: 26),
               const Text(
-                'Pembatalan / Void Transaksi (Audit Anti-Fraud)',
+                'Retur Barang / Pembatalan (Void) Transaksi',
                 style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.dangerDark),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: voidReasonCtrl,
                 decoration: const InputDecoration(
-                  hintText: 'Wajib isi alasan void (misal: salah input barang)',
+                  hintText: 'Wajib isi alasan retur / void (misal: tukar barang / salah input)',
                   prefixIcon: Icon(Icons.warning_amber_rounded, color: AppColors.danger),
                 ),
               ),
               const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.danger,
-                    side: const BorderSide(color: AppColors.danger),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.warningDark,
+                        side: const BorderSide(color: AppColors.warning),
+                      ),
+                      onPressed: () {
+                        final id = (sale['id'] as num?)?.toInt() ?? 0;
+                        final notes = voidReasonCtrl.text.trim().isEmpty
+                            ? 'Retur Pelanggan'
+                            : voidReasonCtrl.text.trim();
+                        context.read<PosCubit>().refundSaleTransaction(id, notes: notes);
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Retur nota ${sale['number']} berhasil diproses & stok dikembalikan.')),
+                        );
+                      },
+                      icon: const Icon(Icons.assignment_return_outlined, size: 18),
+                      label: const Text('Retur (Refund)'),
+                    ),
                   ),
-                  onPressed: () {
-                    if (voidReasonCtrl.text.trim().isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Alasan void wajib diisi!')),
-                      );
-                      return;
-                    }
-                    final id = (sale['id'] as num?)?.toInt() ?? 0;
-                    context.read<PosCubit>().voidSaleTransaction(id, voidReasonCtrl.text.trim());
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Transaksi ${sale['number']} berhasil di-Void.')),
-                    );
-                  },
-                  icon: const Icon(Icons.cancel_outlined),
-                  label: const Text('Batalkan (Void) & Kembalikan Stok'),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                        side: const BorderSide(color: AppColors.danger),
+                      ),
+                      onPressed: () {
+                        if (voidReasonCtrl.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Alasan void wajib diisi!')),
+                          );
+                          return;
+                        }
+                        final id = (sale['id'] as num?)?.toInt() ?? 0;
+                        context.read<PosCubit>().voidSaleTransaction(id, voidReasonCtrl.text.trim());
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Transaksi ${sale['number']} berhasil di-Void.')),
+                        );
+                      },
+                      icon: const Icon(Icons.cancel_outlined, size: 18),
+                      label: const Text('Void Nota'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ],

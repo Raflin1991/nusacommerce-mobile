@@ -376,6 +376,7 @@ class PosCubit extends Cubit<PosState> {
   /// Hold / Park current cart (POST /api/v1/pos/hold)
   Future<void> holdCurrentCart(String label) async {
     if (state.cart.isEmpty) return;
+    final itemsToHold = List<CartItemModel>.from(state.cart);
     final heldEntry = {
       'id': DateTime.now().millisecondsSinceEpoch,
       'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second}',
@@ -383,7 +384,7 @@ class PosCubit extends Cubit<PosState> {
       'table_name': state.selectedTable?['name'],
       'subtotal': state.grandTotal,
       'held_at': DateFormat('HH:mm').format(DateTime.now()),
-      'cart_items': state.cart,
+      'cart_items': itemsToHold,
     };
 
     final updatedHeld = [heldEntry, ...state.heldCarts];
@@ -397,7 +398,7 @@ class PosCubit extends Cubit<PosState> {
     try {
       await _apiClient.dio.post(ApiEndpoints.holdCart, data: {
         'held_label': heldEntry['held_label'],
-        'items': state.cart
+        'items': itemsToHold
             .map((c) => {
                   'product_id': c.product.id,
                   'variant_id': c.variant?.id,
@@ -539,11 +540,37 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(salesHistory: _offlineDb.getLocalSalesHistory()));
   }
 
-  /// Add or update product in Inventory & Stock Opname
+  /// Refund / Return a completed sale (POST /api/v1/pos/sales/{id}/refund)
+  Future<void> refundSaleTransaction(int saleId, {String? notes}) async {
+    await _offlineDb.updateLocalSaleStatus(saleId, 'refunded', voidReason: notes ?? 'Retur Pelanggan');
+    try {
+      await _apiClient.dio.post(
+        ApiEndpoints.refundSale(saleId),
+        data: {
+          'restock': true,
+          'notes': notes ?? 'Retur Pelanggan via NusaPOS Mobile',
+        },
+      );
+    } catch (_) {}
+    emit(state.copyWith(salesHistory: _offlineDb.getLocalSalesHistory()));
+  }
+
+  /// Add or update product in Inventory & Stock Opname (POST /api/v1/products/{id}/adjust-stock)
   Future<void> saveProductInventory(ProductModel product) async {
     await _offlineDb.addOrUpdateLocalProduct(product.toJson());
     final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
     emit(state.copyWith(allProducts: updated));
+
+    try {
+      await _apiClient.dio.post(
+        ApiEndpoints.adjustProductStock(product.id),
+        data: {
+          'new_quantity': product.stock,
+          'unit_cost': product.costPrice,
+          'notes': 'Stock Opname via NusaPOS Mobile',
+        },
+      );
+    } catch (_) {}
   }
 
   /// Sync pending offline transactions manually
