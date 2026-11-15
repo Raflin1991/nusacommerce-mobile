@@ -445,6 +445,38 @@ class SqliteDatabase {
     } catch (_) {}
   }
 
+  Future<void> updateOfflineSalePayload(
+    String id,
+    Map<String, dynamic> updatedPayload, {
+    int isSynced = 0,
+  }) async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      await db.update(
+        'offline_sales',
+        {
+          'payload': jsonEncode(updatedPayload),
+          'is_synced': isSynced,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (_) {}
+  }
+
+  Future<void> deleteOfflineSale(String id) async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      await db.delete(
+        'offline_sales',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (_) {}
+  }
+
   Future<void> clearAll() async {
     final db = await database;
     if (db == null) return;

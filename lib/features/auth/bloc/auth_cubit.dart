@@ -240,6 +240,29 @@ class AuthCubit extends Cubit<AuthState> {
       if (newToken != null && newToken.isNotEmpty) {
         await _apiClient.saveToken(newToken);
       }
+      if (data?['entitlements'] is Map) {
+        final ent = Map<String, dynamic>.from(data!['entitlements'] as Map);
+        final refreshed = AuthSessionModel.fromApiData({
+          'user': {
+            'id': updatedSession.userId,
+            'name': updatedSession.userName,
+            'email': updatedSession.userEmail,
+            'roles': [updatedSession.userRole],
+            'is_owner': updatedSession.isOwner,
+          },
+          'tenant': {
+            'name': updatedSession.tenantName,
+            'subdomain': updatedSession.tenantSubdomain,
+            'plan_name': updatedSession.planName,
+          },
+          'entitlements': ent,
+          'active_store': (data['active_store'] as Map?) ?? updatedSession.activeStore.toJson(),
+          'available_stores': updatedSession.availableStores.map((s) => s.toJson()).toList(),
+          'permissions': data['permissions'] ?? updatedSession.permissions,
+        });
+        await _offlineDb.saveAuthSession(refreshed.toJson());
+        emit(state.copyWith(session: refreshed));
+      }
     } catch (_) {
       // Offline store switch handled locally
     }

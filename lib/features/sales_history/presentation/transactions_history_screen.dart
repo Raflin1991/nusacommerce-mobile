@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
@@ -288,6 +289,24 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                     },
                   ),
                   if (!isVoided) ...[
+                    const SizedBox(height: 8),
+                    NusaButton(
+                      label: 'Tukar Barang (Exchange) 1-Klik',
+                      icon: Icons.swap_horiz_rounded,
+                      variant: NusaButtonVariant.outline,
+                      onPressed: () {
+                        if (items.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Item nota belum termuat. Tunggu sebentar atau sinkronkan riwayat.'),
+                            ),
+                          );
+                          return;
+                        }
+                        Navigator.pop(ctx);
+                        _showExchangeItemSelectorSheet(context, posCubit, activeSale);
+                      },
+                    ),
                     const Divider(height: 24, color: AppColors.border),
                     const Text(
                       'Retur Barang / Pembatalan (Void) Transaksi',
@@ -381,6 +400,221 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                       ],
                     ),
                   ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showExchangeItemSelectorSheet(
+    BuildContext rootContext,
+    PosCubit posCubit,
+    Map<String, dynamic> activeSale,
+  ) {
+    final rawItems = (activeSale['items'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (rawItems.isEmpty) return;
+
+    final selectedQtys = <int, double>{
+      for (int i = 0; i < rawItems.length; i++)
+        i: ((rawItems[i]['quantity'] as num?)?.toDouble() ?? 1.0).abs(),
+    };
+
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          double totalCredit = 0.0;
+          int selectedCount = 0;
+          for (int i = 0; i < rawItems.length; i++) {
+            final q = selectedQtys[i] ?? 0.0;
+            if (q > 0) {
+              selectedCount++;
+              final unitPrice = (rawItems[i]['unit_price'] as num?)?.toDouble() ?? 0.0;
+              totalCredit += (unitPrice * q);
+            }
+          }
+
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.62,
+            maxChildSize: 0.88,
+            builder: (_, scrollCtrl) => Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.swap_horiz_rounded, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Tukar Barang • ${activeSale['number'] ?? '-'}',
+                          style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Pilih item & jumlah yang dikembalikan pelanggan, lalu tambahkan barang pengganti di layar Kasir POS.',
+                    style: TextStyle(fontSize: 12, color: AppColors.slate600),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView.separated(
+                      controller: scrollCtrl,
+                      itemCount: rawItems.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+                      itemBuilder: (_, idx) {
+                        final item = rawItems[idx];
+                        final maxQty = ((item['quantity'] as num?)?.toDouble() ?? 1.0).abs();
+                        final currentQty = selectedQtys[idx] ?? 0.0;
+                        final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
+                        final checked = currentQty > 0;
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: checked,
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    selectedQtys[idx] = (val == true) ? maxQty : 0.0;
+                                  });
+                                },
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      (item['product_name'] ?? 'Produk').toString(),
+                                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                    ),
+                                    Text(
+                                      'Maks ${IdrCurrencyFormatter.formatQty(maxQty)} × ${IdrCurrencyFormatter.format(unitPrice)}',
+                                      style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: AppColors.slate100,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(Icons.remove_rounded, size: 16),
+                                      onPressed: currentQty <= 0
+                                          ? null
+                                          : () {
+                                              setModalState(() {
+                                                final next = (currentQty - 1).clamp(0.0, maxQty);
+                                                selectedQtys[idx] = next;
+                                              });
+                                            },
+                                    ),
+                                    Text(
+                                      IdrCurrencyFormatter.formatQty(currentQty),
+                                      style: AppTheme.moneyStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                    ),
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                      onPressed: currentQty >= maxQty
+                                          ? null
+                                          : () {
+                                              setModalState(() {
+                                                final next = (currentQty + 1).clamp(0.0, maxQty);
+                                                selectedQtys[idx] = next;
+                                              });
+                                            },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Kredit Retur ($selectedCount item)',
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                        ),
+                        NusaPriceTag(
+                          amount: totalCredit,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  NusaButton(
+                    label: 'Lanjut ke Kasir POS (Tukar Barang)',
+                    trailingIcon: Icons.arrow_forward_rounded,
+                    minHeight: 48,
+                    onPressed: selectedCount == 0
+                        ? null
+                        : () {
+                            final returnedItems = <Map<String, dynamic>>[];
+                            for (int i = 0; i < rawItems.length; i++) {
+                              final qty = selectedQtys[i] ?? 0.0;
+                              if (qty > 0) {
+                                returnedItems.add({
+                                  ...rawItems[i],
+                                  'return_quantity': qty,
+                                });
+                              }
+                            }
+                            posCubit.startItemExchange(
+                              originalSale: activeSale,
+                              returnedItems: returnedItems,
+                            );
+                            Navigator.pop(ctx);
+                            if (rootContext.mounted) {
+                              ScaffoldMessenger.of(rootContext).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: AppColors.primary,
+                                  content: Text(
+                                    'Mode Tukar Barang nota ${activeSale['number']} aktif — pilih barang pengganti di POS.',
+                                  ),
+                                ),
+                              );
+                              rootContext.go('/pos');
+                            }
+                          },
+                  ),
                 ],
               ),
             ),

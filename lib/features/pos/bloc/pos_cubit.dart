@@ -11,6 +11,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/network_connectivity_service.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../models/pos_models.dart';
+import '../utils/pos_financial_calculator.dart';
 
 class PosState extends Equatable {
   final bool isLoading;
@@ -36,6 +37,9 @@ class PosState extends Equatable {
   final List<Map<String, dynamic>> salesHistory;
   final List<Map<String, dynamic>> paymentMethods;
   final List<Map<String, dynamic>> returnReasons;
+  final List<Map<String, dynamic>> localSyncConflicts;
+  final int? activeHeldSaleId;
+  final Map<String, dynamic>? exchangeSourceSale;
   final int offlinePendingCount;
   final String? alertMessage;
 
@@ -63,6 +67,9 @@ class PosState extends Equatable {
     this.salesHistory = const [],
     this.paymentMethods = const [],
     this.returnReasons = const [],
+    this.localSyncConflicts = const [],
+    this.activeHeldSaleId,
+    this.exchangeSourceSale,
     this.offlinePendingCount = 0,
     this.alertMessage,
   });
@@ -80,19 +87,37 @@ class PosState extends Equatable {
     }).toList();
   }
 
-  double get totalItemsCount => cart.fold(0.0, (sum, item) => sum + item.quantity);
+  bool get isExchangeMode =>
+      exchangeSourceSale != null || cart.any((c) => c.isExchangeReturn);
+
+  double get exchangeReturnCreditTotal => cart
+      .where((c) => c.isExchangeReturn)
+      .fold(0.0, (sum, c) => sum + c.lineTotal.abs());
+
+  double get replacementItemsSubtotal => cart
+      .where((c) => !c.isExchangeReturn)
+      .fold(0.0, (sum, c) => sum + c.lineTotal);
+
+  double get totalItemsCount =>
+      cart.fold(0.0, (sum, item) => sum + item.quantity.abs());
 
   double get subtotal => cart.fold(0.0, (sum, item) => sum + item.lineTotal);
 
   double get customerGroupDiscount {
     final pct = (selectedCustomer?['default_discount_percent'] as num?)?.toDouble() ?? 0.0;
-    if (pct <= 0) return 0.0;
+    if (pct <= 0 || subtotal <= 0) return 0.0;
     return (subtotal * (pct / 100.0)).roundToDouble();
   }
 
   double get loyaltyDiscountValue => redeemedLoyaltyPoints * 100.0; // 1 point = Rp 100
 
   double get totalDiscount => cartDiscountAmount + customerGroupDiscount + loyaltyDiscountValue;
+
+  double get exchangeSurplusCredit {
+    if (!isExchangeMode) return 0.0;
+    final net = subtotal - totalDiscount;
+    return net < 0 ? net.abs() : 0.0;
+  }
 
   double get grandTotal => (subtotal - totalDiscount).clamp(0.0, double.infinity);
 
@@ -129,6 +154,11 @@ class PosState extends Equatable {
     List<Map<String, dynamic>>? salesHistory,
     List<Map<String, dynamic>>? paymentMethods,
     List<Map<String, dynamic>>? returnReasons,
+    List<Map<String, dynamic>>? localSyncConflicts,
+    int? activeHeldSaleId,
+    bool clearActiveHeldSaleId = false,
+    Map<String, dynamic>? exchangeSourceSale,
+    bool clearExchangeSourceSale = false,
     int? offlinePendingCount,
     String? alertMessage,
   }) {
@@ -156,6 +186,9 @@ class PosState extends Equatable {
       salesHistory: salesHistory ?? this.salesHistory,
       paymentMethods: paymentMethods ?? this.paymentMethods,
       returnReasons: returnReasons ?? this.returnReasons,
+      localSyncConflicts: localSyncConflicts ?? this.localSyncConflicts,
+      activeHeldSaleId: clearActiveHeldSaleId ? null : (activeHeldSaleId ?? this.activeHeldSaleId),
+      exchangeSourceSale: clearExchangeSourceSale ? null : (exchangeSourceSale ?? this.exchangeSourceSale),
       offlinePendingCount: offlinePendingCount ?? this.offlinePendingCount,
       alertMessage: alertMessage,
     );
@@ -186,6 +219,9 @@ class PosState extends Equatable {
         salesHistory,
         paymentMethods,
         returnReasons,
+        localSyncConflicts,
+        activeHeldSaleId,
+        exchangeSourceSale,
         offlinePendingCount,
         alertMessage,
       ];
@@ -301,6 +337,7 @@ class PosCubit extends Cubit<PosState> {
       suppliers: localSuppliers,
       cart: initialCart,
       salesHistory: localHistory,
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
       offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
     ));
 
@@ -351,6 +388,7 @@ class PosCubit extends Cubit<PosState> {
       if (!isClosed) {
         emit(state.copyWith(
           isSyncingOfflineQueue: false,
+          localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
           offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
         ));
       }
@@ -482,6 +520,9 @@ class PosCubit extends Cubit<PosState> {
                       stock: 99,
                     );
               cartItems.add(CartItemModel(
+                saleItemId: (itemRaw['sale_item_id'] ?? itemRaw['id']) is num
+                    ? ((itemRaw['sale_item_id'] ?? itemRaw['id']) as num).toInt()
+                    : null,
                 product: prod,
                 quantity: (itemRaw['quantity'] as num?)?.toDouble() ?? 1,
                 unitPrice: (itemRaw['unit_price'] as num?)?.toDouble() ?? prod.sellingPrice,
@@ -494,7 +535,9 @@ class PosCubit extends Cubit<PosState> {
               'number': map['number'] ?? 'HOLD-${map['id']}',
               'held_label': map['held_label'] ?? map['table_name'] ?? 'Pesanan Ditahan',
               'table_name': map['table_name'],
+              'table_id': map['table_id'],
               'notes': map['notes'],
+              'service_charge_amount': (map['service_charge_amount'] as num?)?.toDouble() ?? 0.0,
               'subtotal': (map['grand_total'] as num?)?.toDouble() ??
                   (map['subtotal'] as num?)?.toDouble() ??
                   0.0,
@@ -540,6 +583,7 @@ class PosCubit extends Cubit<PosState> {
         heldCarts: mergedHeldCarts,
         paymentMethods: paymentMethods,
         returnReasons: returnReasons,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
         cart: (force && !preserveActiveCart) ? [] : state.cart,
       ));
@@ -550,6 +594,7 @@ class PosCubit extends Cubit<PosState> {
         isLoading: false,
         isOnline: online && _apiClient.isOnline,
         isSyncingOfflineQueue: false,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
     }
@@ -607,10 +652,16 @@ class PosCubit extends Cubit<PosState> {
 
   void selectRestaurantTable(Map<String, dynamic>? table) {
     if (table == null) {
-      emit(state.copyWith(clearTable: true));
+      emit(state.copyWith(clearTable: true, clearActiveHeldSaleId: true));
     } else {
+      final activeSaleId = (table['active_sale_id'] as num?)?.toInt() ??
+          (table['active_sale'] is Map
+              ? ((table['active_sale']['id'] as num?)?.toInt())
+              : null);
       emit(state.copyWith(
         selectedTable: table,
+        activeHeldSaleId: activeSaleId,
+        clearActiveHeldSaleId: activeSaleId == null,
         currentVertical: BusinessVertical.restaurant,
         posMode: 'restaurant',
         orderType: 'dine_in',
@@ -648,6 +699,7 @@ class PosCubit extends Cubit<PosState> {
 
     final existingIdx = updated.indexWhere(
       (item) =>
+          !item.isExchangeReturn &&
           item.product.id == product.id &&
           item.variant?.id == variant?.id &&
           item.effectiveUnitCode == unitCode,
@@ -737,9 +789,10 @@ class PosCubit extends Cubit<PosState> {
 
   void incrementCartItem(int index) {
     if (index < 0 || index >= state.cart.length) return;
+    final item = state.cart[index];
+    if (item.isExchangeReturn) return;
     PosFeedback.onTapStepper();
     final updated = List<CartItemModel>.from(state.cart);
-    final item = updated[index];
     final step = item.product.soldByWeight ? 0.5 : 1.0;
     updated[index] = item.copyWith(quantity: item.quantity + step);
     emit(state.copyWith(cart: updated));
@@ -747,9 +800,10 @@ class PosCubit extends Cubit<PosState> {
 
   void decrementCartItem(int index) {
     if (index < 0 || index >= state.cart.length) return;
+    final item = state.cart[index];
+    if (item.isExchangeReturn) return;
     PosFeedback.onTapStepper();
     final updated = List<CartItemModel>.from(state.cart);
-    final item = updated[index];
     final step = item.product.soldByWeight ? 0.5 : 1.0;
     if (item.quantity - step <= 0) {
       updated.removeAt(index);
@@ -813,6 +867,81 @@ class PosCubit extends Cubit<PosState> {
       managerDiscountApproved: false,
       redeemedLoyaltyPoints: 0,
       clearTable: true,
+      clearActiveHeldSaleId: true,
+      clearExchangeSourceSale: true,
+      clearOrderNotes: true,
+    ));
+  }
+
+  /// Start 1-Click Item Exchange workflow from Transactions History.
+  void startItemExchange({
+    required Map<String, dynamic> originalSale,
+    required List<Map<String, dynamic>> returnedItems,
+  }) {
+    final exchangeLines = <CartItemModel>[];
+    for (final raw in returnedItems) {
+      final pid = (raw['product_id'] as num?)?.toInt() ?? 0;
+      final qty = ((raw['return_quantity'] ?? raw['quantity']) as num?)?.toDouble() ?? 1.0;
+      if (qty <= 0) continue;
+
+      final matched = state.allProducts.where((p) => p.id == pid).toList();
+      final product = matched.isNotEmpty
+          ? matched.first
+          : ProductModel(
+              id: pid,
+              name: (raw['product_name'] ?? 'Produk').toString(),
+              sku: (raw['sku'] ?? 'SKU').toString(),
+              barcode: '',
+              sellingPrice: (raw['unit_price'] as num?)?.toDouble() ?? 0.0,
+              stock: 99,
+            );
+
+      final unitPrice = (raw['unit_price'] as num?)?.toDouble() ?? product.sellingPrice;
+      final saleItemId = (raw['sale_item_id'] ?? raw['id']) is num
+          ? ((raw['sale_item_id'] ?? raw['id']) as num).toInt()
+          : null;
+
+      exchangeLines.add(
+        CartItemModel(
+          saleItemId: saleItemId,
+          isExchangeReturn: true,
+          product: product,
+          quantity: -qty,
+          unitPrice: unitPrice,
+          notes: 'Retur Tukar Barang (${originalSale['number'] ?? ''})',
+          selectedUnitCode: (raw['unit_code'] ?? product.unitCode).toString(),
+        ),
+      );
+    }
+
+    Map<String, dynamic>? linkedCustomer;
+    if (originalSale['customer'] is Map) {
+      final rawCust = Map<String, dynamic>.from(originalSale['customer'] as Map);
+      final cid = (rawCust['id'] as num?)?.toInt() ?? 0;
+      if (cid > 0) {
+        final found = state.customers.where((c) => (c['id'] as num?)?.toInt() == cid).toList();
+        linkedCustomer = found.isNotEmpty ? found.first : rawCust;
+      }
+    }
+
+    emit(state.copyWith(
+      cart: exchangeLines,
+      exchangeSourceSale: originalSale,
+      selectedCustomer: linkedCustomer,
+      clearCustomer: linkedCustomer == null,
+      cartDiscountAmount: 0,
+      redeemedLoyaltyPoints: 0,
+      clearTable: true,
+      clearActiveHeldSaleId: true,
+      orderNotes: 'Tukar Barang dari Nota ${originalSale['number'] ?? '-'}',
+    ));
+  }
+
+  void cancelExchangeMode() {
+    final nonExchange = state.cart.where((c) => !c.isExchangeReturn).toList();
+    emit(state.copyWith(
+      cart: nonExchange,
+      clearExchangeSourceSale: true,
       clearOrderNotes: true,
     ));
   }
@@ -899,22 +1028,106 @@ class PosCubit extends Cubit<PosState> {
     final held = state.heldCarts[index];
     final items = (held['cart_items'] as List<CartItemModel>? ?? []);
     final notes = held['notes']?.toString();
+    final heldId = (held['id'] as num?)?.toInt();
     final remainingHeld = List<Map<String, dynamic>>.from(state.heldCarts)..removeAt(index);
     emit(state.copyWith(
       cart: items,
       heldCarts: remainingHeld,
+      activeHeldSaleId: heldId,
+      clearActiveHeldSaleId: heldId == null,
+      clearExchangeSourceSale: true,
       orderNotes: (notes != null && notes.trim().isNotEmpty) ? notes.trim() : null,
       clearOrderNotes: notes == null || notes.trim().isEmpty,
     ));
   }
 
-  /// Complete POS Checkout (POST /api/v1/pos/checkout with UUIDv4 Idempotency + Offline Queue + Split Bill support)
+  /// Sync Split Bill by Item with Backend `SplitBillAction` (`POST /api/v1/pos/tables/{table}/split`)
+  /// Falls back cleanly to prorated calculation if offline or unheld.
+  Future<Map<String, dynamic>> splitRestaurantTableBill(List<int> selectedIndices) async {
+    final tableId = (state.selectedTable?['id'] as num?)?.toInt();
+    final heldSaleId = state.activeHeldSaleId ??
+        (state.selectedTable?['active_sale_id'] as num?)?.toInt();
+
+    final selectedItems = [
+      for (final idx in selectedIndices)
+        if (idx >= 0 && idx < state.cart.length) state.cart[idx],
+    ];
+
+    final localCalc = PosFinancialCalculator.calculateProratedSplitBill(
+      parentItems: state.cart
+          .map((c) => {
+                if (c.saleItemId != null) 'sale_item_id': c.saleItemId,
+                'quantity': c.quantity,
+                'unit_price': c.unitPrice,
+                'discount_amount': c.discountAmount,
+              })
+          .toList(),
+      itemsToSplit: selectedIndices
+          .where((idx) => idx >= 0 && idx < state.cart.length)
+          .map((idx) => {
+                'index': idx,
+                'quantity': state.cart[idx].quantity,
+              })
+          .toList(),
+    );
+
+    if (tableId != null && heldSaleId != null && selectedItems.isNotEmpty) {
+      try {
+        final res = await _apiClient.dio.post(
+          ApiEndpoints.splitTable(tableId),
+          data: {
+            'held_sale_id': heldSaleId,
+            'items': selectedItems
+                .map((c) => {
+                      if (c.saleItemId != null) 'sale_item_id': c.saleItemId,
+                      'product_id': c.product.id,
+                      if (c.variant?.id != null) 'variant_id': c.variant!.id,
+                      'quantity': c.quantity,
+                    })
+                .toList(),
+          },
+        );
+        final data = res.data?['data'] as Map<String, dynamic>?;
+        final child = data?['child'] as Map<String, dynamic>?;
+        if (child != null) {
+          final childSaleId = (child['id'] as num?)?.toInt();
+          final childGrand = (child['grand_total'] as num?)?.toDouble() ?? localCalc.childGrandTotal;
+          final childServiceCharge = (child['service_charge_amount'] as num?)?.toDouble() ?? localCalc.childServiceCharge;
+          final childTax = (child['tax_total'] as num?)?.toDouble() ?? localCalc.childTax;
+          return {
+            'synced': true,
+            'child_held_sale_id': childSaleId,
+            'grand_total': childGrand,
+            'service_charge_amount': childServiceCharge,
+            'tax_total': childTax,
+          };
+        }
+      } catch (_) {
+        // Fallback to local prorated calculation when offline
+      }
+    }
+
+    return {
+      'synced': false,
+      'child_held_sale_id': null,
+      'grand_total': localCalc.childGrandTotal,
+      'service_charge_amount': localCalc.childServiceCharge,
+      'tax_total': localCalc.childTax,
+    };
+  }
+
+  /// Complete POS Checkout (POST /api/v1/pos/checkout with UUIDv4 Idempotency,
+  /// Multi-Tender Split, Kasbon DP, Store Credit, Held Table Split Sync & 1-Click Exchange)
   Future<Map<String, dynamic>> completeCheckout({
     required List<Map<String, dynamic>> payments,
     required List<String> paymentMethodNames,
     required double paidTotal,
     required double changeReturned,
     required double balanceDue,
+    double storeCreditAmount = 0.0,
+    double? grandTotalOverride,
+    int? overrideHeldSaleId,
+    bool refundSurplusToStoreCredit = false,
     List<int>? splitItemIndices,
     String? orderTypeOverride,
     String? dueDate,
@@ -934,26 +1147,35 @@ class PosCubit extends Cubit<PosState> {
     final resolvedOrderType = orderTypeOverride ??
         (state.posMode == 'restaurant' && state.orderType == 'retail' ? 'dine_in' : state.orderType);
 
-    final checkoutSubtotal = checkoutCart.fold<double>(0.0, (sum, c) => sum + c.lineTotal);
-    final appliedOrderDiscount = isPartialSplit ? 0.0 : state.totalDiscount;
-    final checkoutGrandTotal = (checkoutSubtotal - appliedOrderDiscount).clamp(0.0, double.infinity);
+    final returnedLines = checkoutCart.where((c) => c.isExchangeReturn).toList();
+    final positiveLines = checkoutCart.where((c) => !c.isExchangeReturn).toList();
+    final isExchange = state.isExchangeMode && returnedLines.isNotEmpty;
 
-    // Fold order-level discount (manual cart, customer group, loyalty) proportionally into line discounts
+    final positiveSubtotal = positiveLines.fold<double>(0.0, (sum, c) => sum + c.lineTotal);
+    final returnCreditSubtotal = returnedLines.fold<double>(0.0, (sum, c) => sum + c.lineTotal.abs());
+    final checkoutSubtotal = isExchange
+        ? (positiveSubtotal - returnCreditSubtotal)
+        : checkoutCart.fold<double>(0.0, (sum, c) => sum + c.lineTotal);
+    final appliedOrderDiscount = isPartialSplit ? 0.0 : state.totalDiscount;
+    final checkoutGrandTotal = grandTotalOverride ??
+        (checkoutSubtotal - appliedOrderDiscount).clamp(0.0, double.infinity);
+
+    // Fold order-level discount proportionally into positive sale line discounts
     double remainingOrderDisc = appliedOrderDiscount;
-    final itemMaps = <Map<String, dynamic>>[];
-    for (int i = 0; i < checkoutCart.length; i++) {
-      final c = checkoutCart[i];
+    final positiveItemMaps = <Map<String, dynamic>>[];
+    for (int i = 0; i < positiveLines.length; i++) {
+      final c = positiveLines[i];
       double extraDisc = 0.0;
-      if (appliedOrderDiscount > 0 && checkoutSubtotal > 0) {
-        if (i == checkoutCart.length - 1) {
+      if (appliedOrderDiscount > 0 && positiveSubtotal > 0) {
+        if (i == positiveLines.length - 1) {
           extraDisc = remainingOrderDisc;
         } else {
-          extraDisc = ((c.lineTotal / checkoutSubtotal) * appliedOrderDiscount).roundToDouble();
+          extraDisc = ((c.lineTotal / positiveSubtotal) * appliedOrderDiscount).roundToDouble();
           remainingOrderDisc -= extraDisc;
         }
       }
       final combinedDiscount = c.discountAmount + extraDisc;
-      itemMaps.add({
+      positiveItemMaps.add({
         'product_id': c.product.id,
         'variant_id': c.variant?.id,
         'batch_id': c.batch?.id,
@@ -969,6 +1191,24 @@ class PosCubit extends Cubit<PosState> {
       });
     }
 
+    final displayItemMaps = <Map<String, dynamic>>[
+      ...returnedLines.map((c) => {
+            'product_id': c.product.id,
+            'variant_id': c.variant?.id,
+            'product_name': '[RETUR] ${c.displayName}',
+            'unit_code': c.effectiveUnitCode,
+            'multiplier': c.multiplier,
+            'quantity': c.quantity,
+            'unit_price': c.unitPrice,
+            'discount_amount': 0.0,
+            'line_total': c.lineSubtotal,
+            'is_exchange_return': true,
+          }),
+      ...positiveItemMaps,
+    ];
+
+    final effectiveHeldSaleId = overrideHeldSaleId ?? (isPartialSplit ? null : state.activeHeldSaleId);
+
     final receiptPayload = <String, dynamic>{
       'id': DateTime.now().millisecondsSinceEpoch,
       'number': invoiceNo,
@@ -979,27 +1219,36 @@ class PosCubit extends Cubit<PosState> {
       'tax_total': 0.0,
       'grand_total': checkoutGrandTotal,
       'paid_total': paidTotal,
+      'store_credit_amount': storeCreditAmount,
       'change_returned': changeReturned,
       'balance_due': balanceDue,
       if (dueDate != null && dueDate.isNotEmpty) 'due_date': dueDate,
-      'status': 'completed',
+      if (isExchange) 'exchange_return_total': returnCreditSubtotal,
+      if (isExchange) 'exchange_replacement_total': positiveSubtotal,
+      if (isExchange && state.exchangeSourceSale != null)
+        'exchange_source_number': state.exchangeSourceSale!['number'],
+      'status': (isExchange && positiveLines.isEmpty) ? 'refunded' : 'completed',
       'order_type': resolvedOrderType,
       'table_name': state.selectedTable?['name'],
       if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
         'notes': state.orderNotes!.trim(),
       'payment_methods': paymentMethodNames,
       'customer': state.selectedCustomer ?? {'id': 0, 'name': 'Pelanggan Umum', 'phone': '-'},
-      'items': itemMaps,
+      'items': displayItemMaps,
       'payments': payments,
     };
 
-    // Deduct local stock immediately (multiplied by selected unit multiplier)
+    // Adjust local stock immediately (subtract sold replacement qty, add returned exchange qty)
     final updatedProducts = state.allProducts.map((p) {
-      final soldBaseQty = checkoutCart
+      final soldBaseQty = positiveLines
           .where((c) => c.product.id == p.id)
           .fold<double>(0.0, (sum, c) => sum + (c.quantity * c.multiplier));
-      if (soldBaseQty > 0) {
-        final newStock = (p.stock - soldBaseQty).clamp(0.0, double.infinity);
+      final returnedBaseQty = returnedLines
+          .where((c) => c.product.id == p.id)
+          .fold<double>(0.0, (sum, c) => sum + (c.quantity.abs() * c.multiplier));
+      final netDelta = returnedBaseQty - soldBaseQty;
+      if (netDelta.abs() > 0.0001) {
+        final newStock = (p.stock + netDelta).clamp(0.0, double.infinity);
         _offlineDb.updateLocalProductStock(p.id, newStock);
         return ProductModel.fromJson({
           ...p.toJson(),
@@ -1010,32 +1259,98 @@ class PosCubit extends Cubit<PosState> {
       return p;
     }).toList();
 
-    final apiBody = <String, dynamic>{
-      'local_uuid': localUuid,
-      'customer_id': state.selectedCustomer?['id'],
-      'order_type': resolvedOrderType,
-      'table_id': state.selectedTable?['id'],
-      if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
-        'notes': state.orderNotes!.trim(),
-      if (!isPartialSplit && state.redeemedLoyaltyPoints > 0)
-        'redeem_points': state.redeemedLoyaltyPoints,
-      if (dueDate != null && dueDate.isNotEmpty) 'due_date': dueDate,
-      'items': itemMaps,
-      'payments': payments,
-    };
-
-    // Attempt live Cloud Checkout; if offline, enqueue in OfflineSaleQueue
     bool checkoutSyncedOnline = true;
-    try {
-      final res = await _apiClient.dio.post(ApiEndpoints.checkout, data: apiBody);
-      final serverData = res.data['data'] as Map<String, dynamic>?;
-      if (serverData != null) {
-        if (serverData['number'] != null) receiptPayload['number'] = serverData['number'];
-        if (serverData['id'] != null) receiptPayload['id'] = serverData['id'];
+    double effectiveStoreCreditForApi = storeCreditAmount;
+
+    // Step 1 of Exchange Mode: Execute Return/Refund on original sale
+    if (isExchange) {
+      final origSaleId = (state.exchangeSourceSale?['id'] as num?)?.toInt() ?? 0;
+      final customerId = (state.selectedCustomer?['id'] as num?)?.toInt() ?? 0;
+      final shouldCreditDepositOnReturn =
+          customerId > 0 && (positiveLines.isNotEmpty || refundSurplusToStoreCredit);
+
+      if (origSaleId > 0) {
+        try {
+          await _apiClient.dio.post(
+            ApiEndpoints.refundSale(origSaleId),
+            data: {
+              'restock': true,
+              if (shouldCreditDepositOnReturn) 'refund_to_store_credit': true,
+              'notes': 'Tukar Barang (Exchange) ke $invoiceNo',
+              'client_uuid': 'ex-$localUuid',
+              'items': returnedLines
+                  .where((c) => c.saleItemId != null)
+                  .map((c) => {
+                        'sale_item_id': c.saleItemId,
+                        'quantity': c.quantity.abs(),
+                        'restock': true,
+                      })
+                  .toList(),
+            },
+          );
+          if (shouldCreditDepositOnReturn && positiveLines.isNotEmpty) {
+            final usedFromExchangeCredit =
+                returnCreditSubtotal.clamp(0.0, positiveSubtotal);
+            effectiveStoreCreditForApi += usedFromExchangeCredit;
+          }
+        } catch (_) {
+          checkoutSyncedOnline = false;
+        }
       }
-    } catch (_) {
-      checkoutSyncedOnline = false;
-      await _offlineDb.enqueueOfflineSale(apiBody);
+    }
+
+    // Step 2: Submit Checkout when there are replacement / normal sale items
+    if (positiveItemMaps.isNotEmpty) {
+      final apiPayments = List<Map<String, dynamic>>.from(payments);
+      // For Guest exchange (no customer store credit), server records the full
+      // replacement value against Cash (which nets out against the Cash refund above).
+      final customerId = (state.selectedCustomer?['id'] as num?)?.toInt();
+      if (isExchange && (customerId == null || customerId <= 0)) {
+        final cashMethodId = state.paymentMethods.isNotEmpty
+            ? ((state.paymentMethods.first['id'] as num?)?.toInt() ?? 1)
+            : 1;
+        final netTenderTotal = apiPayments.fold<double>(
+            0.0, (s, p) => s + ((p['amount'] as num?)?.toDouble() ?? 0.0));
+        final missingCreditShare =
+            (positiveSubtotal - appliedOrderDiscount - netTenderTotal)
+                .clamp(0.0, double.infinity);
+        if (missingCreditShare > 0.5) {
+          apiPayments.add({
+            'payment_method_id': cashMethodId,
+            'amount': missingCreditShare,
+            'reference': 'EXCHANGE-CREDIT-${state.exchangeSourceSale?['number'] ?? ''}',
+          });
+        }
+      }
+
+      final apiBody = <String, dynamic>{
+        'local_uuid': localUuid,
+        'customer_id': state.selectedCustomer?['id'],
+        'order_type': resolvedOrderType,
+        'table_id': state.selectedTable?['id'],
+        if (effectiveHeldSaleId != null) 'held_sale_id': effectiveHeldSaleId,
+        if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
+          'notes': state.orderNotes!.trim(),
+        if (!isPartialSplit && state.redeemedLoyaltyPoints > 0)
+          'redeem_points': state.redeemedLoyaltyPoints,
+        if (effectiveStoreCreditForApi > 0)
+          'store_credit_amount': effectiveStoreCreditForApi,
+        if (dueDate != null && dueDate.isNotEmpty) 'due_date': dueDate,
+        'items': positiveItemMaps,
+        'payments': apiPayments,
+      };
+
+      try {
+        final res = await _apiClient.dio.post(ApiEndpoints.checkout, data: apiBody);
+        final serverData = res.data['data'] as Map<String, dynamic>?;
+        if (serverData != null) {
+          if (serverData['number'] != null) receiptPayload['number'] = serverData['number'];
+          if (serverData['id'] != null) receiptPayload['id'] = serverData['id'];
+        }
+      } catch (_) {
+        checkoutSyncedOnline = false;
+        await _offlineDb.enqueueOfflineSale(apiBody);
+      }
     }
 
     await _offlineDb.saveSaleToLocalHistory(receiptPayload);
@@ -1058,8 +1373,11 @@ class PosCubit extends Cubit<PosState> {
       managerDiscountApproved: remainingCart.isEmpty ? false : state.managerDiscountApproved,
       redeemedLoyaltyPoints: remainingCart.isEmpty ? 0 : state.redeemedLoyaltyPoints,
       clearTable: remainingCart.isEmpty,
+      clearActiveHeldSaleId: remainingCart.isEmpty,
+      clearExchangeSourceSale: remainingCart.isEmpty,
       clearOrderNotes: remainingCart.isEmpty,
       salesHistory: updatedHistory,
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
       offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
     ));
 
@@ -1276,6 +1594,30 @@ class PosCubit extends Cubit<PosState> {
     }
   }
 
+  /// Resolve an offline `InsufficientStock` conflict either by approving oversell
+  /// or by voiding/cancelling the local conflicted sale.
+  Future<bool> resolveOfflineStockConflict({
+    required String localUuid,
+    required bool approveOversell,
+  }) async {
+    bool ok = true;
+    if (approveOversell) {
+      ok = await _offlineDb.resolveConflictApproveOversell(localUuid, _apiClient);
+      if (ok) {
+        await syncWithCloud(force: false, preserveActiveCart: true);
+      }
+    } else {
+      await _offlineDb.resolveConflictCancelSale(localUuid);
+    }
+
+    emit(state.copyWith(
+      salesHistory: _offlineDb.getLocalSalesHistory(),
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+    ));
+    return ok;
+  }
+
   /// Sync pending offline transactions manually
   Future<int> syncOfflineTransactions() async {
     emit(state.copyWith(isSyncingOfflineQueue: true));
@@ -1288,12 +1630,14 @@ class PosCubit extends Cubit<PosState> {
       emit(state.copyWith(
         isOnline: online,
         isSyncingOfflineQueue: false,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
       return synced;
     } catch (_) {
       emit(state.copyWith(
         isSyncingOfflineQueue: false,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
       return 0;

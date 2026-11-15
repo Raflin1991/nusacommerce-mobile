@@ -36,6 +36,7 @@ class ApiEndpoints {
   static const String restaurantTables = '/pos/tables';
   static String openTable(int tableId) => '/pos/tables/$tableId/open';
   static String transferTable(int tableId) => '/pos/tables/$tableId/transfer';
+  static String splitTable(int tableId) => '/pos/tables/$tableId/split';
   static const String offlineConflicts = '/pos/offline-conflicts';
   static const String onlineOrders = '/online-orders';
   static String updateOnlineOrderStatus(int id) => '/online-orders/$id/status';

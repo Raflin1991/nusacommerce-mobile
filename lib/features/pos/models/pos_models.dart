@@ -335,6 +335,8 @@ class ProductModel extends Equatable {
 }
 
 class CartItemModel extends Equatable {
+  final int? saleItemId;
+  final bool isExchangeReturn;
   final ProductModel product;
   final ProductVariantModel? variant;
   final ProductBatchModel? batch;
@@ -347,6 +349,8 @@ class CartItemModel extends Equatable {
   final double multiplier;
 
   const CartItemModel({
+    this.saleItemId,
+    this.isExchangeReturn = false,
     required this.product,
     this.variant,
     this.batch,
@@ -371,9 +375,13 @@ class CartItemModel extends Equatable {
 
   double get lineSubtotal => quantity * unitPrice;
 
-  double get lineTotal => (lineSubtotal - discountAmount).clamp(0, double.infinity);
+  double get lineTotal => isExchangeReturn
+      ? lineSubtotal
+      : (lineSubtotal - discountAmount).clamp(0, double.infinity);
 
   CartItemModel copyWith({
+    int? saleItemId,
+    bool? isExchangeReturn,
     double? quantity,
     double? unitPrice,
     double? discountAmount,
@@ -384,6 +392,8 @@ class CartItemModel extends Equatable {
     double? multiplier,
   }) {
     return CartItemModel(
+      saleItemId: saleItemId ?? this.saleItemId,
+      isExchangeReturn: isExchangeReturn ?? this.isExchangeReturn,
       product: product,
       variant: variant,
       batch: batch ?? this.batch,
@@ -399,6 +409,8 @@ class CartItemModel extends Equatable {
 
   @override
   List<Object?> get props => [
+        saleItemId,
+        isExchangeReturn,
         product.id,
         variant?.id,
         batch?.id,

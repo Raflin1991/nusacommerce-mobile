@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/widgets/cascade_entitlement_teaser.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../inventory/presentation/products_inventory_screen.dart';
@@ -250,7 +251,86 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                   Navigator.pop(context);
                   context.push('/debts?tab=expenses');
                 }),
-                const Divider(height: 24),
+                const Divider(height: 20),
+                _drawerTile(
+                  Icons.shopping_bag_rounded,
+                  'Pesanan Toko Online (Webstore)',
+                  () {
+                    Navigator.pop(context);
+                    if (session.isModuleGated('online_store')) {
+                      showCascadeModuleTeaserModal(
+                        context,
+                        moduleKey: 'online_store',
+                        moduleTitle: 'Toko Online & Katalog Web',
+                        requiredTier: 'PRO',
+                        currentTier: session.tier,
+                        description: 'Terima pesanan online dari pelanggan langsung ke kasir POS dengan pemotongan stok otomatis secara real-time.',
+                        benefits: const [
+                          'Etalase web katalog toko siap pakai 24 jam',
+                          'Notifikasi pesanan masuk real-time & cetak resi',
+                          'Sinkronisasi stok tunggal antar kasir toko & webstore',
+                        ],
+                      );
+                    } else {
+                      _switchTab(0);
+                    }
+                  },
+                  isGated: session.isModuleGated('online_store'),
+                  requiredTier: 'PRO',
+                ),
+                _drawerTile(
+                  Icons.account_balance_rounded,
+                  'Akuntansi & Jurnal Otomatis',
+                  () {
+                    Navigator.pop(context);
+                    if (session.isModuleGated('accounting')) {
+                      showCascadeModuleTeaserModal(
+                        context,
+                        moduleKey: 'accounting',
+                        moduleTitle: 'Akuntansi SAK EMKM & Jurnal Otomatis',
+                        requiredTier: 'PRO',
+                        currentTier: session.tier,
+                        description: 'Jurnal umum, neraca, buku besar, dan laporan arus kas tersusun otomatis di belakang layar dari setiap struk penjualan & pembelian.',
+                        benefits: const [
+                          'Neraca & Laba Rugi komprehensif standar SAK EMKM',
+                          'Rekonsiliasi bank & buku kas per akun otomatis',
+                          'Ekspor kesiapan pajak & audit akuntan',
+                        ],
+                      );
+                    } else {
+                      _switchTab(3);
+                    }
+                  },
+                  isGated: session.isModuleGated('accounting'),
+                  requiredTier: 'PRO',
+                ),
+                _drawerTile(
+                  Icons.badge_rounded,
+                  'HRD, Jadwal & Absensi Staf',
+                  () {
+                    Navigator.pop(context);
+                    if (session.isModuleGated('hr')) {
+                      showCascadeModuleTeaserModal(
+                        context,
+                        moduleKey: 'hr',
+                        moduleTitle: 'HRD, Jadwal Shift & Absensi Karyawan',
+                        requiredTier: 'ENTERPRISE',
+                        currentTier: session.tier,
+                        description: 'Kelola absensi foto/GPS, komisi kasir per penjualan, dan rekap jam kerja cabang langsung terintegrasi.',
+                        benefits: const [
+                          'Absensi kasir berbasis shift & selfie toko',
+                          'Perhitungan komisi & insentif penjualan otomatis',
+                          'Kontrol akses karyawan lintas cabang terpusat',
+                        ],
+                      );
+                    } else {
+                      context.push('/shifts');
+                    }
+                  },
+                  isGated: session.isModuleGated('hr'),
+                  requiredTier: 'ENTERPRISE',
+                ),
+                const Divider(height: 20),
                 _drawerTile(Icons.storefront_rounded, 'Profil Toko & Struk Header', () {
                   Navigator.pop(context);
                   context.push('/store-profile');
@@ -289,11 +369,26 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     );
   }
 
-  Widget _drawerTile(IconData icon, String title, VoidCallback onTap) {
+  Widget _drawerTile(
+    IconData icon,
+    String title,
+    VoidCallback onTap, {
+    bool isGated = false,
+    String requiredTier = 'PRO',
+  }) {
     return ListTile(
-      leading: Icon(icon, color: AppColors.primary),
-      title: Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-      trailing: const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.slate400),
+      leading: Icon(icon, color: isGated ? AppColors.slate500 : AppColors.primary),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+          color: isGated ? AppColors.slate600 : AppColors.navyDark,
+        ),
+      ),
+      trailing: isGated
+          ? CascadeCrownBadge(requiredTier: requiredTier)
+          : const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.slate400),
       onTap: onTap,
     );
   }

@@ -77,11 +77,69 @@ class _OperationalRadarSheet extends StatefulWidget {
 class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
   late List<Map<String, dynamic>> _approvals;
   final Set<int> _processingApprovalIds = <int>{};
+  final Set<String> _processingConflictUuids = <String>{};
 
   @override
   void initState() {
     super.initState();
     _approvals = widget.approvals.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  List<Map<String, dynamic>> _mergeOfflineConflicts(
+    List<Map<String, dynamic>> localConflicts,
+  ) {
+    final byUuid = <String, Map<String, dynamic>>{};
+    for (final c in widget.offlineConflicts) {
+      final uuid = (c['local_uuid'] ?? c['id'] ?? '').toString();
+      if (uuid.isNotEmpty) {
+        byUuid[uuid] = Map<String, dynamic>.from(c);
+      }
+    }
+    for (final c in localConflicts) {
+      final uuid = (c['local_uuid'] ?? c['id'] ?? '').toString();
+      if (uuid.isNotEmpty) {
+        byUuid[uuid] = {
+          ...?byUuid[uuid],
+          ...Map<String, dynamic>.from(c),
+          'is_local_conflict': true,
+        };
+      }
+    }
+    return byUuid.values.toList();
+  }
+
+  Future<void> _handleResolveConflict(String uuid, {required bool approveOversell}) async {
+    if (_processingConflictUuids.contains(uuid)) return;
+    setState(() => _processingConflictUuids.add(uuid));
+    final posCubit = context.read<PosCubit>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await posCubit.resolveOfflineStockConflict(
+      localUuid: uuid,
+      approveOversell: approveOversell,
+    );
+    if (!mounted) return;
+    setState(() => _processingConflictUuids.remove(uuid));
+    if (approveOversell) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+          content: Text(
+            ok
+                ? 'Oversell disetujui dan nota offline berhasil disinkronkan.'
+                : 'Gagal sinkronisasi oversell. Periksa koneksi jaringan cabang.',
+          ),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.warningDark,
+          content: Text(
+            'Nota offline dibatalkan dari antrean. Lakukan pengembalian dana manual ke pelanggan.',
+          ),
+        ),
+      );
+    }
   }
 
   bool _isTodayIso(dynamic rawDate) {
@@ -144,10 +202,12 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     final List<ProductModel> inventoryAlerts = posState.allProducts
         .where((p) => p.isLowStock || p.hasExpiringSoonBatch)
         .toList();
+    final List<Map<String, dynamic>> mergedOfflineConflicts =
+        _mergeOfflineConflicts(posState.localSyncConflicts);
 
     final int totalAlerts = _approvals.length +
         widget.tasks.length +
-        widget.offlineConflicts.length +
+        mergedOfflineConflicts.length +
         widget.pendingOnlineOrdersCount +
         voidOrLargeDiscounts.length +
         widget.voidCountFromServer +
@@ -248,8 +308,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                       _buildTasksSection(),
                       const SizedBox(height: 12),
                     ],
-                    if (widget.offlineConflicts.isNotEmpty) ...[
-                      _buildOfflineConflictsSection(),
+                    if (mergedOfflineConflicts.isNotEmpty) ...[
+                      _buildOfflineConflictsSection(mergedOfflineConflicts),
                       const SizedBox(height: 12),
                     ],
                     _buildVoidAndDiscountSection(voidOrLargeDiscounts),
@@ -475,38 +535,98 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     );
   }
 
-  Widget _buildOfflineConflictsSection() {
+  Widget _buildOfflineConflictsSection(List<Map<String, dynamic>> conflicts) {
     return _buildSectionCard(
-      title: 'Konflik Sinkronisasi Offline (${widget.offlineConflicts.length})',
-      subtitle: 'Transaksi offline yang butuh peninjauan stok/duplikasi',
+      title: 'Konflik Sinkronisasi Offline (${conflicts.length})',
+      subtitle: 'Transaksi offline yang terblokir akibat stok fisik server habis (InsufficientStock)',
       icon: Icons.sync_problem_rounded,
       accentColor: AppColors.danger,
       softBgColor: AppColors.danger.withOpacity(0.1),
       child: Column(
-        children: widget.offlineConflicts.take(6).map((c) {
+        children: conflicts.take(10).map((c) {
           final uuid = (c['local_uuid'] ?? c['id'] ?? '-').toString();
-          final reason = (c['error_message'] ?? c['reason'] ?? c['conflict_reason'] ?? 'Perlu pengecekan stok cabang').toString();
-          final cashier = c['cashier'] is Map ? (c['cashier']['name'] ?? 'Kasir').toString() : 'Kasir';
+          final reason = (c['conflict_reason'] ??
+                  c['error_message'] ??
+                  c['reason'] ??
+                  'Stok fisik di cabang tidak mencukupi saat sinkronisasi')
+              .toString();
+          final cashier = c['cashier'] is Map
+              ? (c['cashier']['name'] ?? 'Kasir').toString()
+              : 'Kasir';
+          final hasLocalQueueRecord =
+              c['is_local_conflict'] == true || c['sync_status'] == 'sync_conflict';
+          final isProcessing = _processingConflictUuids.contains(uuid);
+
           return Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: AppColors.background,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: AppColors.danger.withOpacity(0.35)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Nota Offline #$uuid • $cashier',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.navyDark,
+                  ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   reason,
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.dangerDark),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.dangerDark,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+                if (hasLocalQueueRecord) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            foregroundColor: AppColors.dangerDark,
+                            side: BorderSide(color: AppColors.danger.withOpacity(0.45)),
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () => _handleResolveConflict(uuid, approveOversell: false),
+                          child: const Text(
+                            'Batalkan & Refund Manual',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            backgroundColor: AppColors.warningDark,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () => _handleResolveConflict(uuid, approveOversell: true),
+                          child: Text(
+                            isProcessing ? 'Memproses...' : 'Setujui Oversell (Override)',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           );

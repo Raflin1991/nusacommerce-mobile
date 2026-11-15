@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../constants/api_endpoints.dart';
@@ -336,14 +337,48 @@ class OfflineDatabase {
     final remaining = <Map<String, dynamic>>[];
     int syncedCount = 0;
 
-    for (final payload in queue) {
+    for (final rawPayload in queue) {
+      final payload = Map<String, dynamic>.from(rawPayload);
       final id = (payload['local_uuid'] ?? '').toString();
+
+      // Do not automatically retry sales already flagged as stock/business conflict;
+      // await owner/manager manual reconciliation (Approve Oversell or Cancel).
+      if (payload['sync_status'] == 'sync_conflict') {
+        remaining.add(payload);
+        continue;
+      }
+
       try {
         await apiClient.dio.post(ApiEndpoints.checkout, data: payload);
         syncedCount++;
         if (id.isNotEmpty) {
           await _sqlite.markOfflineSaleSynced(id);
         }
+      } on DioException catch (e) {
+        final statusCode = e.response?.statusCode;
+        final data = e.response?.data;
+        final errorCode = (data is Map ? data['error_code'] : null)?.toString() ?? '';
+        final message = (data is Map ? data['message'] : null)?.toString() ??
+            ApiClient.extractErrorMessage(e);
+        final msgLower = message.toLowerCase();
+
+        final isInsufficientStock = statusCode == 422 &&
+            (errorCode == 'InsufficientStock' ||
+                errorCode.toLowerCase().contains('stock') ||
+                msgLower.contains('insufficientstock') ||
+                msgLower.contains('stok') ||
+                msgLower.contains('insufficient stock'));
+
+        if (isInsufficientStock) {
+          payload['sync_status'] = 'sync_conflict';
+          payload['conflict_code'] = errorCode.isNotEmpty ? errorCode : 'InsufficientStock';
+          payload['conflict_reason'] = message;
+          payload['conflict_detected_at'] = DateTime.now().toIso8601String();
+          if (id.isNotEmpty) {
+            await _sqlite.updateOfflineSalePayload(id, payload, isSynced: 0);
+          }
+        }
+        remaining.add(payload);
       } catch (_) {
         remaining.add(payload);
       }
@@ -352,6 +387,64 @@ class OfflineDatabase {
     _memOfflineSales = remaining;
     await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(remaining));
     return syncedCount;
+  }
+
+  /// Return all locally flagged `sync_conflict` offline sales awaiting owner reconciliation.
+  List<Map<String, dynamic>> getOfflineSyncConflicts() {
+    return getOfflineSalesQueue()
+        .where((e) => e['sync_status'] == 'sync_conflict')
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  /// Resolve an offline InsufficientStock conflict by approving oversell (`allow_oversell: true`).
+  Future<bool> resolveConflictApproveOversell(
+    String localUuid,
+    ApiClient apiClient,
+  ) async {
+    final queue = getOfflineSalesQueue();
+    final idx = queue.indexWhere((e) => e['local_uuid']?.toString() == localUuid);
+    if (idx < 0) return false;
+
+    final payload = Map<String, dynamic>.from(queue[idx]);
+    payload.remove('sync_status');
+    payload.remove('conflict_code');
+    payload.remove('conflict_reason');
+    payload.remove('conflict_detected_at');
+    payload['allow_oversell'] = true;
+
+    try {
+      await apiClient.dio.post(ApiEndpoints.checkout, data: payload);
+      queue.removeAt(idx);
+      _memOfflineSales = queue;
+      await _sqlite.markOfflineSaleSynced(localUuid);
+      await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Resolve an offline InsufficientStock conflict by cancelling/voiding the local sale.
+  Future<void> resolveConflictCancelSale(String localUuid) async {
+    final queue = getOfflineSalesQueue();
+    queue.removeWhere((e) => e['local_uuid']?.toString() == localUuid);
+    _memOfflineSales = queue;
+    await _sqlite.deleteOfflineSale(localUuid);
+    await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
+
+    final history = getLocalSalesHistory();
+    bool changed = false;
+    for (final s in history) {
+      if (s['local_uuid']?.toString() == localUuid) {
+        s['status'] = 'voided';
+        s['void_reason'] = 'Dibatalkan saat rekonsiliasi konflik stok offline';
+        changed = true;
+      }
+    }
+    if (changed) {
+      await _prefs.setString(_keyCompletedSalesHistory, jsonEncode(history));
+    }
   }
 
   // ===========================================================================

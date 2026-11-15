@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,33 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
+import '../../pos/utils/pos_financial_calculator.dart';
+
+class _MultiTenderLine {
+  String methodCode;
+  String methodLabel;
+  final TextEditingController amountController;
+  final TextEditingController referenceController;
+  String subType;
+
+  _MultiTenderLine({
+    required this.methodCode,
+    required this.methodLabel,
+    required double initialAmount,
+    String initialSubType = '',
+  })  : amountController = TextEditingController(
+          text: IdrCurrencyFormatter.format(initialAmount),
+        ),
+        referenceController = TextEditingController(),
+        subType = initialSubType;
+
+  double get amount => IdrCurrencyFormatter.parse(amountController.text);
+
+  void dispose() {
+    amountController.dispose();
+    referenceController.dispose();
+  }
+}
 
 /// LAYAR 4 — PEMBAYARAN / CHECKOUT SCREEN
 /// NusaCommerce Mobile Enterprise Payment Checkout Screen
@@ -25,9 +53,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   String _selectedMethodName = 'Tunai';
   late final TextEditingController _amountPaidController;
   final TextEditingController _referenceController = TextEditingController();
-  final TextEditingController _splitCashController = TextEditingController();
+  final TextEditingController _storeCreditController = TextEditingController(text: 'Rp 0');
+  final TextEditingController _kasbonDpController = TextEditingController(text: 'Rp 0');
   bool _isSplitPayment = false;
   bool _isKasbonMode = false;
+  bool _useStoreCredit = false;
+  bool _refundSurplusToStoreCredit = true;
   bool _isCartSummaryExpanded = false;
   DateTime _kasbonDueDate = DateTime.now().add(const Duration(days: 7));
   Map<String, dynamic>? _selectedCustomer;
@@ -37,11 +68,16 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   String _qrisType = 'Dinamis'; // 'Dinamis' | 'Statis'
   String _selectedBank = 'BCA'; // 'BCA' | 'Mandiri' | 'BRI' | 'BNI'
   String _edcCardType = 'Debit'; // 'Debit' | 'Kredit'
-  String _splitSecondMethod = 'QRIS'; // 'QRIS' | 'Transfer Bank' | 'Kartu EDC'
+  String _kasbonDpMethod = 'cash'; // 'cash' | 'qris' | 'transfer'
+  final List<_MultiTenderLine> _splitLines = [];
 
   // Split Bill state (Bagi Rata / Pisah Per-Item)
   List<int>? _splitItemIndices;
   int _splitEqualPeople = 0;
+  int? _splitChildHeldSaleId;
+  double? _splitOverrideGrandTotal;
+  double _splitServiceCharge = 0.0;
+  double _splitTaxTotal = 0.0;
 
   @override
   void initState() {
@@ -91,6 +127,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }
 
   double _activeCheckoutTotal(PosState posState) {
+    if (_splitOverrideGrandTotal != null) {
+      return _splitOverrideGrandTotal!;
+    }
     if (_splitItemIndices != null && _splitItemIndices!.isNotEmpty) {
       double total = 0.0;
       for (final idx in _splitItemIndices!) {
@@ -103,12 +142,146 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     return posState.grandTotal;
   }
 
+  double _availableStoreCredit(Map<String, dynamic>? customer) {
+    return ((customer?['store_credit_balance'] as num?)?.toDouble() ?? 0.0)
+        .clamp(0.0, double.infinity);
+  }
+
+  double _appliedStoreCredit(double grandTotal) {
+    if (!_useStoreCredit || _selectedCustomer == null || grandTotal <= 0) {
+      return 0.0;
+    }
+    final avail = _availableStoreCredit(_selectedCustomer);
+    if (avail <= 0) return 0.0;
+    final parsed = IdrCurrencyFormatter.parse(_storeCreditController.text);
+    return parsed.clamp(0.0, math.min(avail, grandTotal)).roundToDouble();
+  }
+
+  double _netTotalAfterStoreCredit(double grandTotal) {
+    return (grandTotal - _appliedStoreCredit(grandTotal)).clamp(0.0, double.infinity);
+  }
+
+  String _defaultSubTypeFor(String code) {
+    switch (code) {
+      case 'qris':
+        return 'Dinamis';
+      case 'transfer':
+        return 'BCA';
+      case 'card':
+        return 'Debit';
+      default:
+        return '';
+    }
+  }
+
+  String _labelForCode(String code) {
+    switch (code) {
+      case 'cash':
+        return 'Tunai';
+      case 'qris':
+        return 'QRIS';
+      case 'transfer':
+        return 'Transfer Bank';
+      case 'card':
+        return 'Kartu EDC';
+      default:
+        return 'Tunai';
+    }
+  }
+
+  void _initSplitLines(double netTarget) {
+    for (final line in _splitLines) {
+      line.dispose();
+    }
+    _splitLines.clear();
+    final half = netTarget >= 2000
+        ? (((netTarget / 2) / 1000).round() * 1000.0)
+        : (netTarget / 2).roundToDouble();
+    final rem = math.max(0.0, netTarget - half);
+    _splitLines.addAll([
+      _MultiTenderLine(
+        methodCode: 'cash',
+        methodLabel: 'Tunai',
+        initialAmount: half,
+      ),
+      _MultiTenderLine(
+        methodCode: 'qris',
+        methodLabel: 'QRIS',
+        initialAmount: rem,
+        initialSubType: 'Dinamis',
+      ),
+    ]);
+  }
+
+  void _addSplitTenderLine(double remainingDue) {
+    final usedCodes = _splitLines.map((e) => e.methodCode).toSet();
+    final nextCode = !usedCodes.contains('transfer')
+        ? 'transfer'
+        : (!usedCodes.contains('card')
+            ? 'card'
+            : (!usedCodes.contains('qris') ? 'qris' : 'cash'));
+    setState(() {
+      _splitLines.add(
+        _MultiTenderLine(
+          methodCode: nextCode,
+          methodLabel: _labelForCode(nextCode),
+          initialAmount: math.max(0.0, remainingDue),
+          initialSubType: _defaultSubTypeFor(nextCode),
+        ),
+      );
+    });
+  }
+
+  void _removeSplitTenderLine(int idx) {
+    if (_splitLines.length <= 2 || idx < 0 || idx >= _splitLines.length) return;
+    setState(() {
+      _splitLines[idx].dispose();
+      _splitLines.removeAt(idx);
+    });
+  }
+
+  KasbonDpComputation _buildKasbonCalculation(double grandTotal) {
+    final c = _selectedCustomer;
+    final limit = (c?['credit_limit'] as num?)?.toDouble() ?? 0.0;
+    final used = (c?['outstanding_balance'] as num?)?.toDouble() ?? 0.0;
+    final availOverride = (c?['available_credit'] as num?)?.toDouble();
+    return PosFinancialCalculator.computeKasbonDp(
+      grandTotal: grandTotal,
+      downPayment: IdrCurrencyFormatter.parse(_kasbonDpController.text),
+      creditLimit: limit,
+      outstandingBalance: used,
+      availableCreditOverride: availOverride,
+      storeCreditUsed: _appliedStoreCredit(grandTotal),
+    );
+  }
+
+  MultiTenderValidation _buildMultiTenderValidation(double grandTotal) {
+    return PosFinancialCalculator.validateMultiTenderPayments(
+      grandTotal: grandTotal,
+      tenderAmounts: _splitLines.map((l) => l.amount).toList(),
+      storeCreditAmount: _appliedStoreCredit(grandTotal),
+    );
+  }
+
+  void _toggleUseStoreCredit(bool enabled, double grandTotal) {
+    final avail = _availableStoreCredit(_selectedCustomer);
+    final defaultUse = enabled ? math.min(avail, grandTotal) : 0.0;
+    setState(() {
+      _useStoreCredit = enabled;
+      _storeCreditController.text = IdrCurrencyFormatter.format(defaultUse);
+      _syncAmountToTotal(grandTotal);
+    });
+  }
+
   void _syncAmountToTotal(double total) {
+    final net = _netTotalAfterStoreCredit(total);
     if (_selectedMethodCode != 'cash' || _isSplitPayment) {
-      _amountPaidController.text = IdrCurrencyFormatter.format(total);
+      _amountPaidController.text = IdrCurrencyFormatter.format(net);
+    } else if (_useStoreCredit) {
+      _amountPaidController.text = IdrCurrencyFormatter.format(net);
     }
     if (_isSplitPayment) {
-      _splitCashController.text = IdrCurrencyFormatter.format((total / 2).round());
+      _initSplitLines(net);
     }
   }
 
@@ -116,7 +289,11 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   void dispose() {
     _amountPaidController.dispose();
     _referenceController.dispose();
-    _splitCashController.dispose();
+    _storeCreditController.dispose();
+    _kasbonDpController.dispose();
+    for (final line in _splitLines) {
+      line.dispose();
+    }
     super.dispose();
   }
 
@@ -131,18 +308,20 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   void _selectPaymentMethod(String code, String label, double grandTotal) {
     if (code == 'kasbon') {
       final cubitCustomers = context.read<PosCubit>().state.customers;
-      final customers = cubitCustomers.isNotEmpty ? cubitCustomers : widget.offlineDb.getCachedCustomers();
+      final customers =
+          cubitCustomers.isNotEmpty ? cubitCustomers : widget.offlineDb.getCachedCustomers();
       _showCustomerKasbonPicker(customers, grandTotal);
       return;
     }
+    final netTarget = _netTotalAfterStoreCredit(grandTotal);
     if (code == 'split') {
       setState(() {
         _selectedMethodCode = 'split';
         _selectedMethodName = 'Split Payment';
         _isSplitPayment = true;
         _isKasbonMode = false;
-        _splitCashController.text = IdrCurrencyFormatter.format((grandTotal / 2).round());
-        _amountPaidController.text = IdrCurrencyFormatter.format(grandTotal);
+        _initSplitLines(netTarget);
+        _amountPaidController.text = IdrCurrencyFormatter.format(netTarget);
       });
       return;
     }
@@ -152,12 +331,15 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       _isKasbonMode = false;
       _isSplitPayment = false;
       if (code != 'cash') {
-        _amountPaidController.text = IdrCurrencyFormatter.format(grandTotal);
+        _amountPaidController.text = IdrCurrencyFormatter.format(netTarget);
+      } else {
+        _amountPaidController.text = IdrCurrencyFormatter.format(netTarget);
       }
     });
   }
 
   void _showCustomerKasbonPicker(List<Map<String, dynamic>> customers, double grandTotal) {
+    final storeCreditApplied = _appliedStoreCredit(grandTotal);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -173,8 +355,13 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Pilih Pelanggan Kasbon (Guard Plafon Kredit)',
+                'Pilih Pelanggan Kasbon (Guard Plafon Kredit + DP Parsial)',
                 style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Jika sisa plafon kredit kurang dari total tagihan, sistem otomatis menghitung minimal Uang Muka (DP).',
+                style: TextStyle(fontSize: 12, color: AppColors.slate600),
               ),
               const SizedBox(height: 12),
               if (customers.isEmpty)
@@ -188,43 +375,84 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
               ...customers.map((c) {
                 final limit = (c['credit_limit'] as num?)?.toDouble() ?? 0.0;
                 final used = (c['outstanding_balance'] as num?)?.toDouble() ?? 0.0;
-                final avail = (c['available_credit'] as num?)?.toDouble() ??
-                    (limit > 0 ? (limit - used).clamp(0.0, double.infinity) : 0.0);
-                final exceeds = grandTotal > avail;
+                final avail = (c['available_credit'] as num?)?.toDouble();
+                final preview = PosFinancialCalculator.computeKasbonDp(
+                  grandTotal: grandTotal,
+                  downPayment: 0,
+                  creditLimit: limit,
+                  outstandingBalance: used,
+                  availableCreditOverride: avail,
+                  storeCreditUsed: storeCreditApplied,
+                );
+                final requiresDp = !preview.isWithinCreditLimit;
+                final availDisplay = preview.availableCredit.isFinite
+                    ? IdrCurrencyFormatter.format(preview.availableCredit)
+                    : 'Tanpa Limit';
+                final depositBal = _availableStoreCredit(c);
+
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(c['name'].toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  title: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          c['name'].toString(),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (depositBal > 0) ...[
+                        const SizedBox(width: 6),
+                        NusaBadge(
+                          label: 'Deposit ${IdrCurrencyFormatter.format(depositBal)}',
+                          variant: NusaBadgeVariant.primary,
+                        ),
+                      ],
+                    ],
+                  ),
                   subtitle: Text(
-                    'Sisa Plafon: ${IdrCurrencyFormatter.format(avail)} • Hutang: ${IdrCurrencyFormatter.format(used)}',
-                    style: TextStyle(color: exceeds ? AppColors.danger : AppColors.slate600, fontSize: 12),
+                    requiresDp
+                        ? 'Sisa Plafon: $availDisplay • Min. DP: ${IdrCurrencyFormatter.format(preview.minimumRequiredDp)}'
+                        : 'Sisa Plafon: $availDisplay • Hutang: ${IdrCurrencyFormatter.format(used)}',
+                    style: TextStyle(
+                      color: requiresDp ? AppColors.warningDark : AppColors.slate600,
+                      fontSize: 12,
+                      fontWeight: requiresDp ? FontWeight.w700 : FontWeight.normal,
+                    ),
                   ),
                   trailing: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: exceeds ? AppColors.danger : AppColors.warningDark,
+                      backgroundColor: requiresDp ? AppColors.primary : AppColors.warningDark,
                     ),
                     onPressed: () {
-                      if (exceeds) {
-                        PosFeedback.onGuardBlocked();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            backgroundColor: AppColors.danger,
-                            content: Text('Plafon kredit ${c['name']} tidak mencukupi (Sisa: ${IdrCurrencyFormatter.format(avail)})!'),
-                          ),
-                        );
-                        return;
-                      }
                       context.read<PosCubit>().selectCustomer(c);
+                      final initialDp = preview.minimumRequiredDp;
                       setState(() {
                         _selectedCustomer = c;
+                        if (_availableStoreCredit(c) <= 0) {
+                          _useStoreCredit = false;
+                          _storeCreditController.text = 'Rp 0';
+                        }
                         _selectedMethodCode = 'kasbon';
                         _selectedMethodName = 'Kasbon (Buku Bon)';
                         _isKasbonMode = true;
                         _isSplitPayment = false;
-                        _amountPaidController.text = IdrCurrencyFormatter.format(0);
+                        _kasbonDpController.text = IdrCurrencyFormatter.format(initialDp);
+                        _amountPaidController.text = IdrCurrencyFormatter.format(initialDp);
                       });
                       Navigator.pop(ctx);
+                      if (requiresDp && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: AppColors.warningDark,
+                            content: Text(
+                              'Plafon sisa $availDisplay — Minimal DP diisi otomatis Rp ${initialDp.toStringAsFixed(0)}.',
+                            ),
+                          ),
+                        );
+                      }
                     },
-                    child: Text(exceeds ? 'Limit Habis' : 'Pilih'),
+                    child: Text(requiresDp ? 'Pilih + DP' : 'Pilih'),
                   ),
                 );
               }),
@@ -239,6 +467,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     String mode = _splitItemIndices != null ? 'item' : 'equal';
     int equalPeople = _splitEqualPeople > 1 ? _splitEqualPeople : 2;
     final selectedSet = <int>{...(_splitItemIndices ?? [])};
+    bool isSyncingSplit = false;
 
     showModalBottomSheet(
       context: context,
@@ -272,14 +501,20 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     children: [
                       const Text('Split Bill / Pisah Nota', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                       TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _splitItemIndices = null;
-                            _splitEqualPeople = 0;
-                            _syncAmountToTotal(posState.grandTotal);
-                          });
-                          Navigator.pop(ctx);
-                        },
+                        onPressed: isSyncingSplit
+                            ? null
+                            : () {
+                                setState(() {
+                                  _splitItemIndices = null;
+                                  _splitEqualPeople = 0;
+                                  _splitChildHeldSaleId = null;
+                                  _splitOverrideGrandTotal = null;
+                                  _splitServiceCharge = 0.0;
+                                  _splitTaxTotal = 0.0;
+                                  _syncAmountToTotal(posState.grandTotal);
+                                });
+                                Navigator.pop(ctx);
+                              },
                         child: const Text('Reset Penuh'),
                       ),
                     ],
@@ -373,27 +608,73 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () {
-                        if (mode == 'item') {
-                          if (selectedSet.isEmpty) return;
-                          setState(() {
-                            _splitItemIndices = selectedSet.toList()..sort();
-                            _splitEqualPeople = 0;
-                            _syncAmountToTotal(selectedItemsTotal);
-                          });
-                        } else {
-                          setState(() {
-                            _splitItemIndices = null;
-                            _splitEqualPeople = equalPeople;
-                            _syncAmountToTotal(fullTotal);
-                          });
-                        }
-                        Navigator.pop(ctx);
-                      },
+                      onPressed: isSyncingSplit
+                          ? null
+                          : () async {
+                              if (mode == 'item') {
+                                if (selectedSet.isEmpty) return;
+                                final sorted = selectedSet.toList()..sort();
+                                final posCubit = context.read<PosCubit>();
+                                final messenger = ScaffoldMessenger.of(context);
+                                final modalNav = Navigator.of(ctx);
+                                setModalState(() => isSyncingSplit = true);
+                                final splitResult =
+                                    await posCubit.splitRestaurantTableBill(sorted);
+                                final resolvedGrand =
+                                    (splitResult['grand_total'] as num?)?.toDouble() ??
+                                        selectedItemsTotal;
+                                final resolvedChildId =
+                                    splitResult['child_held_sale_id'] as int?;
+                                final resolvedSvc =
+                                    (splitResult['service_charge_amount'] as num?)
+                                            ?.toDouble() ??
+                                        0.0;
+                                final resolvedTax =
+                                    (splitResult['tax_total'] as num?)?.toDouble() ??
+                                        0.0;
+                                final synced = splitResult['synced'] == true;
+                                if (!mounted) return;
+                                setState(() {
+                                  _splitItemIndices = sorted;
+                                  _splitEqualPeople = 0;
+                                  _splitChildHeldSaleId = resolvedChildId;
+                                  _splitOverrideGrandTotal = resolvedGrand;
+                                  _splitServiceCharge = resolvedSvc;
+                                  _splitTaxTotal = resolvedTax;
+                                  _syncAmountToTotal(resolvedGrand);
+                                });
+                                if (modalNav.mounted) {
+                                  modalNav.pop();
+                                }
+                                if (synced) {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      backgroundColor: AppColors.successDark,
+                                      content: Text(
+                                        'Tagihan meja dipisah ke server (${IdrCurrencyFormatter.format(resolvedGrand)}).',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              } else {
+                                setState(() {
+                                  _splitItemIndices = null;
+                                  _splitEqualPeople = equalPeople;
+                                  _splitChildHeldSaleId = null;
+                                  _splitOverrideGrandTotal = null;
+                                  _splitServiceCharge = 0.0;
+                                  _splitTaxTotal = 0.0;
+                                  _syncAmountToTotal(fullTotal);
+                                });
+                                Navigator.pop(ctx);
+                              }
+                            },
                       child: Text(
-                        mode == 'item'
-                            ? 'Bayar Item Terpilih (${IdrCurrencyFormatter.format(selectedItemsTotal)})'
-                            : 'Gunakan Info Split $equalPeople Orang',
+                        isSyncingSplit
+                            ? 'Menyinkronkan Split Bill...'
+                            : (mode == 'item'
+                                ? 'Bayar Item Terpilih (${IdrCurrencyFormatter.format(selectedItemsTotal)})'
+                                : 'Gunakan Info Split $equalPeople Orang'),
                       ),
                     ),
                   ),
@@ -409,75 +690,166 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   Future<void> _submitPayment(double grandTotal) async {
     if (_isSubmitting) return;
 
-    final paid = _isKasbonMode ? 0.0 : _paidAmount;
-    if (!_isKasbonMode && paid < grandTotal) {
-      PosFeedback.onGuardBlocked();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.danger,
-          content: Text('Jumlah bayar kurang dari Total Tagihan!'),
-        ),
-      );
-      return;
+    final posState = context.read<PosCubit>().state;
+    final availableMethods = posState.paymentMethods;
+    final appliedStoreCredit = _appliedStoreCredit(grandTotal);
+    final netDue = _netTotalAfterStoreCredit(grandTotal);
+
+    final paymentsList = <Map<String, dynamic>>[];
+    final methodNames = <String>[];
+    double paidTotal = 0.0;
+    double changeReturned = 0.0;
+    double balanceDue = 0.0;
+    String? dueDateStr;
+
+    if (appliedStoreCredit > 0) {
+      methodNames.add('Saldo Deposit (${IdrCurrencyFormatter.format(appliedStoreCredit)})');
+    }
+
+    if (_isKasbonMode) {
+      if (_selectedCustomer == null) {
+        PosFeedback.onGuardBlocked();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text('Pilih pelanggan terlebih dahulu untuk transaksi Kasbon.'),
+          ),
+        );
+        return;
+      }
+      final kasbonCalc = _buildKasbonCalculation(grandTotal);
+      if (kasbonCalc.validationError != null || !kasbonCalc.isWithinCreditLimit) {
+        PosFeedback.onGuardBlocked();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text(kasbonCalc.validationError ?? 'Melebihi plafon kredit pelanggan!'),
+          ),
+        );
+        return;
+      }
+
+      paidTotal = kasbonCalc.downPayment;
+      balanceDue = kasbonCalc.balanceDue;
+      dueDateStr = DateFormat('yyyy-MM-dd').format(_kasbonDueDate);
+
+      if (kasbonCalc.downPayment > 0) {
+        final dpLabel = _labelForCode(_kasbonDpMethod);
+        paymentsList.add({
+          'payment_method_id': _resolvePaymentMethodId(availableMethods, _kasbonDpMethod),
+          'amount': kasbonCalc.downPayment,
+          'tendered_amount': kasbonCalc.downPayment,
+          'reference': 'DP-$dpLabel',
+        });
+        methodNames.add('DP $dpLabel (${IdrCurrencyFormatter.format(kasbonCalc.downPayment)})');
+      }
+      methodNames.add('Kasbon (${IdrCurrencyFormatter.format(balanceDue)})');
+    } else if (_isSplitPayment) {
+      final validation = _buildMultiTenderValidation(grandTotal);
+      if (!validation.isExactMatch) {
+        PosFeedback.onGuardBlocked();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text(
+              validation.remainingDue > 0
+                  ? 'Multi-Tender masih kurang ${IdrCurrencyFormatter.format(validation.remainingDue)}!'
+                  : 'Nominal Multi-Tender melebihi total tagihan!',
+            ),
+          ),
+        );
+        return;
+      }
+
+      paidTotal = validation.tendersTotal;
+      for (final line in _splitLines) {
+        if (line.amount <= 0) continue;
+        final label = line.subType.isNotEmpty
+            ? '${line.methodLabel} (${line.subType})'
+            : line.methodLabel;
+        final ref = line.referenceController.text.trim().isNotEmpty
+            ? line.referenceController.text.trim()
+            : '$label-SPLIT';
+        paymentsList.add({
+          'payment_method_id': _resolvePaymentMethodId(availableMethods, line.methodCode),
+          'amount': line.amount,
+          'tendered_amount': line.amount,
+          if (line.methodCode != 'cash') 'reference': ref,
+        });
+        methodNames.add('$label (${IdrCurrencyFormatter.format(line.amount)})');
+      }
+    } else {
+      if (netDue <= 0.5) {
+        paidTotal = 0.0;
+        changeReturned = 0.0;
+        if (posState.isExchangeMode && posState.exchangeSurplusCredit > 0) {
+          methodNames.add(
+            _refundSurplusToStoreCredit && (_selectedCustomer?['id'] as num?) != null
+                ? 'Tukar Barang (Simpan Deposit)'
+                : 'Tukar Barang (Kembali Tunai)',
+          );
+        } else if (posState.isExchangeMode) {
+          methodNames.add('Tukar Barang (Impas)');
+        }
+      } else {
+        final rawPaid = _paidAmount;
+        if (rawPaid < netDue - 0.5) {
+          PosFeedback.onGuardBlocked();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: AppColors.danger,
+              content: Text('Jumlah bayar kurang dari Sisa Tagihan!'),
+            ),
+          );
+          return;
+        }
+        paidTotal = rawPaid;
+        changeReturned = (rawPaid - netDue).clamp(0.0, double.infinity);
+
+        String resolvedName = _selectedMethodName;
+        if (_selectedMethodCode == 'qris') resolvedName = 'QRIS $_qrisType';
+        if (_selectedMethodCode == 'transfer') resolvedName = 'Transfer $_selectedBank';
+        if (_selectedMethodCode == 'card') resolvedName = 'EDC $_edcCardType';
+
+        paymentsList.add({
+          'payment_method_id': _resolvePaymentMethodId(availableMethods, _selectedMethodCode),
+          'amount': netDue,
+          'tendered_amount': rawPaid,
+          'reference': _referenceController.text.trim().isNotEmpty
+              ? _referenceController.text.trim()
+              : resolvedName,
+        });
+        methodNames.add(resolvedName);
+      }
     }
 
     setState(() => _isSubmitting = true);
 
-    final change = _isKasbonMode ? 0.0 : (paid - grandTotal).clamp(0.0, double.infinity);
-    final balanceDue = _isKasbonMode ? grandTotal : 0.0;
-
-    final paymentsList = <Map<String, dynamic>>[];
-    final methodNames = <String>[];
-    final availableMethods = context.read<PosCubit>().state.paymentMethods;
-
-    if (_isSplitPayment) {
-      final cashPart = IdrCurrencyFormatter.parse(_splitCashController.text).clamp(0.0, grandTotal);
-      final secondPart = (grandTotal - cashPart).clamp(0.0, grandTotal);
-      final cashId = _resolvePaymentMethodId(availableMethods, 'cash');
-      final secondCode = _splitSecondMethod.toLowerCase().contains('qris')
-          ? 'qris'
-          : (_splitSecondMethod.toLowerCase().contains('transfer') ? 'transfer' : 'card');
-      final secondId = _resolvePaymentMethodId(availableMethods, secondCode);
-      paymentsList.add({'payment_method_id': cashId, 'amount': cashPart, 'tendered_amount': cashPart});
-      paymentsList.add({
-        'payment_method_id': secondId,
-        'amount': secondPart,
-        'reference': '${_splitSecondMethod.toUpperCase()}-SPLIT',
-      });
-      methodNames.addAll([
-        'Tunai (${IdrCurrencyFormatter.format(cashPart)})',
-        '$_splitSecondMethod (${IdrCurrencyFormatter.format(secondPart)})',
-      ]);
-    } else {
-      String resolvedName = _selectedMethodName;
-      if (_selectedMethodCode == 'qris') resolvedName = 'QRIS $_qrisType';
-      if (_selectedMethodCode == 'transfer') resolvedName = 'Transfer $_selectedBank';
-      if (_selectedMethodCode == 'card') resolvedName = 'EDC $_edcCardType';
-
-      paymentsList.add({
-        'payment_method_id': _resolvePaymentMethodId(availableMethods, _selectedMethodCode),
-        'amount': _isKasbonMode ? 0.0 : grandTotal,
-        'tendered_amount': paid,
-        'reference': _referenceController.text.trim().isNotEmpty
-            ? _referenceController.text.trim()
-            : resolvedName,
-      });
-      methodNames.add(resolvedName);
-    }
-
     final receipt = await context.read<PosCubit>().completeCheckout(
           payments: paymentsList,
-          paymentMethodNames: methodNames,
-          paidTotal: paid,
-          changeReturned: change,
+          paymentMethodNames: methodNames.isEmpty ? ['Tunai'] : methodNames,
+          paidTotal: paidTotal,
+          changeReturned: changeReturned,
           balanceDue: balanceDue,
+          storeCreditAmount: appliedStoreCredit,
+          grandTotalOverride: _splitOverrideGrandTotal,
+          overrideHeldSaleId: _splitChildHeldSaleId,
+          refundSurplusToStoreCredit: _refundSurplusToStoreCredit,
           splitItemIndices: _splitItemIndices,
-          dueDate: _isKasbonMode ? DateFormat('yyyy-MM-dd').format(_kasbonDueDate) : null,
+          dueDate: dueDateStr,
         );
+
+    final enrichedReceipt = Map<String, dynamic>.from(receipt);
+    if (_splitServiceCharge > 0) {
+      enrichedReceipt['service_charge_amount'] = _splitServiceCharge;
+    }
+    if (_splitTaxTotal > 0) {
+      enrichedReceipt['tax_total'] = _splitTaxTotal;
+    }
 
     if (mounted) {
       setState(() => _isSubmitting = false);
-      context.pushReplacement('/pos/receipt', extra: receipt);
+      context.pushReplacement('/pos/receipt', extra: enrichedReceipt);
     }
   }
 
@@ -497,8 +869,16 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   Widget build(BuildContext context) {
     final posState = context.watch<PosCubit>().state;
     final grandTotal = _activeCheckoutTotal(posState);
-    final changeAmount = _isKasbonMode ? 0.0 : (_paidAmount - grandTotal).clamp(0.0, double.infinity);
-    final isCashInsufficient = !_isKasbonMode && _paidAmount < grandTotal;
+    final availStoreCredit = _availableStoreCredit(_selectedCustomer);
+    final appliedStoreCredit = _appliedStoreCredit(grandTotal);
+    final netDue = _netTotalAfterStoreCredit(grandTotal);
+    final kasbonCalc = _buildKasbonCalculation(grandTotal);
+    final multiValidation = _buildMultiTenderValidation(grandTotal);
+    final changeAmount = (_isKasbonMode || _isSplitPayment || netDue <= 0.5)
+        ? 0.0
+        : (_paidAmount - netDue).clamp(0.0, double.infinity);
+    final isCashInsufficient =
+        !_isKasbonMode && !_isSplitPayment && netDue > 0.5 && _paidAmount < netDue - 0.5;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -653,53 +1033,71 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                                     ],
                                   ),
                                 ),
-                                Container(
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.slate100,
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(color: AppColors.border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      InkWell(
-                                        onTap: () {
-                                          context.read<PosCubit>().decrementCartItem(idx);
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted) {
-                                              _syncAmountToTotal(_activeCheckoutTotal(context.read<PosCubit>().state));
-                                            }
-                                          });
-                                        },
-                                        child: const SizedBox(
-                                          width: 32,
-                                          height: 34,
-                                          child: Icon(Icons.remove_rounded, size: 16),
+                                if (item.isExchangeReturn)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.warningSoft,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(color: AppColors.warning.withOpacity(0.45)),
+                                    ),
+                                    child: Text(
+                                      'RETUR ${IdrCurrencyFormatter.formatQty(item.quantity.abs())}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.warningDark,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Container(
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.slate100,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(color: AppColors.border),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          onTap: () {
+                                            context.read<PosCubit>().decrementCartItem(idx);
+                                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                                              if (mounted) {
+                                                _syncAmountToTotal(_activeCheckoutTotal(context.read<PosCubit>().state));
+                                              }
+                                            });
+                                          },
+                                          child: const SizedBox(
+                                            width: 32,
+                                            height: 34,
+                                            child: Icon(Icons.remove_rounded, size: 16),
+                                          ),
                                         ),
-                                      ),
-                                      Text(
-                                        IdrCurrencyFormatter.formatQty(item.quantity),
-                                        style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
-                                      ),
-                                      InkWell(
-                                        onTap: () {
-                                          context.read<PosCubit>().incrementCartItem(idx);
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted) {
-                                              _syncAmountToTotal(_activeCheckoutTotal(context.read<PosCubit>().state));
-                                            }
-                                          });
-                                        },
-                                        child: const SizedBox(
-                                          width: 32,
-                                          height: 34,
-                                          child: Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                        Text(
+                                          IdrCurrencyFormatter.formatQty(item.quantity),
+                                          style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
                                         ),
-                                      ),
-                                    ],
+                                        InkWell(
+                                          onTap: () {
+                                            context.read<PosCubit>().incrementCartItem(idx);
+                                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                                              if (mounted) {
+                                                _syncAmountToTotal(_activeCheckoutTotal(context.read<PosCubit>().state));
+                                              }
+                                            });
+                                          },
+                                          child: const SizedBox(
+                                            width: 32,
+                                            height: 34,
+                                            child: Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
                                 const SizedBox(width: 8),
                                 NusaPriceTag(
                                   amount: item.lineTotal,
@@ -714,6 +1112,164 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                   ],
                 ),
               ),
+
+              // 1B. Surplus Exchange Return Mode (Kelebihan Retur Tukar Barang)
+              if (posState.isExchangeMode && posState.exchangeSurplusCredit > 0) ...[
+                const SizedBox(height: 14),
+                NusaCard(
+                  backgroundColor: AppColors.primarySoft,
+                  borderColor: AppColors.primary.withOpacity(0.35),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.swap_horiz_rounded, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Kelebihan Retur Tukar Barang',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: AppColors.navyDark),
+                            ),
+                          ),
+                          NusaPriceTag(
+                            amount: posState.exchangeSurplusCredit,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.primary,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Retur: ${IdrCurrencyFormatter.format(posState.exchangeReturnCreditTotal)} • Pengganti: ${IdrCurrencyFormatter.format(posState.replacementItemsSubtotal)}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                      ),
+                      const SizedBox(height: 10),
+                      if (_selectedCustomer != null && ((_selectedCustomer!['id'] as num?)?.toInt() ?? 0) > 0)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            NusaPillFilter(
+                              label: 'Simpan ke Saldo Deposit',
+                              selected: _refundSurplusToStoreCredit,
+                              onTap: () => setState(() => _refundSurplusToStoreCredit = true),
+                            ),
+                            NusaPillFilter(
+                              label: 'Kembalikan Tunai',
+                              selected: !_refundSurplusToStoreCredit,
+                              onTap: () => setState(() => _refundSurplusToStoreCredit = false),
+                            ),
+                          ],
+                        )
+                      else
+                        const Text(
+                          'Pelanggan Umum: kelebihan dana dikembalikan tunai kepada pelanggan.',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // 1C. Customer Store Credit (Saldo Deposit Pelanggan)
+              if (_selectedCustomer != null && availStoreCredit > 0 && grandTotal > 0) ...[
+                const SizedBox(height: 14),
+                NusaCard(
+                  backgroundColor: _useStoreCredit ? const Color(0xFFECFDF5) : Colors.white,
+                  borderColor: _useStoreCredit
+                      ? AppColors.success.withOpacity(0.45)
+                      : AppColors.border,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.account_balance_wallet_rounded,
+                            color: _useStoreCredit ? AppColors.successDark : AppColors.primary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Gunakan Saldo Deposit (${IdrCurrencyFormatter.format(availStoreCredit)})',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                    color: AppColors.navyDark,
+                                  ),
+                                ),
+                                Text(
+                                  'Tersedia untuk ${_selectedCustomer!['name'] ?? 'Pelanggan'}',
+                                  style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: _useStoreCredit,
+                            onChanged: (val) => _toggleUseStoreCredit(val, grandTotal),
+                          ),
+                        ],
+                      ),
+                      if (_useStoreCredit) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _storeCreditController,
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => setState(() {
+                                  final updatedNet = _netTotalAfterStoreCredit(grandTotal);
+                                  if (_selectedMethodCode != 'cash') {
+                                    _amountPaidController.text = IdrCurrencyFormatter.format(updatedNet);
+                                  }
+                                }),
+                                style: AppTheme.moneyStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                                decoration: const InputDecoration(
+                                  labelText: 'Nominal Deposit Dipakai (Rp)',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton(
+                              onPressed: () {
+                                final maxApply = math.min(availStoreCredit, grandTotal);
+                                setState(() {
+                                  _storeCreditController.text = IdrCurrencyFormatter.format(maxApply);
+                                  _syncAmountToTotal(grandTotal);
+                                });
+                              },
+                              child: const Text('Pakai Maks'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Potong Deposit: ${IdrCurrencyFormatter.format(appliedStoreCredit)}',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.successDark),
+                            ),
+                            Text(
+                              'Sisa Tagihan: ${IdrCurrencyFormatter.format(netDue)}',
+                              style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
 
               // 2. Explicit 6 Payment Methods Grid
@@ -916,49 +1472,124 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                 const SizedBox(height: 14),
                 NusaCard(
                   backgroundColor: AppColors.primarySoft,
-                  borderColor: AppColors.primary.withOpacity(0.25),
+                  borderColor: multiValidation.isExactMatch
+                      ? AppColors.success.withOpacity(0.45)
+                      : AppColors.primary.withOpacity(0.3),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Kombinasi Split Payment',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: AppColors.navyDark),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Multi-Tender Split Payment',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                                color: AppColors.navyDark,
+                              ),
+                            ),
+                          ),
+                          NusaBadge(
+                            label: '${_splitLines.length} Metode',
+                            variant: multiValidation.isExactMatch
+                                ? NusaBadgeVariant.success
+                                : NusaBadgeVariant.warning,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 10),
-                      TextField(
-                        controller: _splitCashController,
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: 'Nominal Bayar Tunai (Rp)',
-                          prefixIcon: Icon(Icons.payments_outlined),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: multiValidation.isExactMatch
+                                ? AppColors.success.withOpacity(0.45)
+                                : AppColors.warning.withOpacity(0.45),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Total Tagihan', style: TextStyle(fontSize: 12, color: AppColors.slate600)),
+                                Text(
+                                  IdrCurrencyFormatter.format(multiValidation.grandTotal),
+                                  style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Total Terbayar', style: TextStyle(fontSize: 12, color: AppColors.slate600)),
+                                Text(
+                                  IdrCurrencyFormatter.format(multiValidation.paidTotal),
+                                  style: AppTheme.moneyStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  multiValidation.overpayment > 0
+                                      ? 'Kelebihan Input'
+                                      : 'Sisa Kurang',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: multiValidation.isExactMatch
+                                        ? AppColors.successDark
+                                        : AppColors.danger,
+                                  ),
+                                ),
+                                Text(
+                                  multiValidation.overpayment > 0
+                                      ? IdrCurrencyFormatter.format(multiValidation.overpayment)
+                                      : IdrCurrencyFormatter.format(multiValidation.remainingDue),
+                                  style: AppTheme.moneyStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: multiValidation.isExactMatch
+                                        ? AppColors.successDark
+                                        : AppColors.danger,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      for (int i = 0; i < _splitLines.length; i++) ...[
+                        _buildSplitTenderLineCard(i, _splitLines[i], multiValidation.remainingDue),
+                        if (i < _splitLines.length - 1) const SizedBox(height: 10),
+                      ],
                       const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: ['QRIS', 'Transfer Bank', 'Kartu EDC'].map((m) {
-                          return NusaPillFilter(
-                            label: m,
-                            selected: _splitSecondMethod == m,
-                            onTap: () => setState(() => _splitSecondMethod = m),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 10),
-                      Builder(builder: (_) {
-                        final cashPart = IdrCurrencyFormatter.parse(_splitCashController.text).clamp(0.0, grandTotal);
-                        final rem = (grandTotal - cashPart).clamp(0.0, grandTotal);
-                        return Text(
-                          'Sisa dibayar via $_splitSecondMethod: ${IdrCurrencyFormatter.format(rem)}',
-                          style: AppTheme.moneyStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.primary,
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _addSplitTenderLine(multiValidation.remainingDue),
+                          icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                          label: const Text('+ Tambah Metode Pembayaran'),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppColors.primary,
+                            side: BorderSide(color: AppColors.primary.withOpacity(0.4)),
                           ),
-                        );
-                      }),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -967,28 +1598,193 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
               if (_isKasbonMode && _selectedCustomer != null) ...[
                 const SizedBox(height: 14),
                 NusaCard(
-                  backgroundColor: AppColors.warningSoft,
-                  borderColor: AppColors.warning.withOpacity(0.45),
+                  backgroundColor: kasbonCalc.isWithinCreditLimit
+                      ? AppColors.warningSoft
+                      : AppColors.dangerSoft,
+                  borderColor: kasbonCalc.isWithinCreditLimit
+                      ? AppColors.warning.withOpacity(0.45)
+                      : AppColors.danger.withOpacity(0.45),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.menu_book_rounded, color: AppColors.warningDark),
+                          Icon(
+                            Icons.menu_book_rounded,
+                            color: kasbonCalc.isWithinCreditLimit
+                                ? AppColors.warningDark
+                                : AppColors.danger,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'Piutang Buku Bon: ${_selectedCustomer!['name']}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13.5,
-                                color: AppColors.warningDark,
+                                color: kasbonCalc.isWithinCreditLimit
+                                    ? AppColors.warningDark
+                                    : AppColors.danger,
                               ),
                             ),
                           ),
-                          const NusaBadge(label: 'Plafon Aman', variant: NusaBadgeVariant.success),
+                          NusaBadge(
+                            label: kasbonCalc.isWithinCreditLimit ? 'Plafon Aman' : 'Melebihi Plafon',
+                            variant: kasbonCalc.isWithinCreditLimit
+                                ? NusaBadgeVariant.success
+                                : NusaBadgeVariant.danger,
+                          ),
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Sisa Plafon: ${kasbonCalc.availableCredit.isFinite ? IdrCurrencyFormatter.format(kasbonCalc.availableCredit) : 'Tanpa Limit'} • Hutang Lama: ${IdrCurrencyFormatter.format((_selectedCustomer!['outstanding_balance'] as num?)?.toDouble() ?? 0)}',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.slate700),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _kasbonDpController,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(() {}),
+                        style: AppTheme.moneyStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                        decoration: const InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white,
+                          labelText: 'Uang Muka / DP Parsial (Rp)',
+                          prefixIcon: Icon(Icons.payments_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          NusaPillFilter(
+                            label: 'Tanpa DP (Rp 0)',
+                            selected: kasbonCalc.downPayment == 0,
+                            onTap: () => setState(() {
+                              _kasbonDpController.text = IdrCurrencyFormatter.format(0);
+                            }),
+                          ),
+                          NusaPillFilter(
+                            label: 'DP 25%',
+                            selected: false,
+                            onTap: () => setState(() {
+                              final dp25 = (netDue * 0.25).roundToDouble();
+                              _kasbonDpController.text = IdrCurrencyFormatter.format(dp25);
+                            }),
+                          ),
+                          NusaPillFilter(
+                            label: 'DP 50%',
+                            selected: false,
+                            onTap: () => setState(() {
+                              final dp50 = (netDue * 0.50).roundToDouble();
+                              _kasbonDpController.text = IdrCurrencyFormatter.format(dp50);
+                            }),
+                          ),
+                          if (kasbonCalc.minimumRequiredDp > 0)
+                            NusaPillFilter(
+                              label: 'Min. DP Plafon (${IdrCurrencyFormatter.format(kasbonCalc.minimumRequiredDp)})',
+                              selected: (kasbonCalc.downPayment - kasbonCalc.minimumRequiredDp).abs() < 1,
+                              onTap: () => setState(() {
+                                _kasbonDpController.text =
+                                    IdrCurrencyFormatter.format(kasbonCalc.minimumRequiredDp);
+                              }),
+                            ),
+                        ],
+                      ),
+                      if (kasbonCalc.downPayment > 0) ...[
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Metode Pembayaran DP:',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final m in ['cash', 'qris', 'transfer'])
+                              NusaPillFilter(
+                                label: _labelForCode(m),
+                                selected: _kasbonDpMethod == m,
+                                onTap: () => setState(() => _kasbonDpMethod = m),
+                              ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Total Tagihan', style: TextStyle(fontSize: 12, color: AppColors.slate600)),
+                                Text(IdrCurrencyFormatter.format(grandTotal), style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                            if (kasbonCalc.storeCreditUsed > 0) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Potong Saldo Deposit', style: TextStyle(fontSize: 12, color: AppColors.successDark)),
+                                  Text('- ${IdrCurrencyFormatter.format(kasbonCalc.storeCreditUsed)}', style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.successDark)),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Uang Muka (DP)', style: TextStyle(fontSize: 12, color: AppColors.slate600)),
+                                Text(IdrCurrencyFormatter.format(kasbonCalc.downPayment), style: AppTheme.moneyStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.primary)),
+                              ],
+                            ),
+                            const Divider(height: 14),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Sisa Tagihan (Buku Bon)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.warningDark)),
+                                Text(IdrCurrencyFormatter.format(kasbonCalc.balanceDue), style: AppTheme.moneyStyle(fontSize: 14, fontWeight: FontWeight.w900, color: AppColors.warningDark)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (kasbonCalc.validationError != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.danger.withOpacity(0.45)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 18, color: AppColors.danger),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  kasbonCalc.validationError!,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.danger),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       InkWell(
                         onTap: _pickKasbonDueDate,
@@ -1034,8 +1830,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
               const SizedBox(height: 16),
 
-              // 3. Jumlah Bayar Input Box + 5 Quick Cash Buttons
-              if (!_isKasbonMode) ...[
+              // 3. Jumlah Bayar Input Box + 5 Quick Cash Buttons (Single-Tender Only)
+              if (!_isKasbonMode && !_isSplitPayment && netDue > 0.5) ...[
                 NusaCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1074,8 +1870,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                         children: [
                           NusaPillFilter(
                             label: 'Uang Pas',
-                            selected: _paidAmount == grandTotal,
-                            onTap: () => _setQuickCashAmount(grandTotal),
+                            selected: (_paidAmount - netDue).abs() < 0.5,
+                            onTap: () => _setQuickCashAmount(netDue),
                           ),
                           NusaPillFilter(
                             label: 'Rp 20.000',
@@ -1116,65 +1912,236 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         ),
         child: SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Prominent Kembalian / Kasbon Banner
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _isKasbonMode
-                      ? AppColors.warningSoft
-                      : (isCashInsufficient ? AppColors.dangerSoft : AppColors.successSoft),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _isKasbonMode
-                        ? AppColors.warning.withOpacity(0.35)
-                        : (isCashInsufficient
-                            ? AppColors.danger.withOpacity(0.35)
-                            : AppColors.success.withOpacity(0.35)),
+          child: Builder(
+            builder: (_) {
+              final isKasbonBlocked = _isKasbonMode &&
+                  (_selectedCustomer == null ||
+                      !kasbonCalc.isWithinCreditLimit ||
+                      kasbonCalc.validationError != null);
+              final isSplitBlocked = _isSplitPayment && !multiValidation.isExactMatch;
+              final canSubmit = !_isSubmitting && !isKasbonBlocked && !isSplitBlocked;
+
+              String bannerLabel;
+              double bannerAmount;
+              Color bannerBg;
+              Color bannerBorder;
+              Color bannerTextColor;
+
+              if (posState.isExchangeMode && posState.exchangeSurplusCredit > 0) {
+                bannerLabel = _refundSurplusToStoreCredit && ((_selectedCustomer?['id'] as num?)?.toInt() ?? 0) > 0
+                    ? 'Kelebihan Retur -> Deposit'
+                    : 'Kelebihan Retur -> Tunai';
+                bannerAmount = posState.exchangeSurplusCredit;
+                bannerBg = AppColors.primarySoft;
+                bannerBorder = AppColors.primary.withOpacity(0.35);
+                bannerTextColor = AppColors.primary;
+              } else if (_isKasbonMode) {
+                bannerLabel = isKasbonBlocked
+                    ? 'Melebihi Plafon Kredit'
+                    : 'Masuk Buku Bon (DP ${IdrCurrencyFormatter.format(kasbonCalc.downPayment)})';
+                bannerAmount = kasbonCalc.balanceDue;
+                bannerBg = isKasbonBlocked ? AppColors.dangerSoft : AppColors.warningSoft;
+                bannerBorder = isKasbonBlocked
+                    ? AppColors.danger.withOpacity(0.35)
+                    : AppColors.warning.withOpacity(0.35);
+                bannerTextColor = isKasbonBlocked ? AppColors.danger : AppColors.warningDark;
+              } else if (_isSplitPayment) {
+                if (multiValidation.isExactMatch) {
+                  bannerLabel = 'Multi-Tender Pas & Valid (${_splitLines.length} Metode)';
+                  bannerAmount = multiValidation.grandTotal;
+                  bannerBg = AppColors.successSoft;
+                  bannerBorder = AppColors.success.withOpacity(0.35);
+                  bannerTextColor = AppColors.successDark;
+                } else if (multiValidation.overpayment > 0) {
+                  bannerLabel = 'Kelebihan Input Split';
+                  bannerAmount = multiValidation.overpayment;
+                  bannerBg = AppColors.dangerSoft;
+                  bannerBorder = AppColors.danger.withOpacity(0.35);
+                  bannerTextColor = AppColors.danger;
+                } else {
+                  bannerLabel = 'Sisa Kurang Split Payment';
+                  bannerAmount = multiValidation.remainingDue;
+                  bannerBg = AppColors.dangerSoft;
+                  bannerBorder = AppColors.danger.withOpacity(0.35);
+                  bannerTextColor = AppColors.danger;
+                }
+              } else if (isCashInsufficient) {
+                bannerLabel = 'Kurang Bayar';
+                bannerAmount = (netDue - _paidAmount).clamp(0.0, double.infinity);
+                bannerBg = AppColors.dangerSoft;
+                bannerBorder = AppColors.danger.withOpacity(0.35);
+                bannerTextColor = AppColors.danger;
+              } else {
+                bannerLabel = appliedStoreCredit > 0 && netDue <= 0.5
+                    ? 'Lunas via Saldo Deposit'
+                    : 'Uang Kembalian';
+                bannerAmount = changeAmount;
+                bannerBg = AppColors.successSoft;
+                bannerBorder = AppColors.success.withOpacity(0.35);
+                bannerTextColor = AppColors.successDark;
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: bannerBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: bannerBorder),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            bannerLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: bannerTextColor,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        NusaPriceTag(
+                          amount: bannerAmount,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: bannerTextColor,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _isKasbonMode
-                          ? 'Masuk Buku Bon'
-                          : (isCashInsufficient ? 'Kurang Bayar' : 'Uang Kembalian'),
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        color: _isKasbonMode
-                            ? AppColors.warningDark
-                            : (isCashInsufficient ? AppColors.danger : AppColors.successDark),
-                      ),
-                    ),
-                    NusaPriceTag(
-                      amount: _isKasbonMode
-                          ? grandTotal
-                          : (isCashInsufficient ? (grandTotal - _paidAmount) : changeAmount),
-                      fontSize: 19,
-                      fontWeight: FontWeight.w900,
-                      color: _isKasbonMode
-                          ? AppColors.warningDark
-                          : (isCashInsufficient ? AppColors.danger : AppColors.successDark),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              NusaButton(
-                label: _isSubmitting ? 'Memproses...' : 'Selesaikan Pembayaran',
-                trailingIcon: Icons.check_circle_rounded,
-                minHeight: 52,
-                isLoading: _isSubmitting,
-                onPressed: _isSubmitting ? null : () => _submitPayment(grandTotal),
-              ),
-            ],
+                  const SizedBox(height: 10),
+                  NusaButton(
+                    label: _isSubmitting ? 'Memproses...' : 'Selesaikan Pembayaran',
+                    trailingIcon: Icons.check_circle_rounded,
+                    minHeight: 52,
+                    isLoading: _isSubmitting,
+                    onPressed: canSubmit ? () => _submitPayment(grandTotal) : null,
+                  ),
+                ],
+              );
+            },
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSplitTenderLineCard(
+    int index,
+    _MultiTenderLine line,
+    double remainingDue,
+  ) {
+    final subOptions = line.methodCode == 'qris'
+        ? const ['Dinamis', 'Statis']
+        : (line.methodCode == 'transfer'
+            ? const ['BCA', 'Mandiri', 'BRI', 'BNI']
+            : (line.methodCode == 'card' ? const ['Debit', 'Kredit'] : const <String>[]));
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Metode #${index + 1}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+              ),
+              const Spacer(),
+              if (remainingDue > 0)
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      final nextAmount = line.amount + remainingDue;
+                      line.amountController.text = IdrCurrencyFormatter.format(nextAmount);
+                    });
+                  },
+                  child: const Text('Isi Sisa', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+                ),
+              if (_splitLines.length > 2)
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Hapus Metode',
+                  onPressed: () => _removeSplitTenderLine(index),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final m in ['cash', 'qris', 'transfer', 'card'])
+                NusaPillFilter(
+                  label: _labelForCode(m),
+                  selected: line.methodCode == m,
+                  onTap: () {
+                    setState(() {
+                      line.methodCode = m;
+                      line.methodLabel = _labelForCode(m);
+                      line.subType = _defaultSubTypeFor(m);
+                    });
+                  },
+                ),
+            ],
+          ),
+          if (subOptions.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: subOptions.map((opt) {
+                return NusaPillFilter(
+                  label: opt,
+                  selected: line.subType == opt,
+                  onTap: () => setState(() => line.subType = opt),
+                );
+              }).toList(),
+            ),
+          ],
+          const SizedBox(height: 8),
+          TextField(
+            controller: line.amountController,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
+            style: AppTheme.moneyStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            decoration: InputDecoration(
+              isDense: true,
+              labelText: 'Nominal ${line.methodLabel} (Rp)',
+              prefixIcon: const Icon(Icons.payments_outlined, size: 18),
+            ),
+          ),
+          if (line.methodCode != 'cash') ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: line.referenceController,
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: 'Ref / Approval / Catatan (Opsional)',
+                hintText: 'Misal: TRF-0012 / APPR-882',
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -65,9 +65,87 @@ class AuthSessionModel extends Equatable {
   final String tenantName;
   final String tenantSubdomain;
   final String planName;
+  final String tier;
+  final List<String> activeModules;
+  final List<String> hiddenModules;
   final StoreBranchModel activeStore;
   final List<StoreBranchModel> availableStores;
   final List<String> permissions;
+
+  static const List<String> _enterpriseDefaultModules = [
+    'cash_debt',
+    'accounting',
+    'tax',
+    'assets',
+    'warehouse',
+    'online_store',
+    'crm',
+    'loyalty',
+    'hr',
+  ];
+
+  static const List<String> _proDefaultModules = [
+    'cash_debt',
+    'accounting',
+    'online_store',
+    'crm',
+    'loyalty',
+  ];
+
+  static String _normalizeModuleKey(String raw) => raw.trim().toLowerCase();
+
+  static String _normalizeTier(dynamic rawTier, String fallbackPlan) {
+    final candidate = (rawTier ?? fallbackPlan).toString().trim().toLowerCase();
+    if (candidate.contains('enterprise') || candidate.contains('korporat')) {
+      return 'enterprise';
+    }
+    if (candidate.contains('pro') || candidate.contains('business')) {
+      return 'pro';
+    }
+    return 'starter';
+  }
+
+  static List<String> _parseActiveModules(dynamic entitlementsRaw, String tier) {
+    final result = <String>{'cash_debt'};
+    if (entitlementsRaw is Map) {
+      final modulesRaw = entitlementsRaw['active_modules'] ?? entitlementsRaw['modules'];
+      if (modulesRaw is Map) {
+        modulesRaw.forEach((key, value) {
+          final isEnabled = value == true || value == 1 || value.toString().toLowerCase() == 'true';
+          if (isEnabled) {
+            result.add(_normalizeModuleKey(key.toString()));
+          }
+        });
+        return result.toList();
+      } else if (modulesRaw is List) {
+        for (final item in modulesRaw) {
+          final k = _normalizeModuleKey(item.toString());
+          if (k.isNotEmpty) result.add(k);
+        }
+        return result.toList();
+      }
+    }
+
+    if (tier == 'enterprise') {
+      result.addAll(_enterpriseDefaultModules);
+    } else if (tier == 'pro') {
+      result.addAll(_proDefaultModules);
+    }
+    return result.toList();
+  }
+
+  static List<String> _parseHiddenModules(dynamic entitlementsRaw) {
+    if (entitlementsRaw is Map) {
+      final hidden = entitlementsRaw['hidden_modules'];
+      if (hidden is List) {
+        return hidden
+            .map((e) => _normalizeModuleKey(e.toString()))
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+    }
+    return const [];
+  }
 
   const AuthSessionModel({
     required this.userId,
@@ -78,14 +156,41 @@ class AuthSessionModel extends Equatable {
     required this.tenantName,
     required this.tenantSubdomain,
     required this.planName,
+    this.tier = 'starter',
+    this.activeModules = const ['cash_debt'],
+    this.hiddenModules = const [],
     required this.activeStore,
     required this.availableStores,
     this.permissions = const [],
   });
 
+  /// Checks whether the tenant's active subscription plan unlocks [moduleKey].
+  bool hasModule(String moduleKey) {
+    final key = _normalizeModuleKey(moduleKey);
+    if (key.isEmpty || key == 'cash_debt') return true;
+    if (activeModules.any((m) => _normalizeModuleKey(m) == key)) {
+      return true;
+    }
+    if (key == 'loyalty' && activeModules.any((m) => _normalizeModuleKey(m) == 'crm')) {
+      return true;
+    }
+    if (key == 'crm' && activeModules.any((m) => _normalizeModuleKey(m) == 'loyalty')) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Checks whether [moduleKey] should display the Cascade upgrade Crown gate.
+  bool isModuleGated(String moduleKey) {
+    final key = _normalizeModuleKey(moduleKey);
+    if (key.isEmpty || key == 'cash_debt') return false;
+    return !hasModule(key);
+  }
+
   factory AuthSessionModel.fromApiData(Map<String, dynamic> data) {
     final user = Map<String, dynamic>.from((data['user'] as Map?) ?? {});
     final tenant = Map<String, dynamic>.from((data['tenant'] as Map?) ?? {});
+    final entitlements = Map<String, dynamic>.from((data['entitlements'] as Map?) ?? {});
     final storeJson = Map<String, dynamic>.from((data['active_store'] as Map?) ?? {});
     final storesList = (data['available_stores'] as List<dynamic>? ?? [])
         .map((e) => StoreBranchModel.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -107,6 +212,11 @@ class AuthSessionModel extends Equatable {
         roleLabel.toLowerCase().contains('pemilik') ||
         (user['is_super_admin'] == true);
 
+    final planName = (tenant['plan_name'] ?? '').toString();
+    final tier = _normalizeTier(entitlements['tier'] ?? tenant['tier'], planName);
+    final activeModules = _parseActiveModules(entitlements.isNotEmpty ? entitlements : null, tier);
+    final hiddenModules = _parseHiddenModules(entitlements);
+
     return AuthSessionModel(
       userId: (user['id'] as num?)?.toInt() ?? 0,
       userName: (user['name'] ?? '').toString(),
@@ -115,7 +225,10 @@ class AuthSessionModel extends Equatable {
       isOwner: isOwner,
       tenantName: (tenant['name'] ?? '').toString(),
       tenantSubdomain: (tenant['subdomain'] ?? '').toString(),
-      planName: (tenant['plan_name'] ?? '').toString(),
+      planName: planName,
+      tier: tier,
+      activeModules: activeModules,
+      hiddenModules: hiddenModules,
       activeStore: activeStore,
       availableStores: storesList.isNotEmpty ? storesList : [activeStore],
       permissions: (data['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
@@ -132,6 +245,9 @@ class AuthSessionModel extends Equatable {
       tenantName: '',
       tenantSubdomain: '',
       planName: '',
+      tier: 'starter',
+      activeModules: ['cash_debt'],
+      hiddenModules: [],
       activeStore: StoreBranchModel(id: 0, name: '-', code: '-', city: ''),
       availableStores: [],
       permissions: [],
@@ -156,6 +272,9 @@ class AuthSessionModel extends Equatable {
       tenantName: 'NusaCommerce',
       tenantSubdomain: 'manunggal',
       planName: 'Enterprise',
+      tier: 'enterprise',
+      activeModules: _enterpriseDefaultModules,
+      hiddenModules: [],
       activeStore: mainStore,
       availableStores: [mainStore],
       permissions: ['*'],
@@ -173,6 +292,20 @@ class AuthSessionModel extends Equatable {
             ? availableList.first
             : const StoreBranchModel(id: 0, name: '-', code: '-', city: ''));
 
+    final planName = (json['plan_name'] ?? '').toString();
+    final tier = _normalizeTier(json['tier'], planName);
+    final rawActiveModules = json['active_modules'];
+    final activeModules = rawActiveModules is List
+        ? <String>{
+            'cash_debt',
+            ...rawActiveModules.map((e) => _normalizeModuleKey(e.toString())).where((e) => e.isNotEmpty),
+          }.toList()
+        : _parseActiveModules(null, tier);
+    final hiddenModules = (json['hidden_modules'] as List<dynamic>? ?? [])
+        .map((e) => _normalizeModuleKey(e.toString()))
+        .where((e) => e.isNotEmpty)
+        .toList();
+
     return AuthSessionModel(
       userId: (json['user_id'] as num?)?.toInt() ?? 0,
       userName: (json['user_name'] ?? '').toString(),
@@ -181,7 +314,10 @@ class AuthSessionModel extends Equatable {
       isOwner: json['is_owner'] == true,
       tenantName: (json['tenant_name'] ?? '').toString(),
       tenantSubdomain: (json['tenant_subdomain'] ?? '').toString(),
-      planName: (json['plan_name'] ?? '').toString(),
+      planName: planName,
+      tier: tier,
+      activeModules: activeModules,
+      hiddenModules: hiddenModules,
       activeStore: active,
       availableStores: availableList.isNotEmpty ? availableList : (active.id > 0 ? [active] : []),
       permissions: (json['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
@@ -197,6 +333,9 @@ class AuthSessionModel extends Equatable {
         'tenant_name': tenantName,
         'tenant_subdomain': tenantSubdomain,
         'plan_name': planName,
+        'tier': tier,
+        'active_modules': activeModules,
+        'hidden_modules': hiddenModules,
         'active_store': activeStore.toJson(),
         'available_stores': availableStores.map((s) => s.toJson()).toList(),
         'permissions': permissions,
@@ -206,6 +345,9 @@ class AuthSessionModel extends Equatable {
     StoreBranchModel? activeStore,
     String? userName,
     String? tenantName,
+    String? tier,
+    List<String>? activeModules,
+    List<String>? hiddenModules,
   }) {
     return AuthSessionModel(
       userId: userId,
@@ -216,6 +358,9 @@ class AuthSessionModel extends Equatable {
       tenantName: tenantName ?? this.tenantName,
       tenantSubdomain: tenantSubdomain,
       planName: planName,
+      tier: tier ?? this.tier,
+      activeModules: activeModules ?? this.activeModules,
+      hiddenModules: hiddenModules ?? this.hiddenModules,
       activeStore: activeStore ?? this.activeStore,
       availableStores: availableStores,
       permissions: permissions,
@@ -223,5 +368,13 @@ class AuthSessionModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [userId, userName, tenantSubdomain, activeStore];
+  List<Object?> get props => [
+        userId,
+        userName,
+        tenantSubdomain,
+        tier,
+        activeModules,
+        hiddenModules,
+        activeStore,
+      ];
 }

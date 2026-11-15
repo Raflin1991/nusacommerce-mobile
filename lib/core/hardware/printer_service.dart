@@ -375,10 +375,13 @@ class PrinterService {
     final subtotal = (sale['subtotal'] as num?) ?? (sale['grand_total'] as num?) ?? 0;
     final discount = (sale['discount_total'] as num?) ?? 0;
     final tax = (sale['tax_total'] as num?) ?? 0;
+    final serviceCharge = (sale['service_charge_amount'] as num?) ?? 0;
     final grandTotal = (sale['grand_total'] as num?) ?? subtotal;
+    final storeCreditAmount = (sale['store_credit_amount'] as num?) ?? 0;
     final paid = (sale['paid_total'] as num?) ?? grandTotal;
     final change = (sale['change_returned'] as num?) ?? 0;
     final balanceDue = (sale['balance_due'] as num?) ?? 0;
+    final dueDate = sale['due_date']?.toString();
 
     sb.writeln(_leftRight('Subtotal', IdrCurrencyFormatter.format(subtotal), width));
     if (discount > 0) {
@@ -387,12 +390,22 @@ class PrinterService {
     if (tax > 0) {
       sb.writeln(_leftRight('PPN / Pajak', IdrCurrencyFormatter.format(tax), width));
     }
+    if (serviceCharge > 0) {
+      sb.writeln(_leftRight('Service Charge', IdrCurrencyFormatter.format(serviceCharge), width));
+    }
     sb.writeln(doubleDivider);
     sb.writeln(_leftRight('TOTAL TAGIHAN', IdrCurrencyFormatter.format(grandTotal), width));
-    sb.writeln(_leftRight('Bayar ($methods)', IdrCurrencyFormatter.format(paid), width));
+    if (storeCreditAmount > 0) {
+      sb.writeln(_leftRight('Potong Saldo Deposit', IdrCurrencyFormatter.format(storeCreditAmount), width));
+    }
     if (balanceDue > 0) {
-      sb.writeln(_leftRight('SISA KASBON (BON)', IdrCurrencyFormatter.format(balanceDue), width));
+      sb.writeln(_leftRight('Uang Muka (DP)', IdrCurrencyFormatter.format(paid), width));
+      sb.writeln(_leftRight('SISA TAGIHAN (KASBON)', IdrCurrencyFormatter.format(balanceDue), width));
+      if (dueDate != null && dueDate.trim().isNotEmpty) {
+        sb.writeln(_leftRight('Jatuh Tempo', dueDate.trim(), width));
+      }
     } else {
+      sb.writeln(_leftRight('Bayar ($methods)', IdrCurrencyFormatter.format(paid), width));
       sb.writeln(_leftRight('KEMBALIAN', IdrCurrencyFormatter.format(change), width));
     }
     sb.writeln(doubleDivider);

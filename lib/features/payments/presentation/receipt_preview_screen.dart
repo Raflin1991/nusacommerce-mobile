@@ -310,9 +310,12 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     final sale = widget.receiptData;
     final items = (sale['items'] as List<dynamic>? ?? []);
     final grandTotal = (sale['grand_total'] as num?) ?? 0;
+    final serviceCharge = (sale['service_charge_amount'] as num?) ?? 0;
+    final storeCreditAmount = (sale['store_credit_amount'] as num?) ?? 0;
     final paid = (sale['paid_total'] as num?) ?? grandTotal;
     final change = (sale['change_returned'] as num?) ?? 0;
     final balanceDue = (sale['balance_due'] as num?) ?? 0;
+    final dueDate = sale['due_date']?.toString();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -432,27 +435,54 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       padding: EdgeInsets.symmetric(vertical: 10),
                       child: Divider(),
                     ),
+                    if (serviceCharge > 0) ...[
+                      _receiptSummaryRow('Service Charge', IdrCurrencyFormatter.format(serviceCharge)),
+                      const SizedBox(height: 6),
+                    ],
                     _receiptSummaryRow('Total Tagihan', IdrCurrencyFormatter.format(grandTotal), isBold: true),
                     const SizedBox(height: 6),
-                    _receiptSummaryRow(
-                      'Metode (${(sale['payment_methods'] as List<dynamic>? ?? ['Tunai']).join(', ')})',
-                      IdrCurrencyFormatter.format(paid),
-                    ),
-                    const SizedBox(height: 6),
-                    if (balanceDue > 0)
+                    if (storeCreditAmount > 0) ...[
                       _receiptSummaryRow(
-                        'Piutang Buku Bon',
+                        'Potong Saldo Deposit',
+                        IdrCurrencyFormatter.format(storeCreditAmount),
+                        valueColor: AppColors.primary,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    if (balanceDue > 0) ...[
+                      _receiptSummaryRow(
+                        'Uang Muka (DP)',
+                        IdrCurrencyFormatter.format(paid),
+                        valueColor: AppColors.successDark,
+                      ),
+                      const SizedBox(height: 6),
+                      _receiptSummaryRow(
+                        'Sisa Tagihan (Kasbon)',
                         IdrCurrencyFormatter.format(balanceDue),
                         valueColor: AppColors.warningDark,
                         isBold: true,
-                      )
-                    else
+                      ),
+                      if (dueDate != null && dueDate.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        _receiptSummaryRow(
+                          'Jatuh Tempo',
+                          dueDate.trim(),
+                          valueColor: AppColors.slate600,
+                        ),
+                      ],
+                    ] else ...[
+                      _receiptSummaryRow(
+                        'Metode (${(sale['payment_methods'] as List<dynamic>? ?? ['Tunai']).join(', ')})',
+                        IdrCurrencyFormatter.format(paid),
+                      ),
+                      const SizedBox(height: 6),
                       _receiptSummaryRow(
                         'Kembalian',
                         IdrCurrencyFormatter.format(change),
                         valueColor: AppColors.successDark,
                         isBold: true,
                       ),
+                    ],
                   ],
                 ),
               ),
@@ -547,15 +577,19 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
   Widget _receiptSummaryRow(String label, String value, {bool isBold = false, Color? valueColor}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: isBold ? 14 : 13,
-            fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
-            color: AppColors.slate700,
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: isBold ? 14 : 13,
+              fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
+              color: AppColors.slate700,
+            ),
           ),
         ),
+        const SizedBox(width: 8),
         Text(
           value,
           style: AppTheme.moneyStyle(

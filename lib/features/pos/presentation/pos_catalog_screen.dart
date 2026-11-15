@@ -1317,6 +1317,69 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 ),
               ),
 
+              if (state.isExchangeMode)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.warningSoft,
+                    border: Border(
+                      bottom: BorderSide(color: AppColors.warning.withOpacity(0.45)),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.swap_horiz_rounded, size: 18, color: AppColors.warningDark),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Mode Tukar Barang • Nota ${state.exchangeSourceSale?['number'] ?? '-'}',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.warningDark,
+                              ),
+                            ),
+                          ),
+                          InkWell(
+                            onTap: () => context.read<PosCubit>().cancelExchangeMode(),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppColors.warning.withOpacity(0.5)),
+                              ),
+                              child: const Text(
+                                'Batal Tukar',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.dangerDark,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Retur: -${IdrCurrencyFormatter.format(state.exchangeReturnCreditTotal)} • Pengganti: +${IdrCurrencyFormatter.format(state.replacementItemsSubtotal)}'
+                        '${state.exchangeSurplusCredit > 0 ? ' • Kelebihan: ${IdrCurrencyFormatter.format(state.exchangeSurplusCredit)}' : ' • Kurang Bayar: ${IdrCurrencyFormatter.format(state.grandTotal)}'}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               // 2. Product Catalog Area (Grid or List View)
               Expanded(
                 child: state.filteredProducts.isEmpty
@@ -2101,7 +2164,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: InkWell(
-                                    onTap: () => _showEditCartItemModal(context, idx, item),
+                                    onTap: item.isExchangeReturn
+                                        ? null
+                                        : () => _showEditCartItemModal(context, idx, item),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
@@ -2119,7 +2184,29 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                 ),
                                               ),
                                             ),
-                                            if (state.capabilities.hasWholesaleMultiUnit &&
+                                            if (item.isExchangeReturn) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.warningSoft,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(
+                                                    color: AppColors.warning.withOpacity(0.45),
+                                                  ),
+                                                ),
+                                                child: const Text(
+                                                  'RETUR / TUKAR',
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: AppColors.warningDark,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            if (!item.isExchangeReturn &&
+                                                state.capabilities.hasWholesaleMultiUnit &&
                                                 item.product.unitConversions.length > 1) ...[
                                               const SizedBox(width: 6),
                                               InkWell(
@@ -2284,49 +2371,67 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                // Compact Ergonomic Stepper
-                                Container(
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.slate100,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      InkWell(
-                                        onTap: () => context.read<PosCubit>().decrementCartItem(idx),
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: const SizedBox(
-                                          width: 34,
-                                          height: 34,
-                                          child: Icon(Icons.remove_rounded, size: 16, color: AppColors.slate700),
-                                        ),
+                                if (item.isExchangeReturn)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.warningSoft,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: AppColors.warning.withOpacity(0.45)),
+                                    ),
+                                    child: Text(
+                                      '-${IdrCurrencyFormatter.format(item.lineTotal.abs())}',
+                                      style: AppTheme.moneyStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.warningDark,
                                       ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                                        child: Text(
-                                          IdrCurrencyFormatter.formatQty(item.quantity),
-                                          style: AppTheme.moneyStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w800,
-                                            color: AppColors.navyDark,
+                                    ),
+                                  )
+                                else
+                                  // Compact Ergonomic Stepper
+                                  Container(
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.slate100,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: AppColors.border),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          onTap: () => context.read<PosCubit>().decrementCartItem(idx),
+                                          borderRadius: BorderRadius.circular(10),
+                                          child: const SizedBox(
+                                            width: 34,
+                                            height: 34,
+                                            child: Icon(Icons.remove_rounded, size: 16, color: AppColors.slate700),
                                           ),
                                         ),
-                                      ),
-                                      InkWell(
-                                        onTap: () => context.read<PosCubit>().incrementCartItem(idx),
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: const SizedBox(
-                                          width: 34,
-                                          height: 34,
-                                          child: Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                                          child: Text(
+                                            IdrCurrencyFormatter.formatQty(item.quantity),
+                                            style: AppTheme.moneyStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.navyDark,
+                                            ),
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                        InkWell(
+                                          onTap: () => context.read<PosCubit>().incrementCartItem(idx),
+                                          borderRadius: BorderRadius.circular(10),
+                                          child: const SizedBox(
+                                            width: 34,
+                                            height: 34,
+                                            child: Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
                               ],
                             );
                           },
@@ -2344,18 +2449,26 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Total Tagihan',
+                      Text(
+                        state.isExchangeMode && state.exchangeSurplusCredit > 0
+                            ? 'Kelebihan Retur'
+                            : 'Total Tagihan',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.slate500,
+                          color: state.isExchangeMode && state.exchangeSurplusCredit > 0
+                              ? AppColors.primary
+                              : AppColors.slate500,
                         ),
                       ),
                       NusaPriceTag(
-                        amount: state.grandTotal,
+                        amount: state.isExchangeMode && state.exchangeSurplusCredit > 0
+                            ? state.exchangeSurplusCredit
+                            : state.grandTotal,
                         fontSize: 18,
-                        color: AppColors.navyDark,
+                        color: state.isExchangeMode && state.exchangeSurplusCredit > 0
+                            ? AppColors.primary
+                            : AppColors.navyDark,
                       ),
                     ],
                   ),

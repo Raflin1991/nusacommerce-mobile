@@ -8,6 +8,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/cascade_entitlement_teaser.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/models/auth_session_model.dart';
@@ -188,6 +189,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             (s['status'] ?? '').toString().toUpperCase() == 'VOID' ||
             ((s['discount_total'] ?? s['discount_amount'] ?? 0) as num).toDouble() > 50000)
         .length;
+    final mergedConflicts = _mergedOfflineConflicts(posState.localSyncConflicts);
+
     final badgeCount = (_lowStockCount > 0 ? _lowStockCount : localLowStock) +
         (_expiringCount > 0 ? _expiringCount : localExpiring) +
         _voidCount +
@@ -196,7 +199,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         _overdueReceivables.length +
         _openTasksCount +
         _pendingApprovalsCount +
-        _offlineConflictsList.length +
+        mergedConflicts.length +
         _pendingOnlineOrdersCount;
 
     return Scaffold(
@@ -216,8 +219,87 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   posState.offlinePendingCount,
                   badgeCount,
                   activeStoreId,
+                  mergedConflicts,
                 ),
                 const SizedBox(height: 12),
+
+                if (posState.localSyncConflicts.isNotEmpty)
+                  GestureDetector(
+                    onTap: () {
+                      showAlertNotificationsModal(
+                        context,
+                        voidCountFromServer: _voidCount,
+                        varianceShiftsCount: _varianceShiftsCount,
+                        overdueReceivables: _overdueReceivables,
+                        storeName: authState.session.activeStore.name.isEmpty
+                            ? 'NusaCommerce POS'
+                            : authState.session.activeStore.name,
+                        approvals: _approvalsList,
+                        tasks: _tasksList,
+                        offlineConflicts: mergedConflicts,
+                        pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
+                        onDecideApproval: _decideApproval,
+                        onOpenOnlineOrders: () => _showOnlineOrdersSheet(context),
+                      );
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.danger.withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: AppColors.danger.withOpacity(0.16),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.sync_problem_rounded,
+                              color: AppColors.dangerDark,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${posState.localSyncConflicts.length} Konflik Stok Sinkronisasi Offline',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.dangerDark,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                const Text(
+                                  'Stok habis di server saat sinkronisasi. Ketuk untuk Setujui Oversell atau Batalkan & Refund Manual.',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppColors.slate700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 14,
+                            color: AppColors.dangerDark,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
                 if (_error != null)
                   Container(
@@ -316,12 +398,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
+  List<Map<String, dynamic>> _mergedOfflineConflicts(
+    List<Map<String, dynamic>> localConflicts,
+  ) {
+    final byUuid = <String, Map<String, dynamic>>{};
+    for (final c in _offlineConflictsList) {
+      final uuid = (c['local_uuid'] ?? c['id'] ?? '').toString();
+      if (uuid.isNotEmpty) byUuid[uuid] = Map<String, dynamic>.from(c);
+    }
+    for (final c in localConflicts) {
+      final uuid = (c['local_uuid'] ?? c['id'] ?? '').toString();
+      if (uuid.isNotEmpty) {
+        byUuid[uuid] = {
+          ...?byUuid[uuid],
+          ...Map<String, dynamic>.from(c),
+        };
+      }
+    }
+    return byUuid.values.toList();
+  }
+
   Widget _buildTopHeader(
     BuildContext context,
     AuthSessionModel session,
     int offlinePendingCount,
     int badgeCount,
     int activeStoreId,
+    List<Map<String, dynamic>> mergedConflicts,
   ) {
     final storeName = session.activeStore.name.isEmpty
         ? 'NusaCommerce POS'
@@ -402,7 +505,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       storeName: storeName,
                       approvals: _approvalsList,
                       tasks: _tasksList,
-                      offlineConflicts: _offlineConflictsList,
+                      offlineConflicts: mergedConflicts,
                       pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
                       onDecideApproval: _decideApproval,
                       onOpenOnlineOrders: () => _showOnlineOrdersSheet(context),
@@ -852,12 +955,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     BuildContext context,
     VerticalCapabilities capabilities,
   ) {
+    final session = context.watch<AuthCubit>().state.session;
+    final onlineGated = session.isModuleGated('online_store');
+    final accountingGated = session.isModuleGated('accounting');
+    final hrGated = session.isModuleGated('hr');
+
     final modules = [
       (
         icon: Icons.point_of_sale_rounded,
         color: AppColors.primary,
         title: capabilities.posDisplayName,
         subtitle: capabilities.posSubtitle,
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => context.push('/pos'),
       ),
       (
@@ -865,6 +975,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         color: AppColors.warningDark,
         title: 'Pemasok & Stok Masuk',
         subtitle: 'Supplier, rekening & beli stok',
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => context.push('/suppliers?tab=stock-in'),
       ),
       (
@@ -872,6 +984,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         color: AppColors.purple,
         title: 'Katalog & Opname Stok',
         subtitle: 'Produk, HPP, FEFO & kamera',
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => widget.onSwitchTab(2),
       ),
       (
@@ -879,6 +993,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         color: AppColors.primaryDark,
         title: 'Pelanggan & Member',
         subtitle: 'Diskon grup, poin & kasbon',
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => context.push('/customers'),
       ),
       (
@@ -886,6 +1002,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         color: AppColors.dangerDark,
         title: 'Buku Bon & Biaya Toko',
         subtitle: 'Piutang, hutang & pengeluaran',
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => context.push('/debts'),
       ),
       (
@@ -893,6 +1011,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         color: AppColors.successDark,
         title: 'Shift Kasir & Z-Report',
         subtitle: 'Kas laci, mutasi & blind count',
+        isGated: false,
+        requiredTier: 'STARTER',
         onTap: () => context.push('/shifts'),
       ),
       if (capabilities.hasTableManagement)
@@ -901,23 +1021,99 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           color: AppColors.navyMid,
           title: 'Denah Meja & Resto F&B',
           subtitle: 'Open tab, pindah meja & KOT',
+          isGated: false,
+          requiredTier: 'STARTER',
           onTap: () => context.push('/restaurant'),
         ),
       (
         icon: Icons.analytics_outlined,
         color: AppColors.navyDark,
         title: 'Laporan Laba Rugi Owner',
-        subtitle: 'SAK EMKM, metode & anti-fraud',
-        onTap: () => widget.onSwitchTab(3),
+        subtitle: accountingGated
+            ? 'Ringkasan kas & SAK EMKM'
+            : 'SAK EMKM, metode & anti-fraud',
+        isGated: accountingGated,
+        requiredTier: 'PRO',
+        onTap: () {
+          if (accountingGated) {
+            showCascadeModuleTeaserModal(
+              context,
+              moduleKey: 'accounting',
+              moduleTitle: 'Laporan Keuangan & Akuntansi SAK EMKM',
+              requiredTier: 'PRO',
+              currentTier: session.tier,
+              description:
+                  'Buka laporan neraca lengkap, buku besar, dan jurnal otomatis standar SAK EMKM.',
+              benefits: const [
+                'Laporan Laba Rugi & Neraca otomatis per cabang',
+                'Buku besar & jurnal transaksi kasir real-time',
+                'Kontrol biaya & anti-fraud kasir menyeluruh',
+              ],
+            );
+          } else {
+            widget.onSwitchTab(3);
+          }
+        },
       ),
       (
         icon: Icons.shopping_bag_outlined,
         color: AppColors.primary,
         title: 'Pesanan Toko Online',
-        subtitle: _pendingOnlineOrdersCount > 0
-            ? '$_pendingOnlineOrdersCount pesanan menunggu proses'
-            : 'Kelola webstore, status & resi',
-        onTap: () => _showOnlineOrdersSheet(context),
+        subtitle: onlineGated
+            ? 'Etalase web & order otomatis'
+            : (_pendingOnlineOrdersCount > 0
+                ? '$_pendingOnlineOrdersCount pesanan menunggu proses'
+                : 'Kelola webstore, status & resi'),
+        isGated: onlineGated,
+        requiredTier: 'PRO',
+        onTap: () {
+          if (onlineGated) {
+            showCascadeModuleTeaserModal(
+              context,
+              moduleKey: 'online_store',
+              moduleTitle: 'Pesanan Toko Online (Webstore)',
+              requiredTier: 'PRO',
+              currentTier: session.tier,
+              description:
+                  'Terima order online pelanggan langsung ke POS dengan potong stok terpusat.',
+              benefits: const [
+                'Katalog web toko siap pakai dengan subdomain toko',
+                'Proses order online & resi langsung dari HP kasir',
+                'Terhubung dengan saldo & pelanggan member',
+              ],
+            );
+          } else {
+            _showOnlineOrdersSheet(context);
+          }
+        },
+      ),
+      (
+        icon: Icons.badge_outlined,
+        color: AppColors.navyMid,
+        title: 'HRD & Absensi Staf',
+        subtitle: 'Jadwal shift, foto & komisi',
+        isGated: hrGated,
+        requiredTier: 'ENTERPRISE',
+        onTap: () {
+          if (hrGated) {
+            showCascadeModuleTeaserModal(
+              context,
+              moduleKey: 'hr',
+              moduleTitle: 'HRD, Shift & Absensi Karyawan',
+              requiredTier: 'ENTERPRISE',
+              currentTier: session.tier,
+              description:
+                  'Pantau absensi foto/GPS staf cabang dan komisi kasir otomatis.',
+              benefits: const [
+                'Absensi kasir berbasis shift dengan foto & lokasi',
+                'Rekap keterlambatan & lembur karyawan cabang',
+                'Perhitungan komisi kasir per transaksi otomatis',
+              ],
+            );
+          } else {
+            context.push('/shifts');
+          }
+        },
       ),
     ];
 
@@ -933,6 +1129,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   color: modules[i].color,
                   title: modules[i].title,
                   subtitle: modules[i].subtitle,
+                  isGated: modules[i].isGated,
+                  requiredTier: modules[i].requiredTier,
                   onTap: modules[i].onTap,
                 ),
               ),
@@ -944,6 +1142,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         color: modules[i + 1].color,
                         title: modules[i + 1].title,
                         subtitle: modules[i + 1].subtitle,
+                        isGated: modules[i + 1].isGated,
+                        requiredTier: modules[i + 1].requiredTier,
                         onTap: modules[i + 1].onTap,
                       )
                     : const SizedBox.shrink(),
@@ -961,6 +1161,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    bool isGated = false,
+    String requiredTier = 'PRO',
   }) {
     return InkWell(
       onTap: onTap,
@@ -968,9 +1170,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       child: Container(
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isGated ? const Color(0xFFFFFBEB) : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(
+            color: isGated ? const Color(0xFFFDE68A) : AppColors.border,
+          ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -989,16 +1193,27 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.navyDark,
-                      height: 1.2,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.navyDark,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (isGated) ...[
+                        const SizedBox(width: 4),
+                        CascadeCrownBadge(requiredTier: requiredTier),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 3),
                   Text(
