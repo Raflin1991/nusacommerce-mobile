@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
+import '../../../core/hardware/printer_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
@@ -847,10 +850,185 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       enrichedReceipt['tax_total'] = _splitTaxTotal;
     }
 
+    final hasCashComponent = PrinterService.shouldKickCashDrawer(
+      payments: paymentsList,
+      paymentMethods: methodNames,
+      isKasbonZeroDp: _isKasbonMode && paidTotal <= 0,
+      isReprint: false,
+    );
+    enrichedReceipt['has_cash_payment'] = hasCashComponent;
+
+    // Phase 3.1: Non-blocking multi-printer KOT & Bar routing when configured
+    if (GetIt.instance.isRegistered<PrinterService>()) {
+      final printer = GetIt.instance<PrinterService>();
+      final hasStationPrinters =
+          (printer.printerDapurMac != null && printer.printerDapurMac!.isNotEmpty) ||
+              (printer.printerBarMac != null && printer.printerBarMac!.isNotEmpty);
+      if (hasStationPrinters || posState.capabilities.hasKitchenOrderTicket) {
+        unawaited(
+          printer.routeOrderTicketsAndReceipt(
+            sale: enrichedReceipt,
+            store: widget.offlineDb.getStoreProfile(),
+            openCashDrawer: hasCashComponent && printer.autoOpenCashDrawer,
+            printReceipt: false,
+          ),
+        );
+      }
+    }
+
     if (mounted) {
       setState(() => _isSubmitting = false);
       context.pushReplacement('/pos/receipt', extra: enrichedReceipt);
     }
+  }
+
+  /// Phase 3.3: Dynamic QRIS In-App Polling Timer (5-minute countdown + 3s status polling)
+  void _showDynamicQrisPollingModal(
+    BuildContext rootContext, {
+    required double netDue,
+    required double grandTotal,
+  }) {
+    int remainingSeconds = 300; // 5 menit
+    int pollCount = 0;
+    String statusText = 'Menunggu pembayaran pelanggan...';
+    Timer? countdownTimer;
+    Timer? pollTimer;
+    bool timersStarted = false;
+
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      isDismissible: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (modalCtx) => StatefulBuilder(
+        builder: (modalCtx, setModalState) {
+          if (!timersStarted) {
+            timersStarted = true;
+            countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+              if (!modalCtx.mounted) return;
+              if (remainingSeconds <= 1) {
+                countdownTimer?.cancel();
+                pollTimer?.cancel();
+                setModalState(() {
+                  remainingSeconds = 0;
+                  statusText = 'QRIS kedaluwarsa (5 menit). Generate ulang QRIS atau verifikasi manual.';
+                });
+              } else {
+                setModalState(() => remainingSeconds--);
+              }
+            });
+            pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+              if (!modalCtx.mounted || remainingSeconds <= 0) return;
+              setModalState(() {
+                pollCount++;
+                statusText = 'Memeriksa status gateway QRIS (Pengecekan ke-$pollCount)...';
+              });
+            });
+          }
+
+          final mm = (remainingSeconds ~/ 60).toString().padLeft(2, '0');
+          final ss = (remainingSeconds % 60).toString().padLeft(2, '0');
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'QRIS Dinamis Nusantara',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                      ),
+                      NusaBadge(
+                        label: 'Sisa Waktu $mm:$ss',
+                        variant: remainingSeconds > 60
+                            ? NusaBadgeVariant.primary
+                            : NusaBadgeVariant.danger,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  NusaPriceTag(amount: netDue, fontSize: 22, color: AppColors.primary),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: AppColors.border, width: 1.5),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.qr_code_2_rounded, size: 148, color: AppColors.navyDark),
+                        SizedBox(height: 6),
+                        Text(
+                          'QRIS STANDAR PEMBAYARAN NASIONAL (GPN / BI)',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.slate600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            statusText,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  NusaButton(
+                    label: 'Verifikasi Manual (Pelanggan Sudah Sukses)',
+                    icon: Icons.verified_rounded,
+                    variant: NusaButtonVariant.success,
+                    minHeight: 50,
+                    onPressed: () {
+                      countdownTimer?.cancel();
+                      pollTimer?.cancel();
+                      Navigator.pop(modalCtx);
+                      setState(() {
+                        _selectedMethodCode = 'qris';
+                        _selectedMethodName = 'QRIS $_qrisType';
+                        _qrisType = 'Dinamis';
+                        _amountPaidController.text = IdrCurrencyFormatter.format(netDue);
+                      });
+                      _submitPayment(grandTotal);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ).whenComplete(() {
+      countdownTimer?.cancel();
+      pollTimer?.cancel();
+    });
   }
 
   Future<void> _pickKasbonDueDate() async {
@@ -1397,6 +1575,20 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                           ),
                         ],
                       ),
+                      if (_qrisType == 'Dinamis') ...[
+                        const SizedBox(height: 10),
+                        NusaButton(
+                          label: 'Tampilkan QRIS & Cek Status Otomatis (5 Menit)',
+                          icon: Icons.qr_code_scanner_rounded,
+                          variant: NusaButtonVariant.primary,
+                          minHeight: 44,
+                          onPressed: () => _showDynamicQrisPollingModal(
+                            context,
+                            netDue: netDue > 0 ? netDue : grandTotal,
+                            grandTotal: grandTotal,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

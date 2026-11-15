@@ -48,6 +48,22 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
 
   bool _isPrinting = false;
 
+  bool get _isReprint => widget.receiptData['is_reprint'] == true;
+  int get _reprintCount => (widget.receiptData['reprint_count'] as num?)?.toInt() ?? 1;
+
+  bool get _shouldOpenCashDrawer {
+    final balanceDue = (widget.receiptData['balance_due'] as num?)?.toDouble() ?? 0;
+    final paidTotal = (widget.receiptData['paid_total'] as num?)?.toDouble() ?? 0;
+    final isKasbonZeroDp = balanceDue > 0 && paidTotal <= 0;
+    return PrinterService.shouldKickCashDrawer(
+      payments: widget.receiptData['payments'] as List<dynamic>?,
+      paymentMethods: widget.receiptData['payment_methods'] as List<dynamic>? ??
+          [widget.receiptData['payment_method'] ?? 'Tunai'],
+      isKasbonZeroDp: isKasbonZeroDp,
+      isReprint: _isReprint,
+    );
+  }
+
   Future<void> _handleThermalPrint() async {
     if (_isPrinting) return;
     setState(() => _isPrinting = true);
@@ -58,17 +74,14 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
         storeProfile: storeProfile,
         sale: widget.receiptData,
         paperWidthOverride: selectedWidth,
+        isReprint: _isReprint,
+        reprintCount: _reprintCount,
       );
-
-      final methods = (widget.receiptData['payment_methods'] as List<dynamic>? ?? [])
-          .map((e) => e.toString().toLowerCase())
-          .toList();
-      final isCashPayment = methods.isEmpty || methods.any((m) => m.contains('tunai') || m.contains('cash'));
 
       final bytes = widget.printerService.buildEscPosBytesFromText(
         formatted,
         cutPaper: widget.printerService.autoCutPaper,
-        openCashDrawer: widget.printerService.autoOpenCashDrawer && isCashPayment,
+        openCashDrawer: widget.printerService.autoOpenCashDrawer && _shouldOpenCashDrawer,
       );
 
       final printed = await widget.printerService.printBytes(bytes);
@@ -120,6 +133,8 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
             storeProfile: storeProfile,
             sale: widget.receiptData,
             paperWidthOverride: selectedWidth,
+            isReprint: _isReprint,
+            reprintCount: _reprintCount,
           );
           return AlertDialog(
             title: Row(
@@ -381,6 +396,40 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                 ),
                 child: Column(
                   children: [
+                    if (_isReprint) ...[
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.warningSoft,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.warningDark.withOpacity(0.4)),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              '*** SALINAN / REPRINT KE-$_reprintCount ***',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.warningDark,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Kasir: ${sale['cashier_name'] ?? sale['cashier'] ?? 'Kasir POS'}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.warningDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     Text(
                       (storeProfile['name'] ?? 'NusaCommerce POS').toString(),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
@@ -394,6 +443,40 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       'Telp: ${storeProfile['phone'] ?? '-'}',
                       style: const TextStyle(fontSize: 12, color: AppColors.slate500),
                     ),
+                    if (sale['vertical_metadata'] is Map &&
+                        (sale['vertical_metadata'] as Map).isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (((sale['vertical_metadata'] as Map)['nopol'] ?? '').toString().isNotEmpty)
+                              Text(
+                                'No. Polisi: ${(sale['vertical_metadata'] as Map)['nopol']} • ${(sale['vertical_metadata'] as Map)['kendaraan'] ?? ''} • KM ${(sale['vertical_metadata'] as Map)['kilometer'] ?? '-'}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                            if (((sale['vertical_metadata'] as Map)['doctor_name'] ?? '').toString().isNotEmpty)
+                              Text(
+                                'Dokter: ${(sale['vertical_metadata'] as Map)['doctor_name']} (SIP: ${(sale['vertical_metadata'] as Map)['doctor_sip'] ?? '-'}) • Pasien: ${(sale['vertical_metadata'] as Map)['patient_name'] ?? '-'}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                            if (((sale['vertical_metadata'] as Map)['rack_number'] ?? '').toString().isNotEmpty ||
+                                ((sale['vertical_metadata'] as Map)['estimated_ready_at'] ?? '').toString().isNotEmpty)
+                              Text(
+                                'Rak: ${(sale['vertical_metadata'] as Map)['rack_number'] ?? '-'} • Estimasi Selesai: ${(sale['vertical_metadata'] as Map)['estimated_ready_at'] ?? '-'}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Divider(),
@@ -403,6 +486,9 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       final qty = (item['quantity'] as num?) ?? 1;
                       final price = (item['unit_price'] as num?) ?? 0;
                       final lineTotal = (item['line_total'] as num?) ?? (qty * price);
+                      final batchNo = (item['batch_number'] ?? '').toString().trim();
+                      final expiryDate = (item['expiry_date'] ?? '').toString().trim();
+                      final stylist = (item['stylist_name'] ?? '').toString().trim();
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Row(
@@ -420,6 +506,16 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                                     '${IdrCurrencyFormatter.formatQty(qty)} × ${IdrCurrencyFormatter.format(price)}',
                                     style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
                                   ),
+                                  if (batchNo.isNotEmpty || expiryDate.isNotEmpty)
+                                    Text(
+                                      'Batch: ${batchNo.isEmpty ? '-' : batchNo} • ED: ${expiryDate.isEmpty ? '-' : expiryDate}',
+                                      style: const TextStyle(fontSize: 10.5, color: AppColors.primary, fontWeight: FontWeight.w600),
+                                    ),
+                                  if (stylist.isNotEmpty)
+                                    Text(
+                                      'Kapster/Terapis: $stylist',
+                                      style: const TextStyle(fontSize: 10.5, color: AppColors.slate600, fontWeight: FontWeight.w600),
+                                    ),
                                 ],
                               ),
                             ),

@@ -517,7 +517,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
       text: item.discountAmount > 0 ? item.discountAmount.toInt().toString() : '',
     );
     final noteCtrl = TextEditingController(text: item.notes ?? '');
+    final stylistCtrl = TextEditingController(text: item.stylistName ?? '');
     final pinCtrl = TextEditingController();
+    final isSalonMode = context.read<PosCubit>().state.capabilities.hasSalonStylistWorkflow;
     String discMode = 'rp';
 
     showModalBottomSheet(
@@ -605,6 +607,35 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     prefixIcon: Icon(Icons.edit_note_rounded),
                   ),
                 ),
+                if (isSalonMode) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Kapster / Stylist / Terapis',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final name in const ['Rina (Senior)', 'Andi (Barber)', 'Siska (Terapis)', 'Budi (Kapster)'])
+                        NusaPillFilter(
+                          label: name,
+                          selected: stylistCtrl.text.trim() == name,
+                          onTap: () => setModalState(() => stylistCtrl.text = name),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: stylistCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nama Kapster / Stylist',
+                      hintText: 'Pilih chip di atas atau ketik nama kapster...',
+                      prefixIcon: Icon(Icons.content_cut_rounded),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -653,6 +684,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                             quantity: parsedQty,
                             discountAmount: discRp.clamp(0, lineSub),
                             notes: noteCtrl.text.trim(),
+                            stylistName: isSalonMode ? stylistCtrl.text.trim() : null,
                           );
                           if (ctx.mounted) Navigator.pop(ctx);
                         },
@@ -1175,10 +1207,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // Contextual Vertical Metadata Bar (Apotek: Resep/Dokter, Bengkel: Nopol/Mekanik, Laundry: Timbangan/Rak)
+                    // Contextual Vertical Metadata Bar (Apotek, Bengkel, Laundry, Salon)
                     if (capabilities.hasPrescriptionWorkflow ||
                         capabilities.hasVehicleWorkOrder ||
-                        capabilities.hasLaundryOrderMetadata) ...[
+                        capabilities.hasLaundryOrderMetadata ||
+                        capabilities.hasSalonStylistWorkflow) ...[
                       _buildVerticalMetadataBar(context, state),
                       const SizedBox(height: 8),
                     ],
@@ -1727,42 +1760,43 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
 
   void _showVerticalMetadataSheet(BuildContext context, PosState state) {
     final caps = state.capabilities;
-    final String title;
-    final String primaryLabel;
-    final String primaryHint;
-    final String secondaryLabel;
-    final String secondaryHint;
-    final IconData icon;
+    final meta = state.verticalMetadata;
 
+    final String title;
+    final IconData icon;
     if (caps.hasPrescriptionWorkflow) {
       title = 'Data Resep & Farmasi (Apotek)';
-      primaryLabel = 'Nomor Resep / RM';
-      primaryHint = 'Contoh: RX-2026-0142';
-      secondaryLabel = 'Nama Dokter / Pasien';
-      secondaryHint = 'Contoh: dr. Andi (Pasien Tn. Budi)';
       icon = Icons.medication_outlined;
     } else if (caps.hasVehicleWorkOrder) {
       title = 'Data Kendaraan & PKB (Bengkel)';
-      primaryLabel = 'Nomor Polisi / Plat';
-      primaryHint = 'Contoh: B 1234 XYZ';
-      secondaryLabel = 'Mekanik & Keluhan / Servis';
-      secondaryHint = 'Contoh: Mekanik Agung • Ganti Oli & Tune Up';
       icon = Icons.build_circle_outlined;
+    } else if (caps.hasSalonStylistWorkflow) {
+      title = 'Penugasan Kapster / Stylist (Salon)';
+      icon = Icons.content_cut_rounded;
     } else {
-      title = 'Detail Order & Rak (Laundry)';
-      primaryLabel = 'Berat (Kg) / Jenis Layanan';
-      primaryHint = 'Contoh: 4.5 Kg • Cuci Setrika Ekspres';
-      secondaryLabel = 'Nomor Rak / Estimasi Selesai';
-      secondaryHint = 'Contoh: Rak B-04 • Selesai Besok 17:00';
+      title = 'Detail Rak & Estimasi Selesai (Laundry)';
       icon = Icons.local_laundry_service_outlined;
     }
 
-    final existing = state.orderNotes ?? '';
-    final parts = existing.split(' • ');
-    final field1Ctrl = TextEditingController(text: parts.isNotEmpty ? parts[0] : '');
-    final field2Ctrl = TextEditingController(
-      text: parts.length > 1 ? parts.sublist(1).join(' • ') : '',
-    );
+    // Workshop controllers
+    final nopolCtrl = TextEditingController(text: (meta['nopol'] ?? '').toString());
+    final vehicleCtrl = TextEditingController(text: (meta['kendaraan'] ?? meta['vehicle_model'] ?? '').toString());
+    final kmCtrl = TextEditingController(text: (meta['kilometer'] ?? meta['km'] ?? '').toString());
+    final mechanicCtrl = TextEditingController(text: (meta['mechanic_name'] ?? '').toString());
+
+    // Pharmacy controllers
+    final doctorCtrl = TextEditingController(text: (meta['doctor_name'] ?? '').toString());
+    final sipCtrl = TextEditingController(text: (meta['doctor_sip'] ?? '').toString());
+    final patientCtrl = TextEditingController(text: (meta['patient_name'] ?? '').toString());
+    final rxNoCtrl = TextEditingController(text: (meta['prescription_number'] ?? '').toString());
+
+    // Laundry controllers
+    final rackCtrl = TextEditingController(text: (meta['rack_number'] ?? '').toString());
+    final estReadyCtrl = TextEditingController(text: (meta['estimated_ready_at'] ?? '').toString());
+
+    // Salon controller
+    final stylistCtrl = TextEditingController(text: (meta['stylist_name'] ?? '').toString());
+    final hasAnyExisting = meta.isNotEmpty || (state.orderNotes?.trim().isNotEmpty ?? false);
 
     showModalBottomSheet(
       context: context,
@@ -1778,69 +1812,171 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
           top: 20,
           bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: AppColors.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: field1Ctrl,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: primaryLabel,
-                hintText: primaryHint,
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: field2Ctrl,
-              decoration: InputDecoration(
-                labelText: secondaryLabel,
-                hintText: secondaryHint,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                if (existing.isNotEmpty)
-                  OutlinedButton(
-                    onPressed: () {
-                      context.read<PosCubit>().setOrderNotes(null);
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Hapus'),
-                  ),
-                if (existing.isNotEmpty) const SizedBox(width: 10),
-                Expanded(
-                  child: SizedBox(
-                    height: 46,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        final p1 = field1Ctrl.text.trim();
-                        final p2 = field2Ctrl.text.trim();
-                        final combined = [p1, p2].where((s) => s.isNotEmpty).join(' • ');
-                        context.read<PosCubit>().setOrderNotes(combined);
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Simpan Info Order'),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (caps.hasVehicleWorkOrder) ...[
+                TextField(
+                  controller: nopolCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nomor Polisi (Plat Motor / Mobil) *',
+                    hintText: 'Contoh: B 1234 XYZ',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: vehicleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Merk / Tipe Kendaraan *',
+                    hintText: 'Contoh: Honda PCX 160 / Toyota Avanza',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: kmCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Kilometer (KM) Kendaraan',
+                    hintText: 'Contoh: 24500',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: mechanicCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Mekanik & Keluhan (Opsional)',
+                    hintText: 'Contoh: Mekanik Agung • Ganti Oli & Tune Up',
+                  ),
+                ),
+              ] else if (caps.hasPrescriptionWorkflow) ...[
+                TextField(
+                  controller: doctorCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Dokter Penulis Resep *',
+                    hintText: 'Contoh: dr. Andi Wijaya, Sp.PD',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: sipCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nomor SIP Dokter *',
+                    hintText: 'Contoh: 503/0142/SIP.D/2026',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: patientCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Pasien *',
+                    hintText: 'Contoh: Tn. Budi Santoso',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: rxNoCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nomor Resep / RM (Opsional)',
+                    hintText: 'Contoh: RX-2026-0142',
+                  ),
+                ),
+              ] else if (caps.hasSalonStylistWorkflow) ...[
+                TextField(
+                  controller: stylistCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Kapster / Stylist / Terapis',
+                    hintText: 'Contoh: Rina (Senior Stylist)',
+                  ),
+                ),
+              ] else ...[
+                TextField(
+                  controller: rackCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nomor Rak Penyimpanan Cucian *',
+                    hintText: 'Contoh: Rak B-04',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: estReadyCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Estimasi Selesai Cuci (Tanggal & Jam) *',
+                    hintText: 'Contoh: 17 Nov 2026 • 17:00 WIB',
+                  ),
                 ),
               ],
-            ),
-          ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  if (hasAnyExisting)
+                    OutlinedButton(
+                      onPressed: () {
+                        context.read<PosCubit>().setVerticalMetadata({});
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Hapus'),
+                    ),
+                  if (hasAnyExisting) const SizedBox(width: 10),
+                  Expanded(
+                    child: SizedBox(
+                      height: 46,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final cubit = context.read<PosCubit>();
+                          if (caps.hasVehicleWorkOrder) {
+                            cubit.setVerticalMetadata({
+                              'nopol': nopolCtrl.text.trim(),
+                              'kendaraan': vehicleCtrl.text.trim(),
+                              'kilometer': kmCtrl.text.trim(),
+                              'mechanic_name': mechanicCtrl.text.trim(),
+                            });
+                          } else if (caps.hasPrescriptionWorkflow) {
+                            cubit.setVerticalMetadata({
+                              'doctor_name': doctorCtrl.text.trim(),
+                              'doctor_sip': sipCtrl.text.trim(),
+                              'patient_name': patientCtrl.text.trim(),
+                              'prescription_number': rxNoCtrl.text.trim(),
+                            });
+                          } else if (caps.hasSalonStylistWorkflow) {
+                            cubit.setVerticalMetadata({
+                              'stylist_name': stylistCtrl.text.trim(),
+                            });
+                          } else {
+                            cubit.setVerticalMetadata({
+                              'rack_number': rackCtrl.text.trim(),
+                              'estimated_ready_at': estReadyCtrl.text.trim(),
+                            });
+                          }
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('Simpan Info Order'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1853,13 +1989,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     final String emptyLabel;
     if (caps.hasPrescriptionWorkflow) {
       icon = Icons.medication_outlined;
-      emptyLabel = 'Tambah No. Resep & Nama Dokter (Apotek)';
+      emptyLabel = 'Input Dokter, No. SIP & Pasien (Resep Apotek)';
     } else if (caps.hasVehicleWorkOrder) {
       icon = Icons.directions_car_outlined;
-      emptyLabel = 'Input No. Polisi Kendaraan & Mekanik (PKB)';
+      emptyLabel = 'Input No. Polisi, Kendaraan & KM (Bengkel)';
+    } else if (caps.hasSalonStylistWorkflow) {
+      icon = Icons.content_cut_rounded;
+      emptyLabel = 'Pilih Kapster / Stylist (Tap item utk per-layanan)';
     } else {
       icon = Icons.local_laundry_service_outlined;
-      emptyLabel = 'Input Berat Cucian (Kg) & Nomor Rak (Laundry)';
+      emptyLabel = 'Input Nomor Rak & Estimasi Selesai (Laundry)';
     }
 
     return InkWell(
@@ -2357,6 +2496,8 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                         Text(
                                           '${IdrCurrencyFormatter.format(item.unitPrice)} × ${IdrCurrencyFormatter.formatQty(item.quantity)} ${item.effectiveUnitCode}'
                                           '${item.discountAmount > 0 ? ' • Disc -${IdrCurrencyFormatter.format(item.discountAmount)}' : ''}'
+                                          '${item.stylistName != null && item.stylistName!.isNotEmpty ? ' • Kapster: ${item.stylistName}' : ''}'
+                                          '${(item.batch ?? item.product.fefoBatch) != null ? ' • Batch: ${(item.batch ?? item.product.fefoBatch)!.batchNumber}' : ''}'
                                           '${item.notes != null && item.notes!.isNotEmpty ? ' • ${item.notes}' : ''}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,

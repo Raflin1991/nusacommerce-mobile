@@ -25,6 +25,12 @@ class BluetoothPrinterDevice {
 class PrinterService {
   static const String _keyMac = 'nusa_paired_printer_mac_v4';
   static const String _keyName = 'nusa_paired_printer_v4';
+  static const String _keyKasirMac = 'nusa_printer_kasir_mac_v4';
+  static const String _keyKasirName = 'nusa_printer_kasir_name_v4';
+  static const String _keyDapurMac = 'nusa_printer_dapur_mac_v4';
+  static const String _keyDapurName = 'nusa_printer_dapur_name_v4';
+  static const String _keyBarMac = 'nusa_printer_bar_mac_v4';
+  static const String _keyBarName = 'nusa_printer_bar_name_v4';
   static const String _keyPaperWidth = 'nusa_printer_paper_width_v4';
   static const String _keyAutoCut = 'nusa_printer_auto_cut_v4';
   static const String _keyAutoDrawer = 'nusa_printer_auto_drawer_v4';
@@ -34,6 +40,12 @@ class PrinterService {
   BluetoothPrinterDevice? connectedPrinter;
   String? savedMacAddress;
   String? savedPrinterName;
+  String? printerKasirMac;
+  String? printerKasirName;
+  String? printerDapurMac;
+  String? printerDapurName;
+  String? printerBarMac;
+  String? printerBarName;
   String paperWidth = '58mm';
   bool autoCutPaper = true;
   bool autoOpenCashDrawer = true;
@@ -46,6 +58,12 @@ class PrinterService {
     _prefs = prefs;
     savedMacAddress = prefs.getString(_keyMac);
     savedPrinterName = prefs.getString(_keyName);
+    printerKasirMac = prefs.getString(_keyKasirMac) ?? savedMacAddress;
+    printerKasirName = prefs.getString(_keyKasirName) ?? savedPrinterName;
+    printerDapurMac = prefs.getString(_keyDapurMac);
+    printerDapurName = prefs.getString(_keyDapurName);
+    printerBarMac = prefs.getString(_keyBarMac);
+    printerBarName = prefs.getString(_keyBarName);
     paperWidth = prefs.getString(_keyPaperWidth) ?? '58mm';
     autoCutPaper = prefs.getBool(_keyAutoCut) ?? true;
     autoOpenCashDrawer = prefs.getBool(_keyAutoDrawer) ?? true;
@@ -245,6 +263,207 @@ class PrinterService {
     return await printBytes(bytes);
   }
 
+  /// Phase 3.1: Assign a Bluetooth thermal printer device to a specific station role
+  /// (`'kasir'` = customer receipt, `'dapur'` = kitchen KOT food, `'bar'` = beverage ticket).
+  Future<void> assignPrinterRole(String role, BluetoothPrinterDevice device) async {
+    final normalized = role.trim().toLowerCase();
+    if (normalized == 'dapur') {
+      printerDapurMac = device.macAddress;
+      printerDapurName = device.name;
+      await _prefs?.setString(_keyDapurMac, device.macAddress);
+      await _prefs?.setString(_keyDapurName, device.name);
+    } else if (normalized == 'bar') {
+      printerBarMac = device.macAddress;
+      printerBarName = device.name;
+      await _prefs?.setString(_keyBarMac, device.macAddress);
+      await _prefs?.setString(_keyBarName, device.name);
+    } else {
+      printerKasirMac = device.macAddress;
+      printerKasirName = device.name;
+      savedMacAddress = device.macAddress;
+      savedPrinterName = device.name;
+      connectedPrinter = device;
+      await _prefs?.setString(_keyKasirMac, device.macAddress);
+      await _prefs?.setString(_keyKasirName, device.name);
+      await _prefs?.setString(_keyMac, device.macAddress);
+      await _prefs?.setString(_keyName, device.name);
+    }
+  }
+
+  Future<void> clearPrinterRole(String role) async {
+    final normalized = role.trim().toLowerCase();
+    if (normalized == 'dapur') {
+      printerDapurMac = null;
+      printerDapurName = null;
+      await _prefs?.remove(_keyDapurMac);
+      await _prefs?.remove(_keyDapurName);
+    } else if (normalized == 'bar') {
+      printerBarMac = null;
+      printerBarName = null;
+      await _prefs?.remove(_keyBarMac);
+      await _prefs?.remove(_keyBarName);
+    } else {
+      printerKasirMac = null;
+      printerKasirName = null;
+      await _prefs?.remove(_keyKasirMac);
+      await _prefs?.remove(_keyKasirName);
+    }
+  }
+
+  /// Print raw receipt/ticket text directly to the MAC address mapped to `role`.
+  Future<bool> printToRole(
+    String role,
+    String text, {
+    bool openCashDrawer = false,
+  }) async {
+    final normalized = role.trim().toLowerCase();
+    final targetMac = normalized == 'dapur'
+        ? printerDapurMac
+        : normalized == 'bar'
+            ? printerBarMac
+            : (printerKasirMac ?? savedMacAddress);
+
+    if (kIsWeb || targetMac == null || targetMac.trim().isEmpty) {
+      return false;
+    }
+
+    final bytes = buildEscPosBytesFromText(
+      text,
+      cutPaper: autoCutPaper,
+      openCashDrawer: normalized == 'kasir' ? openCashDrawer : false,
+    );
+
+    try {
+      final ok = await PrintBluetoothThermal.connect(macPrinterAddress: targetMac);
+      if (!ok) return false;
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Phase 3.1: Multi-printer ESC/POS routing for F&B & Retail.
+  /// Routes drink items to Bar printer (`printerBarMac`), food items to Kitchen KOT printer (`printerDapurMac`),
+  /// and customer receipt to Cashier printer (`printerKasirMac`).
+  Future<Map<String, bool>> routeOrderTicketsAndReceipt({
+    required Map<String, dynamic> sale,
+    required Map<String, dynamic> store,
+    bool openCashDrawer = false,
+    bool printReceipt = true,
+  }) async {
+    final results = <String, bool>{
+      'kasir': false,
+      'dapur': false,
+      'bar': false,
+    };
+
+    final items = (sale['items'] as List<dynamic>? ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    bool isDrinkItem(Map<String, dynamic> item) {
+      final cat = (item['category_name'] ?? '').toString().toLowerCase();
+      final name = (item['product_name'] ?? '').toString().toLowerCase();
+      const drinkKeywords = [
+        'minuman',
+        'beverage',
+        'drink',
+        'kopi',
+        'coffee',
+        'teh',
+        'tea',
+        'jus',
+        'juice',
+        'latte',
+        'matcha',
+        'boba',
+        'bar',
+        'es ',
+        'ice ',
+      ];
+      return drinkKeywords.any((kw) => cat.contains(kw) || name.contains(kw));
+    }
+
+    final barItems = items.where(isDrinkItem).toList();
+    final kitchenItems = items.where((item) => !isDrinkItem(item)).toList();
+
+    final tableName = (sale['table_name'] ?? 'Order Counter').toString();
+    final sectionName = (sale['order_type'] ?? 'POS').toString();
+    final pax = (sale['pax'] as num?)?.toInt() ?? 1;
+
+    if (barItems.isNotEmpty && printerBarMac != null && printerBarMac!.isNotEmpty) {
+      final barText = formatKitchenOrderTicket(
+        tableName: '$tableName [BAR]',
+        sectionName: sectionName,
+        pax: pax,
+        items: barItems,
+      );
+      results['bar'] = await printToRole('bar', barText);
+    }
+
+    if (kitchenItems.isNotEmpty && printerDapurMac != null && printerDapurMac!.isNotEmpty) {
+      final kitchenText = formatKitchenOrderTicket(
+        tableName: '$tableName [DAPUR]',
+        sectionName: sectionName,
+        pax: pax,
+        items: kitchenItems,
+      );
+      results['dapur'] = await printToRole('dapur', kitchenText);
+    }
+
+    if (printReceipt) {
+      final receiptText = formatThermalReceiptText(
+        storeProfile: store,
+        sale: sale,
+      );
+      results['kasir'] = await printToRole(
+        'kasir',
+        receiptText,
+        openCashDrawer: openCashDrawer,
+      );
+    }
+
+    return results;
+  }
+
+  /// Phase 2.2: Strict anti-fraud cash drawer kick guard.
+  /// Returns `true` ONLY IF there is a positive Cash/Tunai payment component and it is NOT a reprint or 0-DP kasbon.
+  static bool shouldKickCashDrawer({
+    List<dynamic>? payments,
+    List<dynamic>? paymentMethods,
+    bool isKasbonZeroDp = false,
+    bool isReprint = false,
+  }) {
+    if (isReprint || isKasbonZeroDp) return false;
+
+    bool isCashLabel(String raw) {
+      final lower = raw.trim().toLowerCase();
+      return lower == 'cash' ||
+          lower.contains('tunai') ||
+          lower.contains('uang cash');
+    }
+
+    if (payments != null && payments.isNotEmpty) {
+      for (final raw in payments) {
+        if (raw is Map) {
+          final amount = (raw['amount'] as num?)?.toDouble() ?? 0;
+          final methodLabel = (raw['method'] ?? raw['method_code'] ?? raw['name'] ?? '').toString();
+          if (amount > 0 && isCashLabel(methodLabel)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    if (paymentMethods != null && paymentMethods.isNotEmpty) {
+      return paymentMethods.any((m) => isCashLabel(m.toString()));
+    }
+
+    return false;
+  }
+
   /// Send RJ-11 Pin 2 Cash Drawer Kick Pulse `[0x1B, 0x70, 0x00, 0x19, 0xFA]`.
   Future<bool> kickCashDrawer() async {
     return await printBytes(buildCashDrawerKickBytes());
@@ -315,11 +534,30 @@ class PrinterService {
     ].join('\n');
   }
 
+  /// Alias for `formatThermalReceiptText` supporting reprint watermark & multi-vertical metadata.
+  String formatReceiptText({
+    required Map<String, dynamic> storeProfile,
+    required Map<String, dynamic> sale,
+    String? paperWidthOverride,
+    bool isReprint = false,
+    int reprintCount = 1,
+  }) {
+    return formatThermalReceiptText(
+      storeProfile: storeProfile,
+      sale: sale,
+      paperWidthOverride: paperWidthOverride,
+      isReprint: isReprint,
+      reprintCount: reprintCount,
+    );
+  }
+
   /// Build formatted text & ESC/POS byte stream for a Customer Sale Receipt
   String formatThermalReceiptText({
     required Map<String, dynamic> storeProfile,
     required Map<String, dynamic> sale,
     String? paperWidthOverride,
+    bool isReprint = false,
+    int reprintCount = 1,
   }) {
     final activeWidth = paperWidthOverride ?? paperWidth;
     final width = activeWidth == '80mm' ? 46 : 32;
@@ -334,10 +572,29 @@ class PrinterService {
     final number = (sale['number'] ?? '#INV-0001').toString();
     final dt = (sale['sale_datetime'] ?? 'Hari Ini').toString();
     final customerName = (sale['customer'] is Map ? sale['customer']['name'] : 'Pelanggan Umum').toString();
+    final cashierName = (sale['cashier_name'] ?? sale['cashier'] ?? 'Kasir POS').toString();
     final items = (sale['items'] as List<dynamic>? ?? []);
     final methods = (sale['payment_methods'] as List<dynamic>? ?? ['Tunai']).join(', ');
 
+    final effectiveReprint = isReprint || sale['is_reprint'] == true;
+    final effectiveReprintCount =
+        (sale['reprint_count'] as num?)?.toInt() ?? reprintCount;
+
     final sb = StringBuffer();
+    if (effectiveReprint) {
+      final now = DateTime.now();
+      final dd = now.day.toString().padLeft(2, '0');
+      final mm = now.month.toString().padLeft(2, '0');
+      final yyyy = now.year.toString();
+      final hh = now.hour.toString().padLeft(2, '0');
+      final min = now.minute.toString().padLeft(2, '0');
+      sb.writeln(doubleDivider);
+      sb.writeln(_center('*** SALINAN / REPRINT KE-$effectiveReprintCount ***', width));
+      sb.writeln('Tgl/Jam Cetak: $dd-$mm-$yyyy $hh:$min');
+      sb.writeln('Kasir: $cashierName');
+      sb.writeln(doubleDivider);
+    }
+
     sb.writeln(_center(storeName, width));
     sb.writeln(_center(storeAddress, width));
     sb.writeln(_center('Telp: $storePhone', width));
@@ -347,6 +604,39 @@ class PrinterService {
     if (sale['notes'] != null && sale['notes'].toString().trim().isNotEmpty) {
       sb.writeln('Catatan: ${sale['notes'].toString().trim()}');
     }
+
+    // Phase 4: Vertical-specific metadata (Workshop, Pharmacy, Laundry, Salon)
+    final vMeta = sale['vertical_metadata'] is Map
+        ? Map<String, dynamic>.from(sale['vertical_metadata'] as Map)
+        : const <String, dynamic>{};
+    if (vMeta.isNotEmpty) {
+      final nopol = (vMeta['nopol'] ?? vMeta['plate_number'] ?? '').toString().trim();
+      final kendaraan = (vMeta['vehicle_model'] ?? vMeta['kendaraan'] ?? '').toString().trim();
+      final km = (vMeta['kilometer'] ?? vMeta['km'] ?? '').toString().trim();
+      final mekanik = (vMeta['mechanic_name'] ?? vMeta['mekanik'] ?? '').toString().trim();
+      if (nopol.isNotEmpty) sb.writeln('No. Polisi: $nopol');
+      if (kendaraan.isNotEmpty) sb.writeln('Kendaraan: $kendaraan');
+      if (km.isNotEmpty) sb.writeln('Kilometer (KM): $km');
+      if (mekanik.isNotEmpty) sb.writeln('Mekanik: $mekanik');
+
+      final doctor = (vMeta['doctor_name'] ?? '').toString().trim();
+      final sip = (vMeta['doctor_sip'] ?? '').toString().trim();
+      final patient = (vMeta['patient_name'] ?? '').toString().trim();
+      final rxNo = (vMeta['prescription_number'] ?? '').toString().trim();
+      if (doctor.isNotEmpty) sb.writeln('Dokter: $doctor');
+      if (sip.isNotEmpty) sb.writeln('No. SIP: $sip');
+      if (patient.isNotEmpty) sb.writeln('Pasien: $patient');
+      if (rxNo.isNotEmpty) sb.writeln('No. Resep: $rxNo');
+
+      final rack = (vMeta['rack_number'] ?? '').toString().trim();
+      final estReady = (vMeta['estimated_ready_at'] ?? '').toString().trim();
+      if (rack.isNotEmpty) sb.writeln('No. Rak: $rack');
+      if (estReady.isNotEmpty) sb.writeln('Estimasi Selesai: $estReady');
+
+      final leadStylist = (vMeta['stylist_name'] ?? '').toString().trim();
+      if (leadStylist.isNotEmpty) sb.writeln('Kapster/Terapis: $leadStylist');
+    }
+
     sb.writeln(divider);
 
     for (final rawItem in items) {
@@ -366,6 +656,18 @@ class PrinterService {
           width,
         ),
       );
+      final batchNo = (item['batch_number'] ?? '').toString().trim();
+      final expiryDate = (item['expiry_date'] ?? '').toString().trim();
+      if (batchNo.isNotEmpty || expiryDate.isNotEmpty) {
+        final batchLabel = batchNo.isNotEmpty ? 'Batch: $batchNo' : '';
+        final edLabel = expiryDate.isNotEmpty ? 'ED: $expiryDate' : '';
+        final sep = (batchLabel.isNotEmpty && edLabel.isNotEmpty) ? ' | ' : '';
+        sb.writeln('  $batchLabel$sep$edLabel');
+      }
+      final stylist = (item['stylist_name'] ?? '').toString().trim();
+      if (stylist.isNotEmpty) {
+        sb.writeln('  Kapster/Terapis: $stylist');
+      }
       if (item['notes'] != null && item['notes'].toString().isNotEmpty) {
         sb.writeln('  *Catatan: ${item['notes']}');
       }

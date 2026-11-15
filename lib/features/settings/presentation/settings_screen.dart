@@ -187,6 +187,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool isScanning = true;
     bool hasInitializedScan = false;
     bool isConnecting = false;
+    String selectedPrinterRole = 'kasir';
 
     showModalBottomSheet(
       context: context,
@@ -307,6 +308,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
+                  const Text(
+                    'Routing Multi-Printer (Pilih Stasiun Target)',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      NusaPillFilter(
+                        label: 'Kasir (Struk)',
+                        selected: selectedPrinterRole == 'kasir',
+                        onTap: () => setModalState(() => selectedPrinterRole = 'kasir'),
+                      ),
+                      NusaPillFilter(
+                        label: 'Dapur (KOT Makanan)',
+                        selected: selectedPrinterRole == 'dapur',
+                        onTap: () => setModalState(() => selectedPrinterRole = 'dapur'),
+                      ),
+                      NusaPillFilter(
+                        label: 'Bar (Minuman)',
+                        selected: selectedPrinterRole == 'bar',
+                        onTap: () => setModalState(() => selectedPrinterRole = 'bar'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  NusaCard(
+                    padding: const EdgeInsets.all(10),
+                    backgroundColor: AppColors.background,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '• Kasir (Struk): ${_printerService.printerKasirName ?? 'Belum diatur'} (${_printerService.printerKasirMac ?? '-'})',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '• Dapur (KOT): ${_printerService.printerDapurName ?? 'Belum diatur'} (${_printerService.printerDapurMac ?? '-'})',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '• Bar (Minuman): ${_printerService.printerBarName ?? 'Belum diatur'} (${_printerService.printerBarMac ?? '-'})',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -366,7 +418,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     )
                   else
                     ..._printerService.discoveredDevices.map((dev) {
-                      final isConnected = _printerService.savedMacAddress == dev.macAddress;
+                      final activeMacForRole = selectedPrinterRole == 'dapur'
+                          ? _printerService.printerDapurMac
+                          : selectedPrinterRole == 'bar'
+                              ? _printerService.printerBarMac
+                              : (_printerService.printerKasirMac ?? _printerService.savedMacAddress);
+                      final isConnected = activeMacForRole == dev.macAddress;
+                      final roleLabel = selectedPrinterRole == 'dapur'
+                          ? 'Dapur (KOT Makanan)'
+                          : selectedPrinterRole == 'bar'
+                              ? 'Bar (Minuman)'
+                              : 'Kasir (Struk)';
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: CircleAvatar(
@@ -390,37 +452,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 : () async {
                                     setModalState(() => isConnecting = true);
                                     if (isConnected) {
-                                      await _printerService.disconnectDevice(forgetSavedMac: true);
+                                      if (selectedPrinterRole == 'kasir') {
+                                        await _printerService.disconnectDevice(forgetSavedMac: true);
+                                      }
+                                      await _printerService.clearPrinterRole(selectedPrinterRole);
                                       if (ctx.mounted) setModalState(() => isConnecting = false);
                                       if (mounted) setState(() {});
                                       if (context.mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Koneksi printer ${dev.name} diputus.')),
+                                          SnackBar(content: Text('Printer ${dev.name} dilepas dari $roleLabel.')),
                                         );
                                       }
                                     } else {
-                                      final ok = await _printerService.connectToDevice(
-                                        dev.macAddress,
-                                        deviceName: dev.name,
-                                        paperSize: dev.paperSize,
-                                      );
+                                      await _printerService.assignPrinterRole(selectedPrinterRole, dev);
+                                      bool ok = true;
+                                      if (selectedPrinterRole == 'kasir') {
+                                        ok = await _printerService.connectToDevice(
+                                          dev.macAddress,
+                                          deviceName: dev.name,
+                                          paperSize: dev.paperSize,
+                                        );
+                                      }
                                       if (ctx.mounted) setModalState(() => isConnecting = false);
                                       if (mounted) setState(() {});
                                       if (context.mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
-                                            backgroundColor: ok ? AppColors.successDark : AppColors.danger,
+                                            backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
                                             content: Text(
                                               ok
-                                                  ? 'Terhubung & disimpan: ${dev.name} (${dev.macAddress})'
-                                                  : 'Gagal menyambung ke ${dev.name}. Pastikan printer aktif.',
+                                                  ? '${dev.name} ditetapkan sebagai Printer $roleLabel (${dev.macAddress})'
+                                                  : 'Disimpan sebagai Printer $roleLabel, namun koneksi Bluetooth gagal. Pastikan printer menyala.',
                                             ),
                                           ),
                                         );
                                       }
                                     }
                                   },
-                            child: Text(isConnected ? 'Terhubung' : 'Hubungkan'),
+                            child: Text(isConnected ? 'Terpasang' : 'Set $selectedPrinterRole'),
                           ),
                         ),
                       );
@@ -525,6 +594,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Icons.build_circle_outlined;
       case BusinessVertical.laundry:
         return Icons.local_laundry_service_outlined;
+      case BusinessVertical.salon:
+        return Icons.content_cut_rounded;
     }
   }
 

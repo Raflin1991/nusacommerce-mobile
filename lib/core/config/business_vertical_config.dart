@@ -8,6 +8,7 @@ enum BusinessVertical {
   pharmacy,
   workshop,
   laundry,
+  salon,
 }
 
 extension BusinessVerticalX on BusinessVertical {
@@ -23,6 +24,8 @@ extension BusinessVerticalX on BusinessVertical {
         return 'workshop';
       case BusinessVertical.laundry:
         return 'laundry';
+      case BusinessVertical.salon:
+        return 'salon';
     }
   }
 
@@ -38,6 +41,8 @@ extension BusinessVerticalX on BusinessVertical {
         return 'Bengkel & Servis Otomotif';
       case BusinessVertical.laundry:
         return 'Laundry Kiloan & Satuan';
+      case BusinessVertical.salon:
+        return 'Salon, Barbershop & Spa';
     }
   }
 
@@ -53,6 +58,8 @@ extension BusinessVerticalX on BusinessVertical {
         return 'PKB/SPK nomor polisi kendaraan, jasa montir & suku cadang';
       case BusinessVertical.laundry:
         return 'Timbangan cucian kiloan, satuan & pelacakan status rak';
+      case BusinessVertical.salon:
+        return 'Penjadwalan layanan kecantikan & penugasan kapster/stylist per item';
     }
   }
 
@@ -68,6 +75,7 @@ class VerticalCapabilities {
   final bool hasPrescriptionWorkflow; // Alur Resep Obat (Apotek)
   final bool hasVehicleWorkOrder; // PKB / SPK Kendaraan & Jasa (Bengkel)
   final bool hasLaundryOrderMetadata; // Timbangan Kiloan & Rak Cucian (Laundry)
+  final bool hasSalonStylistWorkflow; // Pemilihan Kapster / Stylist / Terapis per Layanan (Salon)
   final String posDisplayName; // "Kasir POS Retail", "Kasir Resto & Kafe", dst.
   final String posSubtitle;
 
@@ -80,6 +88,7 @@ class VerticalCapabilities {
     required this.hasPrescriptionWorkflow,
     required this.hasVehicleWorkOrder,
     this.hasLaundryOrderMetadata = false,
+    this.hasSalonStylistWorkflow = false,
     required this.posDisplayName,
     required this.posSubtitle,
   });
@@ -149,6 +158,19 @@ class VerticalConfig {
     posSubtitle: 'Order kiloan, satuan & status rak cucian',
   );
 
+  static const VerticalCapabilities _salonCapabilities = VerticalCapabilities(
+    hasTableManagement: false,
+    hasKitchenOrderTicket: false,
+    hasDineInTakeawayOrderType: false,
+    hasBarcodeScannerFastMode: false,
+    hasWholesaleMultiUnit: false,
+    hasPrescriptionWorkflow: false,
+    hasVehicleWorkOrder: false,
+    hasSalonStylistWorkflow: true,
+    posDisplayName: 'Kasir POS Salon & Spa',
+    posSubtitle: 'Layanan treatment & assignment kapster/stylist per item',
+  );
+
   static BusinessVertical parse(String? raw) {
     final v = (raw ?? '').trim().toLowerCase();
     if (v == 'restaurant' ||
@@ -168,6 +190,9 @@ class VerticalConfig {
     if (v == 'laundry') {
       return BusinessVertical.laundry;
     }
+    if (v == 'salon' || v == 'barber' || v == 'barbershop' || v == 'spa') {
+      return BusinessVertical.salon;
+    }
     return BusinessVertical.retail;
   }
 
@@ -183,6 +208,8 @@ class VerticalConfig {
         return _workshopCapabilities;
       case BusinessVertical.laundry:
         return _laundryCapabilities;
+      case BusinessVertical.salon:
+        return _salonCapabilities;
     }
   }
 }

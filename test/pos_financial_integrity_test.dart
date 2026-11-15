@@ -1,8 +1,18 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nusacommerce_mobile/core/config/business_vertical_config.dart';
+import 'package:nusacommerce_mobile/core/database/offline_database.dart';
+import 'package:nusacommerce_mobile/core/hardware/barcode_service.dart';
+import 'package:nusacommerce_mobile/core/hardware/printer_service.dart';
+import 'package:nusacommerce_mobile/core/network/api_client.dart';
 import 'package:nusacommerce_mobile/features/auth/models/auth_session_model.dart';
+import 'package:nusacommerce_mobile/features/pos/bloc/pos_cubit.dart';
+import 'package:nusacommerce_mobile/features/pos/models/pos_models.dart';
 import 'package:nusacommerce_mobile/features/pos/utils/pos_financial_calculator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('Kasbon DP Parsial & Plafon Kredit Guard', () {
     test('calculates balanceDue accurately with partial DP within credit limit', () {
       final result = PosFinancialCalculator.computeKasbonDp(
@@ -216,6 +226,253 @@ void main() {
       expect(restored.tier, 'starter');
       expect(restored.isModuleGated('online_store'), isTrue);
       expect(restored.hasModule('crm'), isTrue);
+    });
+  });
+
+  group('Phase 2-4 Enterprise Hardening, Hardware Routing & Multi-Vertical Tests', () {
+    test('test_reprint_receipt_watermark_present', () {
+      final printer = PrinterService();
+      final store = {
+        'name': 'Toko Nusa Utama',
+        'address': 'Jl. Jend. Sudirman No. 1',
+        'phone': '021-5550199',
+      };
+      final sale = {
+        'number': '#INV-REPRINT-007',
+        'sale_datetime': '15-11-2026 14:20',
+        'cashier_name': 'Siti Kasir',
+        'customer': {'name': 'Budi'},
+        'items': [
+          {
+            'product_name': 'Kopi Susu Gula Aren',
+            'quantity': 2,
+            'unit_code': 'cup',
+            'unit_price': 20000,
+            'line_total': 40000,
+          },
+        ],
+        'subtotal': 40000,
+        'grand_total': 40000,
+        'paid_total': 50000,
+        'change_returned': 10000,
+        'payment_methods': ['Tunai'],
+      };
+
+      final originalText = printer.formatReceiptText(
+        storeProfile: store,
+        sale: sale,
+        isReprint: false,
+      );
+      expect(originalText.contains('SALINAN / REPRINT'), isFalse);
+
+      final reprintText = printer.formatReceiptText(
+        storeProfile: store,
+        sale: sale,
+        isReprint: true,
+        reprintCount: 2,
+      );
+      expect(reprintText.contains('*** SALINAN / REPRINT KE-2 ***'), isTrue);
+      expect(reprintText.contains('Tgl/Jam Cetak:'), isTrue);
+      expect(reprintText.contains('Kasir: Siti Kasir'), isTrue);
+    });
+
+    test('test_tiered_volume_discount_recalculation', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final cubit = PosCubit(
+        apiClient: ApiClient(
+          secureStorage: const FlutterSecureStorage(),
+          prefs: prefs,
+        ),
+        offlineDb: OfflineDatabase(prefs),
+      );
+
+      const retailProduct = ProductModel(
+        id: 501,
+        name: 'Air Mineral 600ml',
+        sku: 'AM-600',
+        barcode: '8991234567890',
+        sellingPrice: 10000,
+        stock: 100,
+        volumeTiers: [
+          ProductVolumeTier(minQuantity: 5, tierPrice: 9200),
+          ProductVolumeTier(minQuantity: 10, tierPrice: 8500),
+        ],
+      );
+
+      cubit.addToCart(retailProduct, quantity: 2);
+      expect(cubit.state.cart.single.unitPrice, 10000);
+      expect(cubit.state.cart.single.lineTotal, 20000);
+
+      // Crossing qty >= 10 must automatically trigger tierPrice 8.500
+      cubit.changeCartItemQuantity(0, 10);
+      expect(cubit.state.cart.single.unitPrice, 8500);
+      expect(cubit.state.cart.single.lineTotal, 85000);
+
+      // Dropping back to qty 5 triggers tierPrice 9.200; dropping to 3 reverts to base price 10.000
+      cubit.updateCartItemQuantity(0, 5);
+      expect(cubit.state.cart.single.unitPrice, 9200);
+      expect(cubit.state.cart.single.lineTotal, 46000);
+
+      cubit.updateCartItemQuantity(0, 3);
+      expect(cubit.state.cart.single.unitPrice, 10000);
+      expect(cubit.state.cart.single.lineTotal, 30000);
+
+      await cubit.close();
+    });
+
+    test('test_cash_drawer_kick_condition_cash_only', () {
+      // 100% Non-Cash QRIS -> MUST NOT kick cash drawer
+      expect(
+        PrinterService.shouldKickCashDrawer(
+          payments: const [
+            {'method': 'QRIS Dinamis', 'amount': 150000},
+          ],
+          paymentMethods: const ['QRIS Dinamis'],
+        ),
+        isFalse,
+      );
+
+      // 100% Card EDC / Transfer -> MUST NOT kick cash drawer
+      expect(
+        PrinterService.shouldKickCashDrawer(
+          payments: const [
+            {'method': 'Transfer BCA', 'amount': 75000},
+            {'method': 'EDC Debit', 'amount': 75000},
+          ],
+          paymentMethods: const ['Transfer BCA', 'EDC Debit'],
+        ),
+        isFalse,
+      );
+
+      // Kasbon 0 DP -> MUST NOT kick cash drawer
+      expect(
+        PrinterService.shouldKickCashDrawer(
+          payments: const [],
+          paymentMethods: const ['Tunai'],
+          isKasbonZeroDp: true,
+        ),
+        isFalse,
+      );
+
+      // Reprint even of Cash sale -> MUST NOT kick cash drawer
+      expect(
+        PrinterService.shouldKickCashDrawer(
+          payments: const [
+            {'method': 'Tunai', 'amount': 100000},
+          ],
+          paymentMethods: const ['Tunai'],
+          isReprint: true,
+        ),
+        isFalse,
+      );
+
+      // Positive Cash component in single or split tender -> MUST kick cash drawer
+      expect(
+        PrinterService.shouldKickCashDrawer(
+          payments: const [
+            {'method': 'QRIS', 'amount': 100000},
+            {'method': 'Tunai', 'amount': 50000},
+          ],
+          paymentMethods: const ['QRIS', 'Tunai'],
+        ),
+        isTrue,
+      );
+    });
+
+    test('test_workshop_and_pharmacy_metadata_preserved', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final cubit = PosCubit(
+        apiClient: ApiClient(
+          secureStorage: const FlutterSecureStorage(),
+          prefs: prefs,
+        ),
+        offlineDb: OfflineDatabase(prefs),
+      );
+      final printer = PrinterService();
+      final store = {'name': 'Nusa Vertical Store', 'address': 'Jakarta', 'phone': '021-999'};
+
+      // 1. Workshop Vertical Metadata
+      await cubit.setBusinessVertical(BusinessVertical.workshop);
+      cubit.setVerticalMetadata({
+        'nopol': 'B 9876 ABC',
+        'kendaraan': 'Honda PCX 160',
+        'kilometer': '24500',
+      });
+      expect(cubit.state.verticalMetadata['nopol'], 'B 9876 ABC');
+      expect(cubit.state.verticalMetadata['kendaraan'], 'Honda PCX 160');
+      expect(cubit.state.verticalMetadata['kilometer'], '24500');
+
+      final workshopReceipt = printer.formatReceiptText(
+        storeProfile: store,
+        sale: {
+          'number': '#WS-001',
+          'vertical_metadata': cubit.state.verticalMetadata,
+          'items': const [
+            {'product_name': 'Ganti Oli MPX2', 'quantity': 1, 'unit_price': 65000, 'line_total': 65000},
+          ],
+          'subtotal': 65000,
+          'grand_total': 65000,
+          'paid_total': 65000,
+        },
+      );
+      expect(workshopReceipt.contains('No. Polisi: B 9876 ABC'), isTrue);
+      expect(workshopReceipt.contains('Kendaraan: Honda PCX 160'), isTrue);
+      expect(workshopReceipt.contains('Kilometer (KM): 24500'), isTrue);
+
+      // 2. Pharmacy Vertical Metadata + FEFO Batch/ED
+      await cubit.setBusinessVertical(BusinessVertical.pharmacy);
+      cubit.setVerticalMetadata({
+        'doctor_name': 'dr. Andi Wijaya',
+        'doctor_sip': '503/SIP/2026',
+        'patient_name': 'Tn. Budi',
+      });
+      expect(cubit.state.verticalMetadata['doctor_name'], 'dr. Andi Wijaya');
+      expect(cubit.state.verticalMetadata['doctor_sip'], '503/SIP/2026');
+      expect(cubit.state.verticalMetadata['patient_name'], 'Tn. Budi');
+
+      final pharmacyReceipt = printer.formatReceiptText(
+        storeProfile: store,
+        sale: {
+          'number': '#RX-001',
+          'vertical_metadata': cubit.state.verticalMetadata,
+          'items': const [
+            {
+              'product_name': 'Amoxicillin 500mg',
+              'quantity': 1,
+              'unit_code': 'strip',
+              'unit_price': 18000,
+              'line_total': 18000,
+              'batch_number': 'BCH-FEFO-22',
+              'expiry_date': '2027-12-31',
+            },
+          ],
+          'subtotal': 18000,
+          'grand_total': 18000,
+          'paid_total': 20000,
+          'change_returned': 2000,
+        },
+      );
+      expect(pharmacyReceipt.contains('Dokter: dr. Andi Wijaya'), isTrue);
+      expect(pharmacyReceipt.contains('No. SIP: 503/SIP/2026'), isTrue);
+      expect(pharmacyReceipt.contains('Pasien: Tn. Budi'), isTrue);
+      expect(pharmacyReceipt.contains('Batch: BCH-FEFO-22 | ED: 2027-12-31'), isTrue);
+
+      // 3. Barcode 350ms Debounce Verification
+      BarcodeService.resetDebounce();
+      final t0 = DateTime(2026, 11, 15, 10, 0, 0, 0);
+      expect(BarcodeService.shouldAcceptScan('8991002003004', now: t0), isTrue);
+      expect(
+        BarcodeService.shouldAcceptScan('8991002003004', now: t0.add(const Duration(milliseconds: 200))),
+        isFalse,
+      );
+      expect(
+        BarcodeService.shouldAcceptScan('8991002003004', now: t0.add(const Duration(milliseconds: 400))),
+        isTrue,
+      );
+
+      await cubit.close();
     });
   });
 }

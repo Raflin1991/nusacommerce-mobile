@@ -43,6 +43,7 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
   };
 
   void _updateDenom(int denom, int delta) {
+    if (_isBlindCountVerified) return;
     setState(() {
       final current = _denomCounts[denom] ?? 0;
       _denomCounts[denom] = (current + delta).clamp(0, 9999);
@@ -55,6 +56,7 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
   }
 
   void _resetDenoms() {
+    if (_isBlindCountVerified) return;
     setState(() {
       for (final key in _denomCounts.keys) {
         _denomCounts[key] = 0;
@@ -461,16 +463,19 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
 
   Future<void> _closeShiftAndSendZReport() async {
     if (!_hasOpenShift) return;
-    if (_countedCashCtrl.text.trim().isEmpty) {
+    if (_countedCashCtrl.text.trim().isEmpty || !_isBlindCountVerified) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: AppColors.danger,
-          content: Text('Masukkan hasil hitung uang fisik laci terlebih dahulu (Blind Count).'),
+          content: Text('Masukkan uang fisik dan tekan "Verifikasi & Kunci Kasir" terlebih dahulu (Blind Count).'),
         ),
       );
       return;
     }
     final counted = IdrCurrencyFormatter.parse(_countedCashCtrl.text);
+    final diff = counted - _expectedCash;
+    final cashShortage = diff < 0 ? diff.abs() : 0.0;
+    final cashOverage = diff > 0 ? diff : 0.0;
     final session = context.read<AuthCubit>().state.session;
 
     setState(() => _submitting = true);
@@ -480,6 +485,10 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
         data: {
           'shift_id': _shiftId,
           'closing_cash_counted': counted,
+          'expected_cash': _expectedCash,
+          'cash_shortage': cashShortage,
+          'cash_overage': cashOverage,
+          'denomination_counts': _denomCounts.map((k, v) => MapEntry(k.toString(), v)),
         },
       );
 
@@ -684,13 +693,19 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                               const SizedBox(height: 12),
                               TextField(
                                 controller: _countedCashCtrl,
+                                readOnly: _isBlindCountVerified,
                                 keyboardType: TextInputType.number,
                                 onChanged: (_) => setState(() {}),
                                 style: AppTheme.moneyStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                                decoration: const InputDecoration(
-                                  labelText: 'Uang Tunai Fisik Dihitung (Rp)',
+                                decoration: InputDecoration(
+                                  labelText: _isBlindCountVerified
+                                      ? 'Uang Tunai Fisik Terkunci (Rp)'
+                                      : 'Uang Tunai Fisik Dihitung (Rp)',
                                   hintText: 'Contoh: 1250000',
-                                  prefixIcon: Icon(Icons.calculate_outlined, color: AppColors.primary),
+                                  prefixIcon: Icon(
+                                    _isBlindCountVerified ? Icons.lock_rounded : Icons.calculate_outlined,
+                                    color: _isBlindCountVerified ? AppColors.successDark : AppColors.primary,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -706,7 +721,7 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                       onTap: () => setState(() => _showDenomCalculator = !_showDenomCalculator),
                                     ),
                                   ),
-                                  if (_showDenomCalculator) ...[
+                                  if (_showDenomCalculator && !_isBlindCountVerified) ...[
                                     const SizedBox(width: 8),
                                     TextButton(
                                       onPressed: _resetDenoms,
@@ -796,8 +811,8 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                               const SizedBox(height: 12),
                               if (!_isBlindCountVerified)
                                 NusaButton(
-                                  label: 'Hitung & Bandingkan Kas Sistem',
-                                  icon: Icons.visibility_rounded,
+                                  label: 'Verifikasi & Kunci Kasir',
+                                  icon: Icons.lock_outline_rounded,
                                   variant: NusaButtonVariant.outline,
                                   onPressed: _countedCashCtrl.text.trim().isEmpty
                                       ? null
@@ -818,6 +833,14 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
+                                          const Text('Kas Fisik Terkunci:', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                          NusaPriceTag(amount: counted, fontSize: 13.5),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
                                           const Text('Kas Sistem (Expected):', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
                                           NusaPriceTag(amount: _expectedCash, fontSize: 13.5),
                                         ],
@@ -828,8 +851,10 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                         children: [
                                           Text(
                                             variance == 0
-                                                ? 'Selisih Kas (Balance):'
-                                                : (variance > 0 ? 'Selisih Lebih (Over):' : 'Selisih Kurang (Short):'),
+                                                ? 'Status Kas (Balance):'
+                                                : (variance > 0
+                                                    ? 'Selisih Lebih (Cash Overage):'
+                                                    : 'Selisih Kurang (Cash Shortage):'),
                                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                                           ),
                                           NusaPriceTag(
@@ -856,7 +881,7 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                 label: _submitting ? 'Memproses...' : 'Tutup Shift & Kirim Z-Report WA Owner',
                                 icon: Icons.send_rounded,
                                 isLoading: _submitting,
-                                onPressed: _submitting ? null : _closeShiftAndSendZReport,
+                                onPressed: (_submitting || !_isBlindCountVerified) ? null : _closeShiftAndSendZReport,
                               ),
                             ],
                           ),

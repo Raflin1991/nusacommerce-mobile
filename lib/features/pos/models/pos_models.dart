@@ -1,5 +1,38 @@
 import 'package:equatable/equatable.dart';
 
+class ProductVolumeTier extends Equatable {
+  final double minQuantity;
+  final double tierPrice;
+  final String? label;
+
+  const ProductVolumeTier({
+    required this.minQuantity,
+    required this.tierPrice,
+    this.label,
+  });
+
+  factory ProductVolumeTier.fromJson(Map<String, dynamic> json) {
+    return ProductVolumeTier(
+      minQuantity: (json['min_quantity'] as num?)?.toDouble() ??
+          (json['min_qty'] as num?)?.toDouble() ??
+          1.0,
+      tierPrice: (json['tier_price'] as num?)?.toDouble() ??
+          (json['price'] as num?)?.toDouble() ??
+          0.0,
+      label: json['label']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'min_quantity': minQuantity,
+        'tier_price': tierPrice,
+        'label': label,
+      };
+
+  @override
+  List<Object?> get props => [minQuantity, tierPrice, label];
+}
+
 class ProductUnitConversion extends Equatable {
   final String unitCode; // e.g. 'pcs', 'renteng', 'lusin', 'dus'
   final String unitName;
@@ -156,6 +189,7 @@ class ProductModel extends Equatable {
   final List<ProductVariantModel> variants;
   final List<ProductBatchModel> batches;
   final List<ProductUnitConversion> unitConversions;
+  final List<ProductVolumeTier> volumeTiers;
 
   const ProductModel({
     required this.id,
@@ -179,6 +213,7 @@ class ProductModel extends Equatable {
     this.variants = const [],
     this.batches = const [],
     this.unitConversions = const [],
+    this.volumeTiers = const [],
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -205,6 +240,15 @@ class ProductModel extends Equatable {
 
     final batchesList = (json['batches'] as List<dynamic>? ?? [])
         .map((b) => ProductBatchModel.fromJson(Map<String, dynamic>.from(b as Map)))
+        .toList();
+
+    final rawTiers = (json['volume_tiers'] ??
+            json['price_tiers'] ??
+            json['wholesale_tiers'] ??
+            const <dynamic>[]) as List<dynamic>;
+    final volumeTiersList = rawTiers
+        .whereType<Map>()
+        .map((t) => ProductVolumeTier.fromJson(Map<String, dynamic>.from(t)))
         .toList();
 
     final type = (json['type'] ?? 'standard').toString();
@@ -292,6 +336,7 @@ class ProductModel extends Equatable {
       variants: variantsList,
       batches: batchesList,
       unitConversions: unitConversionsList,
+      volumeTiers: volumeTiersList,
     );
   }
 
@@ -317,7 +362,22 @@ class ProductModel extends Equatable {
         'variants': variants.map((v) => v.toJson()).toList(),
         'batches': batches.map((b) => b.toJson()).toList(),
         'unit_conversions': unitConversions.map((u) => u.toJson()).toList(),
+        'volume_tiers': volumeTiers.map((t) => t.toJson()).toList(),
       };
+
+  /// Phase 2.4: Resolve wholesale/tiered unit price based on cart quantity.
+  double resolveUnitPriceForQuantity(double quantity, {double? basePriceOverride}) {
+    final fallback = basePriceOverride ?? sellingPrice;
+    if (volumeTiers.isEmpty) return fallback;
+    final sorted = List<ProductVolumeTier>.from(volumeTiers)
+      ..sort((a, b) => b.minQuantity.compareTo(a.minQuantity));
+    for (final tier in sorted) {
+      if (quantity >= tier.minQuantity && tier.minQuantity > 0) {
+        return tier.tierPrice;
+      }
+    }
+    return fallback;
+  }
 
   /// Resolve earliest non-expired FEFO batch automatically
   ProductBatchModel? get fefoBatch {
@@ -331,7 +391,7 @@ class ProductModel extends Equatable {
   bool get hasExpiringSoonBatch => batches.any((b) => b.isExpiringSoon);
 
   @override
-  List<Object?> get props => [id, name, sku, sellingPrice, stock, isLowStock, batches, unitConversions];
+  List<Object?> get props => [id, name, sku, sellingPrice, stock, isLowStock, batches, unitConversions, volumeTiers];
 }
 
 class CartItemModel extends Equatable {
@@ -345,6 +405,7 @@ class CartItemModel extends Equatable {
   final double discountAmount;
   final String? notes;
   final String? digitalTargetValue;
+  final String? stylistName;
   final String selectedUnitCode;
   final double multiplier;
 
@@ -359,6 +420,7 @@ class CartItemModel extends Equatable {
     this.discountAmount = 0,
     this.notes,
     this.digitalTargetValue,
+    this.stylistName,
     this.selectedUnitCode = '',
     this.multiplier = 1.0,
   });
@@ -387,6 +449,7 @@ class CartItemModel extends Equatable {
     double? discountAmount,
     String? notes,
     String? digitalTargetValue,
+    String? stylistName,
     ProductBatchModel? batch,
     String? selectedUnitCode,
     double? multiplier,
@@ -402,6 +465,7 @@ class CartItemModel extends Equatable {
       discountAmount: discountAmount ?? this.discountAmount,
       notes: notes ?? this.notes,
       digitalTargetValue: digitalTargetValue ?? this.digitalTargetValue,
+      stylistName: stylistName ?? this.stylistName,
       selectedUnitCode: selectedUnitCode ?? this.selectedUnitCode,
       multiplier: multiplier ?? this.multiplier,
     );
@@ -419,6 +483,7 @@ class CartItemModel extends Equatable {
         discountAmount,
         notes,
         digitalTargetValue,
+        stylistName,
         selectedUnitCode,
         multiplier,
       ];

@@ -557,6 +557,8 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
                 if (_activeTabIndex != 2) ...[
                   _buildPaymentBreakdownSection(),
                   const SizedBox(height: 16),
+                  _buildMdrAndNetCashInflowCard(),
+                  const SizedBox(height: 16),
                   _buildTopProductsSection(),
                   const SizedBox(height: 16),
                   _buildCashierPerformanceSection(),
@@ -907,6 +909,130 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
             ],
         ],
       ),
+    );
+  }
+
+  /// Phase 2.5: Pelacakan Potongan MDR (QRIS 0.7%, Kartu EDC 1.8%) & Kas Bersih (Net Cash Inflow)
+  Widget _buildMdrAndNetCashInflowCard() {
+    double qrisTotal = 0.0;
+    double cardEdcTotal = 0.0;
+    double breakdownSum = 0.0;
+
+    for (final item in _paymentBreakdown) {
+      final label = (item['name'] ??
+              item['label'] ??
+              item['payment_method'] ??
+              item['method'] ??
+              item['code'] ??
+              '')
+          .toString()
+          .toLowerCase();
+      final total = _numVal(item['total_amount'] ?? item['total'] ?? item['amount']).toDouble();
+      breakdownSum += total;
+      if (label.contains('qris')) {
+        qrisTotal += total;
+      } else if (label.contains('kartu') ||
+          label.contains('edc') ||
+          label.contains('debit') ||
+          label.contains('kredit') ||
+          label.contains('card')) {
+        cardEdcTotal += total;
+      }
+    }
+
+    final grossSales = _netSales > 0 ? _netSales.toDouble() : breakdownSum;
+    final qrisMdr = (qrisTotal * 0.007).roundToDouble();
+    final edcMdr = (cardEdcTotal * 0.018).roundToDouble();
+    final totalMdr = qrisMdr + edcMdr;
+    final netCashInflow = (grossSales - totalMdr).clamp(0.0, double.infinity);
+
+    return NusaCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined, color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Omset Bruto, Potongan MDR & Kas Bersih',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                ),
+              ),
+              const NusaBadge(label: 'Settlement', variant: NusaBadgeVariant.primary),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _mdrRow('Omset Bruto (Gross Sales)', grossSales, isBold: true),
+          const SizedBox(height: 6),
+          _mdrRow(
+            'Biaya Layanan MDR QRIS (0.7% dari ${IdrCurrencyFormatter.formatCompact(qrisTotal)})',
+            -qrisMdr,
+            valueColor: qrisMdr > 0 ? AppColors.danger : AppColors.slate500,
+          ),
+          const SizedBox(height: 6),
+          _mdrRow(
+            'Biaya Layanan MDR Kartu/EDC (1.8% dari ${IdrCurrencyFormatter.formatCompact(cardEdcTotal)})',
+            -edcMdr,
+            valueColor: edcMdr > 0 ? AppColors.danger : AppColors.slate500,
+          ),
+          const SizedBox(height: 6),
+          _mdrRow(
+            'Total Potongan MDR Gateway',
+            -totalMdr,
+            valueColor: totalMdr > 0 ? AppColors.dangerDark : AppColors.slate500,
+          ),
+          const Divider(height: 18, color: AppColors.border),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Penerimaan Bersih (Net Cash Inflow)',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                ),
+              ),
+              NusaPriceTag(
+                amount: netCashInflow,
+                fontSize: 16,
+                color: AppColors.successDark,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mdrRow(
+    String label,
+    double amount, {
+    bool isBold = false,
+    Color? valueColor,
+  }) {
+    final isNegative = amount < 0;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+              color: isBold ? AppColors.navyDark : AppColors.slate600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        NusaPriceTag(
+          amount: amount.abs(),
+          prefix: isNegative ? '-' : '',
+          fontSize: isBold ? 13.5 : 12.5,
+          color: valueColor ?? AppColors.navyDark,
+        ),
+      ],
     );
   }
 

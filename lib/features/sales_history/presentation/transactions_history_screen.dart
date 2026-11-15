@@ -24,6 +24,20 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
   String _periodFilter = 'Semua Waktu';
   String _statusFilter = 'Semua';
   final TextEditingController _searchCtrl = TextEditingController();
+  final Map<String, int> _reprintCounts = {};
+
+  Map<String, dynamic> _prepareReprintSalePayload(Map<String, dynamic> sale) {
+    final saleKey = (sale['id'] ?? sale['number'] ?? sale.hashCode).toString();
+    final existingCount = (sale['reprint_count'] as num?)?.toInt() ?? 0;
+    final nextCount = (_reprintCounts[saleKey] ?? existingCount) + 1;
+    _reprintCounts[saleKey] = nextCount;
+    return {
+      ...sale,
+      'is_reprint': true,
+      'reprint_count': nextCount,
+      'cashier_name': sale['cashier_name'] ?? sale['cashier'] ?? 'Kasir POS',
+    };
+  }
 
   @override
   void initState() {
@@ -281,11 +295,23 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                   ],
                   const SizedBox(height: 14),
                   NusaButton(
-                    label: 'Buka Struk (Cetak Thermal / Kirim WA)',
+                    label: 'Buka Struk (Salinan / Reprint)',
                     icon: Icons.receipt_long_rounded,
                     onPressed: () {
+                      final reprintSale = _prepareReprintSalePayload(activeSale);
                       Navigator.pop(ctx);
-                      context.push('/pos/receipt', extra: activeSale);
+                      context.push('/pos/receipt', extra: reprintSale);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  NusaButton(
+                    label: 'Cetak Ulang Struk (Reprint)',
+                    icon: Icons.print_rounded,
+                    variant: NusaButtonVariant.outline,
+                    onPressed: () {
+                      final reprintSale = _prepareReprintSalePayload(activeSale);
+                      Navigator.pop(ctx);
+                      context.push('/pos/receipt', extra: reprintSale);
                     },
                   ),
                   if (!isVoided) ...[
