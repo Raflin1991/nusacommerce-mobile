@@ -25,8 +25,8 @@ class WhatsAppService {
     required Map<String, dynamic> sale,
   }) async {
     final phone = normalizePhone(customerPhone);
-    final storeName = storeProfile['name'] ?? 'Toko Berkah Jaya';
-    final number = sale['number'] ?? '#INV-1024';
+    final storeName = storeProfile['name'] ?? 'NusaCommerce POS';
+    final number = sale['number'] ?? '#INV-0001';
     final dt = sale['sale_datetime'] ?? 'Hari Ini';
     final grandTotal = (sale['grand_total'] as num?) ?? 0;
     final paid = (sale['paid_total'] as num?) ?? grandTotal;
@@ -102,6 +102,40 @@ class WhatsAppService {
         '• Selisih Kas: *${IdrCurrencyFormatter.format(variance)}*\n'
         '--------------------------------\n'
         '_Dikirim otomatis dari NusaCommerce Mobile POS_';
+
+    return _launchWhatsApp(phone, message);
+  }
+
+  /// Launch WhatsApp with Executive Owner Business Report (SAK EMKM + Anti-Fraud)
+  static Future<bool> sendExecutiveReportToOwner({
+    required String ownerPhone,
+    required String storeName,
+    required String periodLabel,
+    required String branchLabel,
+    required num netSales,
+    required num grossProfit,
+    required num expenses,
+    required num netProfit,
+    required num netMarginPct,
+    required int transactionsCount,
+    required int voidCount,
+    required int refundCount,
+    required int varianceCount,
+  }) async {
+    final phone = normalizePhone(ownerPhone);
+    final message = '📈 *LAPORAN EKSEKUTIF OWNER — ${storeName.toUpperCase()}*\n'
+        'Periode: *$periodLabel* | Cabang: *$branchLabel*\n'
+        '--------------------------------\n'
+        '• Omzet Bersih: *${IdrCurrencyFormatter.format(netSales)}* ($transactionsCount Trx)\n'
+        '• Laba Kotor (Gross): ${IdrCurrencyFormatter.format(grossProfit)}\n'
+        '• Biaya Operasional: ${IdrCurrencyFormatter.format(expenses)}\n'
+        '• Laba Bersih (Net): *${IdrCurrencyFormatter.format(netProfit)}* (${netMarginPct.toStringAsFixed(1)}%)\n'
+        '--------------------------------\n'
+        '🛡️ *Radar Anti-Fraud*\n'
+        '• Transaksi Void: $voidCount | Retur: $refundCount\n'
+        '• Selisih Kas Shift: $varianceCount peringatan\n'
+        '--------------------------------\n'
+        '_Dikirim otomatis dari NusaCommerce Mobile_';
 
     return _launchWhatsApp(phone, message);
   }

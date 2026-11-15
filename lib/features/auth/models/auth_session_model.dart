@@ -7,6 +7,8 @@ class StoreBranchModel extends Equatable {
   final String? city;
   final String? address;
   final String? phone;
+  final String? businessType;
+  final String? posMode;
 
   const StoreBranchModel({
     required this.id,
@@ -15,16 +17,27 @@ class StoreBranchModel extends Equatable {
     this.city,
     this.address,
     this.phone,
+    this.businessType,
+    this.posMode,
   });
+
+  String? get preferredVerticalRaw =>
+      (posMode != null && posMode!.trim().isNotEmpty)
+          ? posMode
+          : ((businessType != null && businessType!.trim().isNotEmpty)
+              ? businessType
+              : null);
 
   factory StoreBranchModel.fromJson(Map<String, dynamic> json) {
     return StoreBranchModel(
       id: (json['id'] as num?)?.toInt() ?? 1,
-      name: (json['name'] ?? 'Toko Kemang').toString(),
-      code: (json['code'] ?? 'KMG').toString(),
+      name: (json['name'] ?? 'Toko Utama').toString(),
+      code: (json['code'] ?? 'MAIN').toString(),
       city: json['city']?.toString(),
       address: json['address']?.toString(),
       phone: json['phone']?.toString(),
+      businessType: json['business_type']?.toString(),
+      posMode: json['pos_mode']?.toString(),
     );
   }
 
@@ -35,10 +48,12 @@ class StoreBranchModel extends Equatable {
         'city': city,
         'address': address,
         'phone': phone,
+        'business_type': businessType,
+        'pos_mode': posMode,
       };
 
   @override
-  List<Object?> get props => [id, name, code, city];
+  List<Object?> get props => [id, name, code, city, businessType, posMode];
 }
 
 class AuthSessionModel extends Equatable {
@@ -80,7 +95,7 @@ class AuthSessionModel extends Equatable {
         ? StoreBranchModel.fromJson(storeJson)
         : (storesList.isNotEmpty
             ? storesList.first
-            : const StoreBranchModel(id: 1, name: 'Toko Kemang', code: 'KMG', city: 'Jakarta Selatan'));
+            : const StoreBranchModel(id: 1, name: 'Toko Utama', code: 'MAIN', city: 'Indonesia'));
 
     final roles = (user['roles'] as List<dynamic>? ?? [user['role'] ?? 'Pemilik Usaha'])
         .map((e) => e.toString())
@@ -93,56 +108,99 @@ class AuthSessionModel extends Equatable {
         (user['is_super_admin'] == true);
 
     return AuthSessionModel(
-      userId: (user['id'] as num?)?.toInt() ?? 1,
-      userName: (user['name'] ?? 'Raflin Abdul').toString(),
-      userEmail: (user['email'] ?? 'raflin@nusacommerce.id').toString(),
+      userId: (user['id'] as num?)?.toInt() ?? 0,
+      userName: (user['name'] ?? '').toString(),
+      userEmail: (user['email'] ?? '').toString(),
       userRole: isOwner ? 'Pemilik Usaha' : roleLabel,
       isOwner: isOwner,
-      tenantName: (tenant['name'] ?? 'Toko Berkah Jaya').toString(),
-      tenantSubdomain: (tenant['subdomain'] ?? 'belewarna').toString(),
-      planName: (tenant['plan_name'] ?? 'Enterprise Pro').toString(),
+      tenantName: (tenant['name'] ?? '').toString(),
+      tenantSubdomain: (tenant['subdomain'] ?? '').toString(),
+      planName: (tenant['plan_name'] ?? '').toString(),
       activeStore: activeStore,
-      availableStores: storesList.isNotEmpty
-          ? storesList
-          : [
-              activeStore,
-              const StoreBranchModel(id: 2, name: 'Cabang Bandung', code: 'BDG', city: 'Bandung'),
-            ],
+      availableStores: storesList.isNotEmpty ? storesList : [activeStore],
       permissions: (data['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
     );
   }
 
-  factory AuthSessionModel.defaultOwnerDemo() {
-    const kmg = StoreBranchModel(
-      id: 1,
-      name: 'Toko Kemang',
-      code: 'KMG',
-      city: 'Jakarta Selatan',
-      address: 'Jl. Melati No. 12, Jakarta',
-      phone: '0812 3456 7890',
+  factory AuthSessionModel.empty() {
+    return const AuthSessionModel(
+      userId: 0,
+      userName: '',
+      userEmail: '',
+      userRole: '',
+      isOwner: false,
+      tenantName: '',
+      tenantSubdomain: '',
+      planName: '',
+      activeStore: StoreBranchModel(id: 0, name: '-', code: '-', city: ''),
+      availableStores: [],
+      permissions: [],
     );
-    const bdg = StoreBranchModel(
-      id: 2,
-      name: 'Cabang Bandung',
-      code: 'BDG',
-      city: 'Bandung',
-      address: 'Jl. Braga No. 45, Bandung',
-      phone: '0813 8899 7766',
+  }
+
+  factory AuthSessionModel.defaultOwnerDemo() {
+    const mainStore = StoreBranchModel(
+      id: 1,
+      name: 'Nusa Manunggal Grand Sudirman',
+      code: 'STORE-01',
+      city: 'Jakarta Selatan',
+      address: 'Jl. Jend. Sudirman Kav. 1, Jakarta',
+      phone: '-',
     );
     return const AuthSessionModel(
       userId: 1,
-      userName: 'Raflin',
-      userEmail: 'raflin@belewarna.com',
+      userName: 'Direktur Manunggal',
+      userEmail: 'direktur@manunggal.co.id',
       userRole: 'Pemilik Usaha',
       isOwner: true,
-      tenantName: 'Toko Berkah Jaya',
-      tenantSubdomain: 'belewarna',
-      planName: 'Enterprise Omnichannel',
-      activeStore: kmg,
-      availableStores: [kmg, bdg],
+      tenantName: 'NusaCommerce',
+      tenantSubdomain: 'manunggal',
+      planName: 'Enterprise',
+      activeStore: mainStore,
+      availableStores: [mainStore],
       permissions: ['*'],
     );
   }
+
+  factory AuthSessionModel.fromJson(Map<String, dynamic> json) {
+    final activeStoreMap = Map<String, dynamic>.from((json['active_store'] as Map?) ?? {});
+    final availableList = (json['available_stores'] as List<dynamic>? ?? [])
+        .map((e) => StoreBranchModel.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+    final active = activeStoreMap.isNotEmpty
+        ? StoreBranchModel.fromJson(activeStoreMap)
+        : (availableList.isNotEmpty
+            ? availableList.first
+            : const StoreBranchModel(id: 0, name: '-', code: '-', city: ''));
+
+    return AuthSessionModel(
+      userId: (json['user_id'] as num?)?.toInt() ?? 0,
+      userName: (json['user_name'] ?? '').toString(),
+      userEmail: (json['user_email'] ?? '').toString(),
+      userRole: (json['user_role'] ?? '').toString(),
+      isOwner: json['is_owner'] == true,
+      tenantName: (json['tenant_name'] ?? '').toString(),
+      tenantSubdomain: (json['tenant_subdomain'] ?? '').toString(),
+      planName: (json['plan_name'] ?? '').toString(),
+      activeStore: active,
+      availableStores: availableList.isNotEmpty ? availableList : (active.id > 0 ? [active] : []),
+      permissions: (json['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'user_id': userId,
+        'user_name': userName,
+        'user_email': userEmail,
+        'user_role': userRole,
+        'is_owner': isOwner,
+        'tenant_name': tenantName,
+        'tenant_subdomain': tenantSubdomain,
+        'plan_name': planName,
+        'active_store': activeStore.toJson(),
+        'available_stores': availableStores.map((s) => s.toJson()).toList(),
+        'permissions': permissions,
+      };
 
   AuthSessionModel copyWith({
     StoreBranchModel? activeStore,

@@ -1,5 +1,41 @@
 import 'package:equatable/equatable.dart';
 
+class ProductUnitConversion extends Equatable {
+  final String unitCode; // e.g. 'pcs', 'renteng', 'lusin', 'dus'
+  final String unitName;
+  final double multiplier; // e.g. 1 dus = 24 pcs, 1 lusin = 12 pcs
+  final double price; // Tiered wholesale price for this unit
+
+  const ProductUnitConversion({
+    required this.unitCode,
+    required this.unitName,
+    required this.multiplier,
+    required this.price,
+  });
+
+  factory ProductUnitConversion.fromJson(Map<String, dynamic> json) {
+    final code = (json['unit_code'] ?? json['code'] ?? 'pcs').toString();
+    return ProductUnitConversion(
+      unitCode: code,
+      unitName: (json['unit_name'] ?? json['name'] ?? code.toUpperCase()).toString(),
+      multiplier: (json['multiplier'] as num?)?.toDouble() ?? 1.0,
+      price: (json['price'] as num?)?.toDouble() ??
+          (json['selling_price'] as num?)?.toDouble() ??
+          0.0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'unit_code': unitCode,
+        'unit_name': unitName,
+        'multiplier': multiplier,
+        'price': price,
+      };
+
+  @override
+  List<Object?> get props => [unitCode, unitName, multiplier, price];
+}
+
 class ProductBatchModel extends Equatable {
   final int id;
   final String batchNumber;
@@ -31,6 +67,15 @@ class ProductBatchModel extends Equatable {
       quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
       isExpired: expired,
     );
+  }
+
+  bool get isExpiringSoon {
+    if (isExpired || quantity <= 0 || expiryDate == null || expiryDate!.isEmpty) {
+      return false;
+    }
+    final parsed = DateTime.tryParse(expiryDate!);
+    if (parsed == null) return false;
+    return parsed.difference(DateTime.now()).inDays <= 30;
   }
 
   Map<String, dynamic> toJson() => {
@@ -110,6 +155,7 @@ class ProductModel extends Equatable {
   final String? imageUrl;
   final List<ProductVariantModel> variants;
   final List<ProductBatchModel> batches;
+  final List<ProductUnitConversion> unitConversions;
 
   const ProductModel({
     required this.id,
@@ -132,6 +178,7 @@ class ProductModel extends Equatable {
     this.imageUrl,
     this.variants = const [],
     this.batches = const [],
+    this.unitConversions = const [],
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -148,29 +195,9 @@ class ProductModel extends Equatable {
     }
 
     final name = (json['name'] ?? 'Produk').toString();
-    final lower = name.toLowerCase();
-    String inferredIcon = (json['icon_type'] ?? '').toString();
-    if (inferredIcon.isEmpty) {
-      if (lower.contains('air') || lower.contains('mineral')) {
-        inferredIcon = 'water';
-      } else if (lower.contains('teh') || lower.contains('kopi')) {
-        inferredIcon = 'tea';
-      } else if (lower.contains('mie') || lower.contains('indomie')) {
-        inferredIcon = 'noodle';
-      } else if (lower.contains('roti')) {
-        inferredIcon = 'bread';
-      } else if (lower.contains('biskuit') || lower.contains('roma')) {
-        inferredIcon = 'biscuit';
-      } else if (lower.contains('susu') || lower.contains('uht')) {
-        inferredIcon = 'milk';
-      } else if (lower.contains('beras') || lower.contains('gula')) {
-        inferredIcon = 'rice';
-      } else if (lower.contains('pulsa') || lower.contains('token')) {
-        inferredIcon = 'digital';
-      } else {
-        inferredIcon = 'default';
-      }
-    }
+    final inferredIcon = (json['icon_type'] ?? '').toString().isNotEmpty
+        ? json['icon_type'].toString()
+        : 'default';
 
     final variantsList = (json['variants'] as List<dynamic>? ?? [])
         .map((v) => ProductVariantModel.fromJson(Map<String, dynamic>.from(v as Map)))
@@ -180,21 +207,73 @@ class ProductModel extends Equatable {
         .map((b) => ProductBatchModel.fromJson(Map<String, dynamic>.from(b as Map)))
         .toList();
 
+    final type = (json['type'] ?? 'standard').toString();
+    final sellingPrice = (json['selling_price'] as num?)?.toDouble() ?? 0.0;
+    final unitCode = unitMap != null
+        ? (unitMap['code'] ?? 'pcs').toString()
+        : (json['unit_code'] ?? 'pcs').toString();
+    final soldByWeight = json['sold_by_weight'] == true;
+
+    final rawUnits = (json['unit_conversions'] as List<dynamic>? ?? json['units'] as List<dynamic>? ?? []);
+    List<ProductUnitConversion> unitConversionsList = rawUnits
+        .map((u) => ProductUnitConversion.fromJson(Map<String, dynamic>.from(u as Map)))
+        .toList();
+
+    if (unitConversionsList.isNotEmpty) {
+      final hasBase = unitConversionsList.any((u) => (u.multiplier - 1.0).abs() < 0.0001);
+      if (!hasBase) {
+        unitConversionsList.insert(
+          0,
+          ProductUnitConversion(
+            unitCode: unitCode,
+            unitName: unitCode.toUpperCase(),
+            multiplier: 1.0,
+            price: sellingPrice,
+          ),
+        );
+      }
+    } else if (!soldByWeight &&
+        type != 'digital' &&
+        sellingPrice > 0 &&
+        !const {'kg', 'gram', 'g', 'liter', 'l'}.contains(unitCode.toLowerCase())) {
+      final lusinPrice = ((sellingPrice * 12 * 0.95) / 100).round() * 100.0;
+      final dusPrice = ((sellingPrice * 24 * 0.90) / 100).round() * 100.0;
+      unitConversionsList = [
+        ProductUnitConversion(
+          unitCode: unitCode,
+          unitName: unitCode.toUpperCase(),
+          multiplier: 1.0,
+          price: sellingPrice,
+        ),
+        ProductUnitConversion(
+          unitCode: 'lusin',
+          unitName: 'Lusin (12 $unitCode)',
+          multiplier: 12.0,
+          price: lusinPrice > 0 ? lusinPrice : sellingPrice * 12,
+        ),
+        ProductUnitConversion(
+          unitCode: 'dus',
+          unitName: 'Dus (24 $unitCode)',
+          multiplier: 24.0,
+          price: dusPrice > 0 ? dusPrice : sellingPrice * 24,
+        ),
+      ];
+    }
+
     final stockVal = (json['stock'] as num?)?.toDouble() ?? 0.0;
-    final lowStock = json['is_low_stock'] == true || (stockVal <= 25 && lower.contains('indomie')) || stockVal <= 5;
+    final minStock = (json['reorder_level'] as num?)?.toDouble() ?? 5.0;
+    final lowStock = json['is_low_stock'] == true || stockVal <= minStock;
 
     return ProductModel(
       id: (json['id'] as num?)?.toInt() ?? 1,
       name: name,
       sku: (json['sku'] ?? 'SKU-01').toString(),
       barcode: (json['barcode'] ?? '').toString(),
-      type: (json['type'] ?? 'standard').toString(),
-      sellingPrice: (json['selling_price'] as num?)?.toDouble() ?? 0.0,
+      type: type,
+      sellingPrice: sellingPrice,
       costPrice: (json['cost_price'] as num?)?.toDouble() ?? 0.0,
       stock: stockVal,
-      unitCode: unitMap != null
-          ? (unitMap['code'] ?? 'pcs').toString()
-          : (json['unit_code'] ?? 'pcs').toString(),
+      unitCode: unitCode,
       categoryId: categoryMap != null
           ? ((categoryMap['id'] as num?)?.toInt() ?? 1)
           : ((json['category_id'] as num?)?.toInt() ?? 1),
@@ -202,7 +281,7 @@ class ProductModel extends Equatable {
           ? (categoryMap['name'] ?? 'Umum').toString()
           : (json['category_name'] ?? 'Umum').toString(),
       isLowStock: lowStock,
-      soldByWeight: json['sold_by_weight'] == true,
+      soldByWeight: soldByWeight,
       scalePlu: json['scale_plu']?.toString(),
       digitalTargetLabel: digitalMap != null
           ? digitalMap['target_label']?.toString()
@@ -212,6 +291,7 @@ class ProductModel extends Equatable {
       imageUrl: json['image_url']?.toString(),
       variants: variantsList,
       batches: batchesList,
+      unitConversions: unitConversionsList,
     );
   }
 
@@ -236,6 +316,7 @@ class ProductModel extends Equatable {
         'image_url': imageUrl,
         'variants': variants.map((v) => v.toJson()).toList(),
         'batches': batches.map((b) => b.toJson()).toList(),
+        'unit_conversions': unitConversions.map((u) => u.toJson()).toList(),
       };
 
   /// Resolve earliest non-expired FEFO batch automatically
@@ -246,8 +327,11 @@ class ProductModel extends Equatable {
     return batches.isNotEmpty ? batches.first : null;
   }
 
+  /// True when any active batch expires within <= 30 days (FEFO alert)
+  bool get hasExpiringSoonBatch => batches.any((b) => b.isExpiringSoon);
+
   @override
-  List<Object?> get props => [id, name, sku, sellingPrice, stock, isLowStock];
+  List<Object?> get props => [id, name, sku, sellingPrice, stock, isLowStock, batches, unitConversions];
 }
 
 class CartItemModel extends Equatable {
@@ -259,6 +343,8 @@ class CartItemModel extends Equatable {
   final double discountAmount;
   final String? notes;
   final String? digitalTargetValue;
+  final String selectedUnitCode;
+  final double multiplier;
 
   const CartItemModel({
     required this.product,
@@ -269,7 +355,12 @@ class CartItemModel extends Equatable {
     this.discountAmount = 0,
     this.notes,
     this.digitalTargetValue,
+    this.selectedUnitCode = '',
+    this.multiplier = 1.0,
   });
+
+  String get effectiveUnitCode =>
+      selectedUnitCode.trim().isNotEmpty ? selectedUnitCode : product.unitCode;
 
   String get displayName {
     if (variant != null) {
@@ -289,6 +380,8 @@ class CartItemModel extends Equatable {
     String? notes,
     String? digitalTargetValue,
     ProductBatchModel? batch,
+    String? selectedUnitCode,
+    double? multiplier,
   }) {
     return CartItemModel(
       product: product,
@@ -299,6 +392,8 @@ class CartItemModel extends Equatable {
       discountAmount: discountAmount ?? this.discountAmount,
       notes: notes ?? this.notes,
       digitalTargetValue: digitalTargetValue ?? this.digitalTargetValue,
+      selectedUnitCode: selectedUnitCode ?? this.selectedUnitCode,
+      multiplier: multiplier ?? this.multiplier,
     );
   }
 
@@ -312,5 +407,7 @@ class CartItemModel extends Equatable {
         discountAmount,
         notes,
         digitalTargetValue,
+        selectedUnitCode,
+        multiplier,
       ];
 }

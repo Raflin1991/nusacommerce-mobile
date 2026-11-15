@@ -40,40 +40,117 @@ class AuthState extends Equatable {
 class AuthCubit extends Cubit<AuthState> {
   final ApiClient _apiClient;
   final OfflineDatabase _offlineDb;
+  bool _handlingUnauthorized = false;
 
   AuthCubit({
     required ApiClient apiClient,
     required OfflineDatabase offlineDb,
   })  : _apiClient = apiClient,
         _offlineDb = offlineDb,
-        super(AuthState(session: AuthSessionModel.defaultOwnerDemo()));
+        super(AuthState(
+          session: AuthSessionModel.empty(),
+        )) {
+    _apiClient.onUnauthorized = _handleUnauthorizedSession;
+  }
 
-  /// Check existing Bearer token on startup
+  Future<void> _handleUnauthorizedSession() async {
+    if (_handlingUnauthorized) return;
+    _handlingUnauthorized = true;
+    try {
+      await _apiClient.clearSession();
+      await _offlineDb.clearAuthSession();
+      if (!isClosed) {
+        emit(AuthState(
+          isLoading: false,
+          isAuthenticated: false,
+          session: AuthSessionModel.empty(),
+          errorMessage: 'Sesi login telah berakhir atau diperbarui. Silakan masuk kembali.',
+        ));
+      }
+    } finally {
+      _handlingUnauthorized = false;
+    }
+  }
+
+  /// Check existing Bearer token on startup & validate against GET /api/v1/auth/me
   Future<void> checkExistingSession() async {
     final token = await _apiClient.getToken();
-    if (token == null || token.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      await _offlineDb.clearAuthSession();
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: false,
+        session: AuthSessionModel.empty(),
+      ));
+      return;
+    }
 
-    emit(state.copyWith(isLoading: true));
+    final cachedMap = _offlineDb.getCachedAuthSession();
+    final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
+
+    emit(state.copyWith(
+      isLoading: true,
+      session: cachedSession ?? state.session,
+      errorMessage: null,
+    ));
+
     try {
       final response = await _apiClient.dio.get(ApiEndpoints.me);
       final data = response.data['data'] as Map<String, dynamic>?;
       if (data != null) {
         final session = AuthSessionModel.fromApiData(data);
-        emit(state.copyWith(
+        await _apiClient.setActiveStoreId(session.activeStore.id);
+        if (session.tenantSubdomain.isNotEmpty) {
+          await _apiClient.setTenantSlug(session.tenantSubdomain);
+        }
+        if (session.activeStore.preferredVerticalRaw != null &&
+            (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
+          await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
+        }
+        await _offlineDb.saveAuthSession(session.toJson());
+        emit(AuthState(
           isLoading: false,
           isAuthenticated: true,
           session: session,
         ));
         return;
       }
-    } catch (_) {
-      // Offline resilience: keep authenticated with cached session if token exists
+    } catch (e) {
+      final isNetworkOffline = e is DioException && e.response == null;
+      final statusCode = e is DioException ? e.response?.statusCode : null;
+
+      if (statusCode == 401 || statusCode == 403 || statusCode == 404) {
+        await _apiClient.clearSession();
+        await _offlineDb.clearAuthSession();
+        emit(AuthState(
+          isLoading: false,
+          isAuthenticated: false,
+          session: AuthSessionModel.empty(),
+          errorMessage: 'Sesi login tidak valid atau telah kedaluwarsa. Silakan login kembali.',
+        ));
+        return;
+      }
+
+      if (isNetworkOffline && cachedSession != null && cachedSession.userId > 0) {
+        emit(AuthState(
+          isLoading: false,
+          isAuthenticated: true,
+          session: cachedSession,
+        ));
+        return;
+      }
     }
-    emit(state.copyWith(isLoading: false, isAuthenticated: true));
+
+    await _apiClient.clearSession();
+    await _offlineDb.clearAuthSession();
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: false,
+      session: AuthSessionModel.empty(),
+    ));
   }
 
   /// Multi-Tenant Login against POST /api/v1/auth/login
-  /// Includes automatic Offline/Demo Resilience when running without local server
   Future<bool> login({
     required String tenantDomain,
     required String email,
@@ -96,46 +173,45 @@ class AuthCubit extends Cubit<AuthState> {
       final data = Map<String, dynamic>.from((body['data'] as Map?) ?? {});
       final token = (data['token'] ?? data['access_token'] ?? '').toString();
 
-      if (token.isNotEmpty) {
-        await _apiClient.saveToken(token);
+      if (token.isEmpty) {
+        throw Exception('Token otentikasi tidak diterima dari server.');
       }
+      await _apiClient.saveToken(token);
 
       final session = AuthSessionModel.fromApiData(data);
+      if (session.tenantSubdomain.isNotEmpty) {
+        await _apiClient.setTenantSlug(session.tenantSubdomain);
+      }
       await _apiClient.setActiveStoreId(session.activeStore.id);
+      if (session.activeStore.preferredVerticalRaw != null &&
+          (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
+        await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
+      }
+      await _offlineDb.saveAuthSession(session.toJson());
 
       await _offlineDb.saveStoreProfile({
-        'name': session.tenantName,
+        'name': session.tenantName.isNotEmpty ? session.tenantName : 'NusaCommerce POS',
         'branch': session.activeStore.name,
-        'address': session.activeStore.address ?? 'Jl. Melati No. 12, Jakarta',
-        'phone': session.activeStore.phone ?? '0812 3456 7890',
-        'receipt_footer': 'Terima kasih telah berbelanja di ${session.tenantName}!',
+        'address': (session.activeStore.address ?? '').trim().isNotEmpty ? session.activeStore.address : '-',
+        'phone': (session.activeStore.phone ?? '').trim().isNotEmpty ? session.activeStore.phone : '-',
+        'receipt_footer':
+            'Terima kasih telah berbelanja di ${session.tenantName.isNotEmpty ? session.tenantName : session.activeStore.name}!',
       });
 
-      emit(state.copyWith(
+      emit(AuthState(
         isLoading: false,
         isAuthenticated: true,
         session: session,
       ));
       return true;
     } catch (e) {
-      // Only fall back to offline demo mode when the backend is unreachable (no HTTP response).
-      // If the server explicitly rejected credentials (401/403/404/422), surface the exact error.
       final isNetworkOffline = e is DioException && e.response == null;
-      if (isNetworkOffline && email.trim().isNotEmpty && password.isNotEmpty) {
-        final fallbackSession = AuthSessionModel.defaultOwnerDemo();
-        await _apiClient.saveToken('offline_hmac_session_token');
-        await _apiClient.setActiveStoreId(fallbackSession.activeStore.id);
-        emit(state.copyWith(
-          isLoading: false,
-          isAuthenticated: true,
-          session: fallbackSession,
-        ));
-        return true;
-      }
-
       emit(state.copyWith(
         isLoading: false,
-        errorMessage: ApiClient.extractErrorMessage(e),
+        isAuthenticated: false,
+        errorMessage: isNetworkOffline
+            ? 'Gagal terhubung ke server Cloud. Periksa koneksi jaringan atau URL Server API.'
+            : ApiClient.extractErrorMessage(e),
       ));
       return false;
     }
@@ -144,8 +220,14 @@ class AuthCubit extends Cubit<AuthState> {
   /// Switch active Store Branch (POST /api/v1/auth/switch-store)
   Future<void> switchStoreBranch(StoreBranchModel branch) async {
     await _apiClient.setActiveStoreId(branch.id);
+    if (branch.preferredVerticalRaw != null &&
+        (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
+      await _offlineDb.setSavedBusinessVertical(branch.preferredVerticalRaw!);
+    }
+    final updatedSession = state.session.copyWith(activeStore: branch);
+    await _offlineDb.saveAuthSession(updatedSession.toJson());
     emit(state.copyWith(
-      session: state.session.copyWith(activeStore: branch),
+      session: updatedSession,
     ));
 
     try {
@@ -168,6 +250,11 @@ class AuthCubit extends Cubit<AuthState> {
       await _apiClient.dio.post(ApiEndpoints.logout);
     } catch (_) {}
     await _apiClient.clearSession();
-    emit(state.copyWith(isAuthenticated: false));
+    await _offlineDb.clearAuthSession();
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: false,
+      session: AuthSessionModel.empty(),
+    ));
   }
 }

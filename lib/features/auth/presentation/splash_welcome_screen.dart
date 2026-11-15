@@ -1,178 +1,280 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/widgets/product_illustration_widget.dart';
+import '../bloc/auth_cubit.dart';
 
-/// LAYAR 1 — SPLASH & WELCOME SCREEN
-/// Matches 1:1 with Top-Left Screen of `Papan Konsep UI KasirKu Modern-1.png`
+/// LAYAR 1 — PORTAL PENGANTAR RESMI NUSACOMMERCE MOBILE
 class SplashWelcomeScreen extends StatelessWidget {
   const SplashWelcomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final isAuthenticated = context.watch<AuthCubit>().state.isAuthenticated;
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // Top-right soft blue decorative wave matching mockup
-          Positioned(
-            top: -60,
-            right: -50,
-            child: Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                color: AppColors.primaryLight.withOpacity(0.45),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-              child: Column(
-                children: [
-                  const Spacer(flex: 2),
-                  // Shopping Bag Logo with 'K' / NusaPOS Icon (Persis Mockup)
-                  _buildShoppingBagLogo(),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'KasirKu',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.navyDark,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text(
-                      'NusaCommerce Enterprise Edition',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Kelola Usaha Lebih Mudah\nDalam Satu Aplikasi',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.slate600,
-                      height: 1.4,
-                    ),
-                  ),
-                  const Spacer(flex: 2),
-                  // 3D Storefront & Rising Growth Chart Illustration
-                  const Store3DIllustrationWidget(height: 195, showChartBadge: true),
-                  const Spacer(flex: 3),
-                  // Primary CTA Button: "Mulai Sekarang >"
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton(
-                      onPressed: () => context.go('/home'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(999),
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 40),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            _buildBrandEmblem(),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'NusaCommerce',
+                                    style: TextStyle(
+                                      fontSize: 25,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.navyDark,
+                                      letterSpacing: -0.6,
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'POS & Store Operations Super-App',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        elevation: 4,
-                        shadowColor: AppColors.primary.withOpacity(0.35),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Mulai Sekarang',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Pusat kendali operasional harian toko fisik & F&B yang terhubung langsung ke Cloud multi-tenant.',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.slate600,
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: AppColors.cardShadow,
+                          ),
+                          child: const Column(
+                            children: [
+                              _CapabilityRow(
+                                icon: Icons.qr_code_scanner_rounded,
+                                title: 'Kasir POS Retail & Multi-Industri',
+                                subtitle: 'Scan barcode & timbangan digital, multi-satuan grosir, cetak thermal & struk WA.',
+                              ),
+                              Divider(height: 1, indent: 64),
+                              _CapabilityRow(
+                                icon: Icons.inventory_2_outlined,
+                                title: 'Inventaris Real-Time & Opname FEFO',
+                                subtitle: 'Pantau stok menipis, batch kadaluwarsa, lokasi rak & stock opname kamera.',
+                              ),
+                              Divider(height: 1, indent: 64),
+                              _CapabilityRow(
+                                icon: Icons.account_balance_wallet_outlined,
+                                title: 'Pelanggan, Pemasok & Buku Bon',
+                                subtitle: 'Diskon member, poin loyalitas, stok masuk supplier & penagihan piutang WA.',
+                              ),
+                              Divider(height: 1, indent: 64),
+                              _CapabilityRow(
+                                icon: Icons.analytics_outlined,
+                                title: 'Shift Blind-Count & Laporan SAK EMKM',
+                                subtitle: 'Rekonsiliasi kas laci anti-manipulasi, Z-Report, dan radar anti-fraud cabang.',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.primaryLight),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.verified_user_outlined, size: 18, color: AppColors.primary),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Multi-Tenant Cloud Sync • Offline-First Idempotent Queue',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primaryDark,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          height: 54,
+                          child: ElevatedButton.icon(
+                            onPressed: () => context.go(isAuthenticated ? '/home' : '/login'),
+                            icon: const Icon(Icons.login_rounded, size: 20),
+                            label: Text(
+                              isAuthenticated
+                                  ? 'Lanjutkan ke Ruang Kerja Toko'
+                                  : 'Masuk ke Ruang Kerja Toko',
                             ),
                           ),
-                          SizedBox(width: 8),
-                          Icon(Icons.chevron_right_rounded, color: Colors.white, size: 22),
+                        ),
+                        if (isAuthenticated) ...[
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: () => context.go('/login'),
+                            child: const Text(
+                              'Ganti Akun atau Subdomain Toko',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.slate600,
+                              ),
+                            ),
+                          ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  // Secondary Link: "Masuk ke Akun" (Multi-Tenant Cloud Login)
-                  TextButton(
-                    onPressed: () => context.push('/login'),
-                    child: const Text(
-                      'Masuk ke Akun',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.slate700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildShoppingBagLogo() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+  Widget _buildBrandEmblem() {
+    return Stack(
+      clipBehavior: Clip.none,
       children: [
-        // Bag Handle
         Container(
-          width: 36,
-          height: 16,
-          decoration: const BoxDecoration(
-            border: Border(
-              top: BorderSide(color: AppColors.primary, width: 5),
-              left: BorderSide(color: AppColors.primary, width: 5),
-              right: BorderSide(color: AppColors.primary, width: 5),
-            ),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-          ),
-        ),
-        // Bag Body
-        Container(
-          width: 76,
-          height: 68,
+          width: 64,
+          height: 64,
           decoration: BoxDecoration(
-            gradient: AppColors.heroBlueGradient,
+            gradient: AppColors.executiveNavyGradient,
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withOpacity(0.3),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
+                color: AppColors.navyDark.withOpacity(0.22),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           alignment: Alignment.center,
-          child: const Text(
-            'K',
-            style: TextStyle(
-              fontSize: 38,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
+          child: const Icon(Icons.point_of_sale_rounded, color: Colors.white, size: 30),
+        ),
+        Positioned(
+          right: -6,
+          bottom: -4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: const Text(
+              'NC',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                letterSpacing: 0.4,
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CapabilityRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _CapabilityRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.slate600,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
 /// LAYAR 6 — RIWAYAT TRANSAKSI (TAB 2 NAVIGASI)
-/// Matches 1:1 with Bottom-Left Screen (Screen 5) of `Papan Konsep UI KasirKu Modern-1.png`
+/// NusaCommerce Mobile Enterprise Sales History Screen
 class TransactionsHistoryScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
 
@@ -19,12 +20,121 @@ class TransactionsHistoryScreen extends StatefulWidget {
 
 class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
   String _searchQuery = '';
-  String _periodFilter = 'Hari Ini';
+  String _periodFilter = 'Semua Waktu';
   String _statusFilter = 'Semua';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final cubit = context.read<PosCubit>();
+        cubit.syncWithCloud(force: false);
+        cubit.fetchReturnReasons();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  DateTime? _parseSaleDate(Map<String, dynamic> sale) {
+    final raw = (sale['created_at'] ?? sale['sale_datetime'] ?? '').toString().trim();
+    if (raw.isEmpty) return null;
+    final iso = DateTime.tryParse(raw);
+    if (iso != null) return iso.toLocal();
+    try {
+      return DateFormat('dd MMM yyyy • HH:mm').parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _matchesPeriod(Map<String, dynamic> sale) {
+    if (_periodFilter == 'Semua Waktu') return true;
+    final dt = _parseSaleDate(sale);
+    if (dt == null) return true;
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    if (_periodFilter == 'Hari Ini') {
+      return !dt.isBefore(todayStart);
+    }
+    if (_periodFilter == '7 Hari') {
+      return !dt.isBefore(todayStart.subtract(const Duration(days: 6)));
+    }
+    if (_periodFilter == 'Bulan Ini') {
+      return dt.year == now.year && dt.month == now.month;
+    }
+    return true;
+  }
+
+  Future<bool> _promptAndVerifyManagerPin(BuildContext rootContext, String action) async {
+    final pinCtrl = TextEditingController();
+    final pin = await showDialog<String>(
+      context: rootContext,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Otorisasi PIN Manajer', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              action == 'void'
+                  ? 'Pembatalan (Void) nota memerlukan otorisasi PIN Manajer / Supervisor.'
+                  : 'Retur barang (Refund) memerlukan otorisasi PIN Manajer / Supervisor.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: pinCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Masukkan PIN / Sandi Manajer *',
+                prefixIcon: Icon(Icons.lock_outline_rounded),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, pinCtrl.text.trim()),
+            child: const Text('Verifikasi'),
+          ),
+        ],
+      ),
+    );
+
+    if (pin == null || pin.isEmpty || !rootContext.mounted) return false;
+    final ok = await rootContext.read<PosCubit>().verifyManagerPin(
+          pin,
+          action: action,
+          setApprovedState: false,
+        );
+    if (!ok && rootContext.mounted) {
+      ScaffoldMessenger.of(rootContext).showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.danger,
+          content: Text('PIN / Sandi Manajer tidak valid atau ditolak server!'),
+        ),
+      );
+    }
+    return ok;
+  }
 
   void _showTransactionActionSheet(BuildContext context, Map<String, dynamic> sale) {
     final voidReasonCtrl = TextEditingController();
-    final isVoided = sale['status'] == 'voided';
+    final posCubit = context.read<PosCubit>();
+    Map<String, dynamic> activeSale = Map<String, dynamic>.from(sale);
+    bool loadingDetail = ((activeSale['items'] as List<dynamic>?) ?? []).isEmpty &&
+        ((activeSale['id'] as num?)?.toInt() ?? 0) > 0 &&
+        ((activeSale['id'] as num?)?.toInt() ?? 0) < 1000000000;
+    bool initializedFetch = false;
+    int? selectedReasonCodeId;
 
     showModalBottomSheet(
       context: context,
@@ -33,121 +143,249 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Detail Nota ${sale['number']}',
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                ),
-                Chip(
-                  label: Text(
-                    isVoided ? 'VOID / BATAL' : 'LUNAS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: isVoided ? AppColors.dangerDark : AppColors.successDark,
-                    ),
-                  ),
-                  backgroundColor: isVoided ? AppColors.dangerSoft : AppColors.successSoft,
-                ),
-              ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          if (!initializedFetch) {
+            initializedFetch = true;
+            if (loadingDetail) {
+              final saleId = (activeSale['id'] as num).toInt();
+              Future.microtask(() async {
+                final detail = await posCubit.fetchSaleDetail(saleId);
+                if (!ctx.mounted) return;
+                setModalState(() {
+                  loadingDetail = false;
+                  if (detail != null) {
+                    activeSale = detail;
+                  }
+                });
+              });
+            }
+            if (posCubit.state.returnReasons.isEmpty) {
+              Future.microtask(() async {
+                await posCubit.fetchReturnReasons();
+                if (ctx.mounted) setModalState(() {});
+              });
+            }
+          }
+
+          final status = (activeSale['status'] ?? 'completed').toString().toLowerCase();
+          final isVoided = status == 'voided' || status == 'refunded';
+          final items = (activeSale['items'] as List<dynamic>? ?? []);
+          final methods = (activeSale['payment_methods'] as List<dynamic>? ?? []);
+          final customerName = (activeSale['customer'] is Map
+                  ? activeSale['customer']['name']
+                  : 'Pelanggan Umum')
+              .toString();
+          final returnReasons = posCubit.state.returnReasons;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             ),
-            Text(
-              'Waktu: ${sale['sale_datetime']} • Total: ${IdrCurrencyFormatter.format(sale['grand_total'])}',
-              style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  context.push('/pos/receipt', extra: sale);
-                },
-                icon: const Icon(Icons.receipt_long_rounded),
-                label: const Text('Buka Struk (Cetak Thermal / Kirim WA)'),
-              ),
-            ),
-            if (!isVoided) ...[
-              const Divider(height: 26),
-              const Text(
-                'Retur Barang / Pembatalan (Void) Transaksi',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.dangerDark),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: voidReasonCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'Wajib isi alasan retur / void (misal: tukar barang / salah input)',
-                  prefixIcon: Icon(Icons.warning_amber_rounded, color: AppColors.danger),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.warningDark,
-                        side: const BorderSide(color: AppColors.warning),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Nota ${activeSale['number']}',
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                        ),
                       ),
-                      onPressed: () {
-                        final id = (sale['id'] as num?)?.toInt() ?? 0;
-                        final notes = voidReasonCtrl.text.trim().isEmpty
-                            ? 'Retur Pelanggan'
-                            : voidReasonCtrl.text.trim();
-                        context.read<PosCubit>().refundSaleTransaction(id, notes: notes);
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Retur nota ${sale['number']} berhasil diproses & stok dikembalikan.')),
-                        );
-                      },
-                      icon: const Icon(Icons.assignment_return_outlined, size: 18),
-                      label: const Text('Retur (Refund)'),
-                    ),
+                      NusaBadge(
+                        label: status == 'voided'
+                            ? 'VOID / BATAL'
+                            : (status == 'refunded' ? 'RETUR / REFUND' : 'LUNAS'),
+                        variant: isVoided ? NusaBadgeVariant.danger : NusaBadgeVariant.success,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.danger,
-                        side: const BorderSide(color: AppColors.danger),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${activeSale['sale_datetime']} • $customerName'
+                    '${methods.isNotEmpty ? ' • ${methods.join(', ')}' : ''}',
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w500),
+                  ),
+                  if (loadingDetail)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       ),
-                      onPressed: () {
-                        if (voidReasonCtrl.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Alasan void wajib diisi!')),
+                    )
+                  else if (items.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    NusaCard(
+                      backgroundColor: AppColors.background,
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Daftar Item (${items.length})',
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.slate500),
+                          ),
+                          const SizedBox(height: 8),
+                          ...items.take(6).map((raw) {
+                            final it = raw is Map ? raw : <String, dynamic>{};
+                            final name = (it['product_name'] ?? it['name'] ?? 'Produk').toString();
+                            final qty = (it['quantity'] as num?) ?? 1;
+                            final lineTotal = (it['line_total'] as num?) ?? ((it['unit_price'] as num?) ?? 0) * qty;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '${IdrCurrencyFormatter.formatQty(qty)}× $name',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  NusaPriceTag(amount: lineTotal, fontSize: 12.5),
+                                ],
+                              ),
+                            );
+                          }),
+                          if (items.length > 6)
+                            Text(
+                              '+${items.length - 6} item lainnya (lihat di struk)',
+                              style: const TextStyle(fontSize: 11.5, color: AppColors.primary, fontWeight: FontWeight.w700),
+                            ),
+                          const Divider(height: 14, color: AppColors.border),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Total Nota', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                              NusaPriceTag(amount: activeSale['grand_total'], fontSize: 15, color: AppColors.primary),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  NusaButton(
+                    label: 'Buka Struk (Cetak Thermal / Kirim WA)',
+                    icon: Icons.receipt_long_rounded,
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      context.push('/pos/receipt', extra: activeSale);
+                    },
+                  ),
+                  if (!isVoided) ...[
+                    const Divider(height: 24, color: AppColors.border),
+                    const Text(
+                      'Retur Barang / Pembatalan (Void) Transaksi',
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.dangerDark),
+                    ),
+                    if (returnReasons.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: returnReasons.map((r) {
+                          final rid = (r['id'] as num?)?.toInt();
+                          final rName = (r['name'] ?? r['code'] ?? 'Retur').toString();
+                          final selected = rid != null && selectedReasonCodeId == rid;
+                          return NusaPillFilter(
+                            label: rName,
+                            selected: selected,
+                            onTap: () {
+                              setModalState(() {
+                                selectedReasonCodeId = rid;
+                                voidReasonCtrl.text = rName;
+                              });
+                            },
                           );
-                          return;
-                        }
-                        final id = (sale['id'] as num?)?.toInt() ?? 0;
-                        context.read<PosCubit>().voidSaleTransaction(id, voidReasonCtrl.text.trim());
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Transaksi ${sale['number']} berhasil di-Void.')),
-                        );
-                      },
-                      icon: const Icon(Icons.cancel_outlined, size: 18),
-                      label: const Text('Void Nota'),
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: voidReasonCtrl,
+                      decoration: const InputDecoration(
+                        hintText: 'Wajib isi alasan retur / void (misal: tukar barang / salah input)',
+                        prefixIcon: Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: NusaButton(
+                            label: 'Retur (Refund)',
+                            icon: Icons.assignment_return_outlined,
+                            variant: NusaButtonVariant.warning,
+                            onPressed: () async {
+                              final ok = await _promptAndVerifyManagerPin(context, 'refund');
+                              if (!ok || !context.mounted) return;
+                              final id = (activeSale['id'] as num?)?.toInt() ?? 0;
+                              final notes = voidReasonCtrl.text.trim().isEmpty
+                                  ? 'Retur Pelanggan'
+                                  : voidReasonCtrl.text.trim();
+                              await context.read<PosCubit>().refundSaleTransaction(
+                                    id,
+                                    notes: notes,
+                                    reasonCodeId: selectedReasonCodeId,
+                                  );
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Retur nota ${activeSale['number']} berhasil diproses & stok dikembalikan.')),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: NusaButton(
+                            label: 'Void Nota',
+                            icon: Icons.cancel_outlined,
+                            variant: NusaButtonVariant.danger,
+                            onPressed: () async {
+                              if (voidReasonCtrl.text.trim().isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Alasan void wajib diisi!')),
+                                );
+                                return;
+                              }
+                              final ok = await _promptAndVerifyManagerPin(context, 'void');
+                              if (!ok || !context.mounted) return;
+                              final id = (activeSale['id'] as num?)?.toInt() ?? 0;
+                              await context.read<PosCubit>().voidSaleTransaction(id, voidReasonCtrl.text.trim());
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Transaksi ${activeSale['number']} berhasil di-Void.')),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
-            ],
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -157,203 +395,281 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
     final salesHistory = context.watch<PosCubit>().state.salesHistory;
 
     final filtered = salesHistory.where((sale) {
-      if (_statusFilter == 'Lunas' && sale['status'] != 'completed') return false;
-      if (_statusFilter == 'Void' && sale['status'] != 'voided') return false;
+      if (!_matchesPeriod(sale)) return false;
+      final status = (sale['status'] ?? 'completed').toString().toLowerCase();
+      final isVoid = status == 'voided' || status == 'refunded';
+      final hasDebt = ((sale['balance_due'] as num?)?.toDouble() ?? 0) > 0;
+      if (_statusFilter == 'Lunas' && (isVoid || hasDebt)) return false;
+      if (_statusFilter == 'Kasbon' && (!hasDebt || isVoid)) return false;
+      if (_statusFilter == 'Void / Batal' && !isVoid) return false;
+
       if (_searchQuery.trim().isEmpty) return true;
       final q = _searchQuery.toLowerCase();
       final numStr = (sale['number'] ?? '').toString().toLowerCase();
       final custName = (sale['customer'] is Map ? sale['customer']['name'] : '').toString().toLowerCase();
-      return numStr.contains(q) || custName.contains(q);
+      final cashier = (sale['cashier_name'] ?? '').toString().toLowerCase();
+      return numStr.contains(q) || custName.contains(q) || cashier.contains(q);
     }).toList();
+
+    final validSalesTotal = filtered
+        .where((s) => s['status'] != 'voided' && s['status'] != 'refunded')
+        .fold<double>(0.0, (sum, s) => sum + ((s['grand_total'] as num?)?.toDouble() ?? 0.0));
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.menu_rounded),
           onPressed: widget.onOpenDrawer,
         ),
-        title: const Text('Transaksi'),
+        title: const Text('Riwayat Transaksi'),
+        actions: [
+          IconButton(
+            tooltip: 'Sinkronkan Riwayat Transaksi',
+            icon: const Icon(Icons.sync_rounded, color: AppColors.primary),
+            onPressed: () async {
+              await context.read<PosCubit>().syncWithCloud(force: false);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Riwayat transaksi berhasil disinkronkan.')),
+                );
+              }
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // 1. Search Bar & Filter Dropdowns ("Hari Ini v" | "Semua v" Persis Mockup Screen 5)
+          // 1. Sticky Filter & Search Header
           Container(
-            color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 TextField(
+                  controller: _searchCtrl,
                   onChanged: (v) => setState(() => _searchQuery = v),
-                  decoration: const InputDecoration(
-                    hintText: 'Cari transaksi...',
-                    prefixIcon: Icon(Icons.search_rounded, color: AppColors.slate400),
+                  decoration: InputDecoration(
+                    hintText: 'Cari nomor nota, pelanggan, atau kasir...',
+                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.slate400),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
                   ),
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    _buildDropdownFilter(
-                      value: _periodFilter,
-                      items: const ['Hari Ini', '7 Hari Terakhir', 'Bulan Ini'],
-                      onChanged: (val) => setState(() => _periodFilter = val!),
-                    ),
-                    const SizedBox(width: 10),
-                    _buildDropdownFilter(
-                      value: _statusFilter,
-                      items: const ['Semua', 'Lunas', 'Void'],
-                      onChanged: (val) => setState(() => _statusFilter = val!),
-                    ),
-                  ],
+                // Period Pills
+                SizedBox(
+                  height: 36,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final period in const ['Semua Waktu', 'Hari Ini', '7 Hari', 'Bulan Ini'])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: NusaPillFilter(
+                            label: period,
+                            selected: _periodFilter == period,
+                            selectedColor: AppColors.navyDark,
+                            onTap: () => setState(() => _periodFilter = period),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Status Pills + Quick Metric
+                SizedBox(
+                  height: 36,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final st in const ['Semua', 'Lunas', 'Kasbon', 'Void / Batal'])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: NusaPillFilter(
+                            label: st,
+                            selected: _statusFilter == st,
+                            onTap: () => setState(() => _statusFilter = st),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
 
-          // 2. Transaction Cards List (#INV-1024, #INV-1023, #INV-1022... Persis Mockup Screen 5)
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, idx) {
-                final sale = filtered[idx];
-                final isVoid = sale['status'] == 'voided';
-                final hasDebt = ((sale['balance_due'] as num?)?.toDouble() ?? 0) > 0;
+          // Summary Strip
+          if (filtered.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: AppColors.slate100,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${filtered.length} Transaksi',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.slate600),
+                  ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Total Valid: ',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.slate500),
+                      ),
+                      NusaPriceTag(amount: validSalesTotal, fontSize: 12.5, color: AppColors.primary),
+                    ],
+                  ),
+                ],
+              ),
+            ),
 
-                return InkWell(
-                  onTap: () => _showTransactionActionSheet(context, sale),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border),
-                      boxShadow: AppColors.cardShadow,
-                    ),
-                    child: Row(
+          // 2. Transaction Cards List
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => context.read<PosCubit>().syncWithCloud(force: false),
+              child: filtered.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySoft,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.receipt_outlined, color: AppColors.primary, size: 22),
+                        const SizedBox(height: 48),
+                        NusaEmptyState(
+                          icon: Icons.receipt_long_outlined,
+                          title: 'Belum Ada Transaksi Tercatat',
+                          subtitle: 'Buka Penjualan Baru di Kasir untuk mencatat transaksi atau ubah filter pencarian.',
+                          actionLabel: (_periodFilter != 'Semua Waktu' || _statusFilter != 'Semua' || _searchQuery.isNotEmpty)
+                              ? 'Tampilkan Semua'
+                              : null,
+                          onAction: () {
+                            _searchCtrl.clear();
+                            setState(() {
+                              _searchQuery = '';
+                              _periodFilter = 'Semua Waktu';
+                              _statusFilter = 'Semua';
+                            });
+                          },
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(14),
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, idx) {
+                        final sale = filtered[idx];
+                        final status = (sale['status'] ?? 'completed').toString().toLowerCase();
+                        final isVoid = status == 'voided';
+                        final isRefunded = status == 'refunded';
+                        final hasDebt = ((sale['balance_due'] as num?)?.toDouble() ?? 0) > 0;
+                        final custName = (sale['customer'] is Map ? sale['customer']['name'] : 'Pelanggan Umum').toString();
+                        final cashierName = (sale['cashier_name'] ?? '').toString().trim();
+                        final methods = (sale['payment_methods'] as List<dynamic>? ?? []);
+                        final methodLabel = methods.isNotEmpty ? methods.first.toString() : 'Tunai';
+
+                        return NusaCard(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          onTap: () => _showTransactionActionSheet(context, sale),
+                          child: Row(
                             children: [
-                              Text(
-                                sale['number'].toString(),
-                                style: const TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.navyDark,
+                              Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: (isVoid || isRefunded)
+                                      ? AppColors.dangerSoft
+                                      : (hasDebt ? AppColors.warningSoft : AppColors.primarySoft),
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                                child: Icon(
+                                  (isVoid || isRefunded)
+                                      ? Icons.cancel_outlined
+                                      : (hasDebt ? Icons.menu_book_rounded : Icons.receipt_outlined),
+                                  color: (isVoid || isRefunded)
+                                      ? AppColors.danger
+                                      : (hasDebt ? AppColors.warningDark : AppColors.primary),
+                                  size: 21,
                                 ),
                               ),
-                              const SizedBox(height: 3),
-                              Text(
-                                sale['sale_datetime'].toString(),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.slate500,
-                                  fontWeight: FontWeight.w500,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      sale['number'].toString(),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.navyDark,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${sale['sale_datetime']} • $custName'
+                                      '${cashierName.isNotEmpty ? ' • Kasir: $cashierName' : ''}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        color: AppColors.slate500,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    NusaBadge(
+                                      label: methodLabel,
+                                      variant: NusaBadgeVariant.neutral,
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              IdrCurrencyFormatter.format(sale['grand_total']),
-                              style: AppTheme.moneyStyle(
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.navyDark,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            // Status Pill Badge ("✦ Lunas" green pill matching Mockup)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: isVoid
-                                    ? AppColors.dangerSoft
-                                    : (hasDebt ? AppColors.warningSoft : AppColors.successSoft),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Icon(
-                                    isVoid
+                                  NusaPriceTag(
+                                    amount: sale['grand_total'],
+                                    fontSize: 14.5,
+                                    strikethrough: isVoid || isRefunded,
+                                    color: (isVoid || isRefunded) ? AppColors.slate400 : AppColors.navyDark,
+                                  ),
+                                  const SizedBox(height: 5),
+                                  NusaBadge(
+                                    label: isVoid
+                                        ? 'Void'
+                                        : (isRefunded ? 'Retur' : (hasDebt ? 'Kasbon' : 'Lunas')),
+                                    icon: isVoid || isRefunded
                                         ? Icons.cancel_rounded
                                         : (hasDebt ? Icons.schedule_rounded : Icons.check_circle_rounded),
-                                    size: 11,
-                                    color: isVoid
-                                        ? AppColors.dangerDark
-                                        : (hasDebt ? AppColors.warningDark : AppColors.successDark),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    isVoid ? 'Void' : (hasDebt ? 'Kasbon' : 'Lunas'),
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: isVoid
-                                          ? AppColors.dangerDark
-                                          : (hasDebt ? AppColors.warningDark : AppColors.successDark),
-                                    ),
+                                    variant: isVoid || isRefunded
+                                        ? NusaBadgeVariant.danger
+                                        : (hasDebt ? NusaBadgeVariant.warning : NusaBadgeVariant.success),
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                );
-              },
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildDropdownFilter({
-    required String value,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isDense: true,
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: AppColors.slate600),
-          style: const TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.navyDark,
-          ),
-          items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: onChanged,
-        ),
       ),
     );
   }

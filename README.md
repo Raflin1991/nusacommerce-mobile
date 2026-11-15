@@ -1,6 +1,8 @@
-# NusaCommerce Mobile (NusaPOS & Owner Super-App) — v2.0.0
+# NusaCommerce Mobile (NusaPOS & Owner Super-App) — v2.1.0
 
 Aplikasi smartphone enterprise (Android, iOS & Handheld POS Sunmi/iMin) berbasis **Flutter 3.24+ (Dart 3.5+)** dengan **Clean Architecture**, **BLoC State Management**, dan **Offline-First Synchronization** yang terintegrasi penuh dengan **NusaCommerce Cloud Multi-Tenant REST API v1**.
+
+Dokumen arsitektur & hasil audit resolusi gap: [docs/06-MASTER-PRD-NUSACOMMERCE-MOBILE-AUDIT-DAN-GAP-RESOLUTION.md](file:///d:/laragon/www/Nusacommerce/docs/06-MASTER-PRD-NUSACOMMERCE-MOBILE-AUDIT-DAN-GAP-RESOLUTION.md).
 
 ---
 

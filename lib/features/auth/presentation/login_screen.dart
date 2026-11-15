@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
+import '../../pos/bloc/pos_cubit.dart';
 import '../bloc/auth_cubit.dart';
 
 /// Multi-Tenant Cloud Login Screen (Subdomain Toko, Email Kasir/Owner, Password)
@@ -16,9 +17,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _tenantController = TextEditingController(text: 'belewarna');
-  final _emailController = TextEditingController(text: 'raflin@belewarna.com');
-  final _passwordController = TextEditingController(text: 'password');
+  final _tenantController = TextEditingController(text: 'manunggal');
+  final _emailController = TextEditingController(text: 'direktur@manunggal.co.id');
+  final _passwordController = TextEditingController(text: 'Manunggal2026!');
   bool _obscurePassword = true;
 
   @override
@@ -29,14 +30,39 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _loginWithPreset({
+    required String tenant,
+    required String email,
+    required String password,
+  }) async {
+    setState(() {
+      _tenantController.text = tenant;
+      _emailController.text = email;
+      _passwordController.text = password;
+    });
+    await _submitLogin();
+  }
+
   Future<void> _submitLogin() async {
+    if (_tenantController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty ||
+        _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Subdomain tenant, email, dan kata sandi wajib diisi.')),
+      );
+      return;
+    }
+
     final success = await context.read<AuthCubit>().login(
           tenantDomain: _tenantController.text,
           email: _emailController.text,
           password: _passwordController.text,
         );
     if (success && mounted) {
-      context.go('/home');
+      await context.read<PosCubit>().syncWithCloud(force: true);
+      if (mounted) {
+        context.go('/home');
+      }
     }
   }
 
@@ -101,60 +127,85 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final apiHost = Uri.tryParse(widget.apiClient.baseUrl)?.host ?? widget.apiClient.baseUrl;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Info Aplikasi NusaCommerce',
+          icon: const Icon(Icons.info_outline_rounded),
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
         ),
-        title: const Text('Masuk Akun Toko'),
+        title: const Text('Masuk NusaCommerce'),
         actions: [
-          IconButton(
-            tooltip: 'Pengaturan Server Cloud',
-            icon: const Icon(Icons.dns_outlined, color: AppColors.primary),
-            onPressed: _showServerUrlModal,
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: ActionChip(
+              avatar: const Icon(Icons.dns_outlined, size: 15, color: AppColors.primary),
+              label: Text(
+                apiHost.isEmpty ? 'Server API' : apiHost,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+              ),
+              backgroundColor: AppColors.primarySoft,
+              side: const BorderSide(color: AppColors.primaryLight),
+              onPressed: _showServerUrlModal,
+            ),
           ),
         ],
       ),
       body: BlocBuilder<AuthCubit, AuthState>(
         builder: (context, state) {
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    gradient: AppColors.heroBlueGradient,
-                    borderRadius: BorderRadius.circular(20),
+                    gradient: AppColors.executiveNavyGradient,
+                    borderRadius: BorderRadius.circular(18),
                     boxShadow: AppColors.cardShadow,
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      CircleAvatar(
-                        radius: 26,
-                        backgroundColor: Colors.white24,
-                        child: Icon(Icons.storefront_rounded, color: Colors.white, size: 28),
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.14),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          'NC',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
                       ),
-                      SizedBox(width: 14),
-                      Expanded(
+                      const SizedBox(width: 14),
+                      const Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'NusaCommerce Multi-Tenant',
+                              'NusaCommerce Cloud & POS',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 17,
+                                fontSize: 16.5,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                             SizedBox(height: 4),
                             Text(
-                              'Sinkronisasi Kasir POS, Stok Gudang, Buku Bon & Laporan Owner Real-Time.',
-                              style: TextStyle(color: Colors.white70, fontSize: 12),
+                              'Kasir POS Retail, Inventaris FEFO, Pemasok, Buku Bon & Laporan Owner.',
+                              style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
                             ),
                           ],
                         ),
@@ -162,13 +213,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 16),
                 if (state.errorMessage != null) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: AppColors.dangerSoft,
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.35)),
                     ),
                     child: Row(
                       children: [
@@ -177,7 +229,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         Expanded(
                           child: Text(
                             state.errorMessage!,
-                            style: const TextStyle(color: AppColors.dangerDark, fontSize: 12.5),
+                            style: const TextStyle(
+                              color: AppColors.dangerDark,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -185,64 +241,191 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                const Text(
-                  'Subdomain / Kode Toko',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _tenantController,
-                  decoration: const InputDecoration(
-                    hintText: 'Contoh: belewarna',
-                    prefixIcon: Icon(Icons.domain_rounded, color: AppColors.primary),
-                    suffixText: '.nusco.id',
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppColors.cardShadow,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Subdomain / Kode Toko',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                      const SizedBox(height: 7),
+                      TextField(
+                        controller: _tenantController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          hintText: 'Contoh: manunggal',
+                          prefixIcon: Icon(Icons.domain_rounded, color: AppColors.primary),
+                          suffixText: '.nusco.id',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Email Pengguna (Owner / Kasir)',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                      const SizedBox(height: 7),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          hintText: 'direktur@tokoanda.co.id',
+                          prefixIcon: Icon(Icons.email_outlined, color: AppColors.primary),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Kata Sandi',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                      const SizedBox(height: 7),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => state.isLoading ? null : _submitLogin(),
+                        decoration: InputDecoration(
+                          hintText: 'Masukkan kata sandi',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.primary),
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: state.isLoading ? null : _submitLogin,
+                          icon: state.isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                                )
+                              : const Icon(Icons.login_rounded, size: 20),
+                          label: Text(
+                            state.isLoading ? 'Menghubungkan Toko...' : 'Masuk & Sinkronkan Toko',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'Email Kasir / Pemilik Usaha',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    hintText: 'kasir@tokoanda.com',
-                    prefixIcon: Icon(Icons.email_outlined, color: AppColors.primary),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
                   ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Kata Sandi / PIN',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  decoration: InputDecoration(
-                    hintText: 'Masukkan kata sandi',
-                    prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.primary),
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
-                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 26),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: state.isLoading ? null : _submitLogin,
-                    child: state.isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                          )
-                        : const Text('Masuk & Sinkronkan Toko'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.bolt_rounded, size: 17, color: AppColors.primary),
+                          const SizedBox(width: 6),
+                          const Text(
+                            'Akses Cepat Akun UAT / Demo (1-Ketuk Masuk)',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.navyDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: state.isLoading
+                                  ? null
+                                  : () => _loginWithPreset(
+                                        tenant: 'manunggal',
+                                        email: 'direktur@manunggal.co.id',
+                                        password: 'Manunggal2026!',
+                                      ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                side: const BorderSide(color: AppColors.primaryLight),
+                                backgroundColor: AppColors.primarySoft,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Direktur (Owner)',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.primaryDark,
+                                    ),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'manunggal • direktur@',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 11, color: AppColors.slate600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: state.isLoading
+                                  ? null
+                                  : () => _loginWithPreset(
+                                        tenant: 'manunggal',
+                                        email: 'kasir.siti@manunggal.co.id',
+                                        password: 'Manunggal2026!',
+                                      ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                side: const BorderSide(color: AppColors.successSoft),
+                                backgroundColor: AppColors.successSoft.withOpacity(0.55),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Kasir Siti (POS)',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.successDark,
+                                    ),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'manunggal • kasir.siti@',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 11, color: AppColors.slate600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],

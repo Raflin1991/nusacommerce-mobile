@@ -2,6 +2,9 @@
 ## NUSACOMMERCE MOBILE POS, SALES & OWNER COMMAND CENTER
 ### *Dokumen Spesifikasi Teknis & Paritas Fitur Penuh (Zero-Gap Cloud Parity) Berbasis Flutter (Android, iOS & Handheld POS)*
 
+> [!NOTE]
+> **Dokumen Master PRD Resmi & Hasil Deep Audit Codebase Terbaru (v2.1.0)** telah diterbitkan dan tersinkronisasi di [docs/06-MASTER-PRD-NUSACOMMERCE-MOBILE-AUDIT-DAN-GAP-RESOLUTION.md](file:///d:/laragon/www/Nusacommerce/docs/06-MASTER-PRD-NUSACOMMERCE-MOBILE-AUDIT-DAN-GAP-RESOLUTION.md).
+
 ---
 
 | Metadata Dokumen | Keterangan |

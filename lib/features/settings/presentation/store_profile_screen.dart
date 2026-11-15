@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
-import '../../../core/widgets/product_illustration_widget.dart';
+import '../../auth/bloc/auth_cubit.dart';
 
-/// LAYAR 10 — PROFIL TOKO SCREEN
-/// Matches 1:1 with Bottom-Right Screen (Screen 9) of `Papan Konsep UI KasirKu Modern-1.png`
+/// LAYAR 10 — PROFIL TOKO & HEADER STRUK NUSACOMMERCE
 class StoreProfileScreen extends StatefulWidget {
   final OfflineDatabase offlineDb;
 
@@ -19,14 +19,43 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
   late final TextEditingController _nameController;
   late final TextEditingController _addressController;
   late final TextEditingController _phoneController;
+  late final TextEditingController _footerController;
 
   @override
   void initState() {
     super.initState();
+    final session = context.read<AuthCubit>().state.session;
     final profile = widget.offlineDb.getStoreProfile();
-    _nameController = TextEditingController(text: (profile['name'] ?? 'Toko Berkah Jaya').toString());
-    _addressController = TextEditingController(text: (profile['address'] ?? 'Jl. Melati No. 12, Jakarta').toString());
-    _phoneController = TextEditingController(text: (profile['phone'] ?? '0812 3456 7890').toString());
+
+    final storedName = (profile['name'] ?? '').toString().trim();
+    final storedAddress = (profile['address'] ?? '').toString().trim();
+    final storedPhone = (profile['phone'] ?? '').toString().trim();
+    final storedFooter = (profile['receipt_footer'] ?? '').toString().trim();
+
+    final fallbackName = session.tenantName.trim().isNotEmpty
+        ? session.tenantName.trim()
+        : (session.activeStore.name.trim().isNotEmpty ? session.activeStore.name.trim() : 'NusaCommerce POS');
+    final fallbackAddress = (session.activeStore.address ?? '').trim().isNotEmpty
+        ? session.activeStore.address!.trim()
+        : '-';
+    final fallbackPhone = (session.activeStore.phone ?? '').trim().isNotEmpty
+        ? session.activeStore.phone!.trim()
+        : '-';
+
+    _nameController = TextEditingController(
+      text: (storedName.isEmpty || storedName == 'NusaCommerce POS') ? fallbackName : storedName,
+    );
+    _addressController = TextEditingController(
+      text: (storedAddress.isEmpty || storedAddress == '-') ? fallbackAddress : storedAddress,
+    );
+    _phoneController = TextEditingController(
+      text: (storedPhone.isEmpty || storedPhone == '-') ? fallbackPhone : storedPhone,
+    );
+    _footerController = TextEditingController(
+      text: storedFooter.isNotEmpty
+          ? storedFooter
+          : 'Terima kasih telah berbelanja di ${_nameController.text.trim()}!',
+    );
   }
 
   @override
@@ -34,15 +63,21 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
     _nameController.dispose();
     _addressController.dispose();
     _phoneController.dispose();
+    _footerController.dispose();
     super.dispose();
   }
 
   Future<void> _saveChanges() async {
+    final session = context.read<AuthCubit>().state.session;
+    final footerText = _footerController.text.trim();
     await widget.offlineDb.saveStoreProfile({
       'name': _nameController.text.trim(),
+      'branch': session.activeStore.name,
       'address': _addressController.text.trim(),
       'phone': _phoneController.text.trim(),
-      'receipt_footer': 'Terima kasih telah berbelanja di ${_nameController.text.trim()}!',
+      'receipt_footer': footerText.isNotEmpty
+          ? footerText
+          : 'Terima kasih telah berbelanja di ${_nameController.text.trim()}!',
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -57,6 +92,8 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final session = context.watch<AuthCubit>().state.session;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -64,7 +101,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.pop(),
         ),
-        title: const Text('Profil Toko'),
+        title: const Text('Profil Toko & Struk'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -72,39 +109,45 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. 3D Store Banner Illustration with Blue Camera Badge (Persis Mockup Screen 9)
+              // 1. Structured Enterprise Store Header Preview
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.border),
+                  gradient: AppColors.executiveNavyGradient,
+                  borderRadius: BorderRadius.circular(18),
                   boxShadow: AppColors.cardShadow,
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
+                child: Row(
                   children: [
-                    const Store3DIllustrationWidget(height: 150, showChartBadge: false),
-                    Positioned(
-                      right: 26,
-                      bottom: 4,
-                      child: InkWell(
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Kamera / Galeri foto toko siap dipilih.')),
-                          );
-                        },
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2.5),
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.14),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 28),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            session.activeStore.name.isEmpty ? 'Cabang Aktif' : session.activeStore.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                          child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 19),
-                        ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Kode: ${session.activeStore.code} • Header Struk Thermal & WhatsApp',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -112,7 +155,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
               ),
               const SizedBox(height: 18),
 
-              // 2. Form Inputs Card: Nama Toko, Alamat, Telepon, Logo Toko (Persis Mockup Screen 9)
+              // 2. Form Inputs Card
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -125,8 +168,8 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Nama Toko',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                      'Nama Toko (Header Struk)',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -135,18 +178,19 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                     ),
                     const SizedBox(height: 14),
                     const Text(
-                      'Alamat',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                      'Alamat Cabang',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
                       controller: _addressController,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                      maxLines: 2,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                     ),
                     const SizedBox(height: 14),
                     const Text(
-                      'Telepon',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                      'Nomor Telepon / WhatsApp Toko',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -156,46 +200,24 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Logo Toko',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                      'Footer Struk Kasir',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Container(
-                          width: 60,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySoft,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: const Icon(Icons.storefront_rounded, color: AppColors.primary, size: 32),
-                        ),
-                        const Spacer(),
-                        OutlinedButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Logo struk thermal diperbarui.')),
-                            );
-                          },
-                          style: OutlinedButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                            side: const BorderSide(color: AppColors.border),
-                          ),
-                          child: const Text(
-                            'Ubah',
-                            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.navyDark),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _footerController,
+                      maxLines: 2,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                      decoration: const InputDecoration(
+                        hintText: 'Pesan ucapan / syarat penukaran di bagian bawah struk',
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 22),
 
-              // 3. Full-Width Blue Button: "Simpan Perubahan" (Persis Mockup Screen 9)
+              // 3. Full-Width Blue Button: "Simpan Perubahan"
               SizedBox(
                 width: double.infinity,
                 height: 52,
@@ -203,7 +225,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                   onPressed: _saveChanges,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   child: const Text(
                     'Simpan Perubahan',

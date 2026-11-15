@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
@@ -6,6 +7,8 @@ import '../../../core/hardware/printer_service.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/nusa_widgets.dart';
+import '../../pos/bloc/pos_cubit.dart';
 
 /// LAYAR 5 / 10 — PRATINJAU STRUK THERMAL & WHATSAPP DISPATCHER
 class ReceiptPreviewScreen extends StatefulWidget {
@@ -31,8 +34,9 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
   void initState() {
     super.initState();
     final customer = widget.receiptData['customer'] as Map<String, dynamic>?;
+    final rawPhone = (customer?['phone'] ?? '').toString().trim();
     _waPhoneController = TextEditingController(
-      text: (customer?['phone'] ?? '081234567890').toString(),
+      text: rawPhone == '-' ? '' : rawPhone,
     );
   }
 
@@ -42,48 +46,181 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     super.dispose();
   }
 
-  void _handleThermalPrint() {
-    final storeProfile = widget.offlineDb.getStoreProfile();
-    final formatted = widget.printerService.formatThermalReceiptText(
-      storeProfile: storeProfile,
-      sale: widget.receiptData,
-    );
+  bool _isPrinting = false;
+
+  Future<void> _handleThermalPrint() async {
+    if (_isPrinting) return;
+    setState(() => _isPrinting = true);
+    try {
+      final storeProfile = widget.offlineDb.getStoreProfile();
+      final selectedWidth = widget.printerService.paperWidth;
+      final formatted = widget.printerService.formatThermalReceiptText(
+        storeProfile: storeProfile,
+        sale: widget.receiptData,
+        paperWidthOverride: selectedWidth,
+      );
+
+      final methods = (widget.receiptData['payment_methods'] as List<dynamic>? ?? [])
+          .map((e) => e.toString().toLowerCase())
+          .toList();
+      final isCashPayment = methods.isEmpty || methods.any((m) => m.contains('tunai') || m.contains('cash'));
+
+      final bytes = widget.printerService.buildEscPosBytesFromText(
+        formatted,
+        cutPaper: widget.printerService.autoCutPaper,
+        openCashDrawer: widget.printerService.autoOpenCashDrawer && isCashPayment,
+      );
+
+      final printed = await widget.printerService.printBytes(bytes);
+      if (!mounted) return;
+
+      if (printed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.successDark,
+            content: Text(
+              'Struk berhasil dicetak ke ${widget.printerService.connectedPrinter?.name ?? 'Printer Bluetooth'} ($selectedWidth)!',
+            ),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.warningDark,
+          content: Text(
+            'Printer Bluetooth belum tersambung. Menampilkan pratinjau ESC/POS ($selectedWidth).',
+          ),
+        ),
+      );
+      _showEscPosPreviewDialog(storeProfile, selectedWidth);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text('Gagal mencetak struk: $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
+  void _showEscPosPreviewDialog(Map<String, dynamic> storeProfile, String initialWidth) {
+    String selectedWidth = initialWidth;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.print_rounded, color: AppColors.primary),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Struk ESC/POS Thermal (58mm)',
-                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final formatted = widget.printerService.formatThermalReceiptText(
+            storeProfile: storeProfile,
+            sale: widget.receiptData,
+            paperWidthOverride: selectedWidth,
+          );
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.print_rounded, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Struk ESC/POS Thermal ($selectedWidth)',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      NusaPillFilter(
+                        label: '58mm',
+                        selected: selectedWidth == '58mm',
+                        onTap: () => setModalState(() {
+                          selectedWidth = '58mm';
+                          widget.printerService.savePreferences(width: '58mm');
+                        }),
+                      ),
+                      const SizedBox(width: 8),
+                      NusaPillFilter(
+                        label: '80mm',
+                        selected: selectedWidth == '80mm',
+                        onTap: () => setModalState(() {
+                          selectedWidth = '80mm';
+                          widget.printerService.savePreferences(width: '80mm');
+                        }),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Text(
+                      formatted,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Text(
-              formatted,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Tutup'),
-          ),
-        ],
+            actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  final ok = await widget.printerService.kickCashDrawer();
+                  final kick = widget.printerService.buildCashDrawerKickBytes();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: ok ? AppColors.successDark : null,
+                      content: Text(
+                        ok
+                            ? 'Laci kasir RJ-11 berhasil dibuka via Bluetooth!'
+                            : 'Perintah Pulse RJ-11 siap (${kick.map((b) => '0x${b.toRadixString(16)}').join(' ')}) — sambungkan printer terlebih dahulu.',
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.point_of_sale_rounded, size: 17),
+                label: const Text('Buka Laci'),
+              ),
+              TextButton.icon(
+                onPressed: () async {
+                  final ok = await widget.printerService.printReceiptText(formatted);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                      content: Text(
+                        ok
+                            ? 'Byte ESC/POS ($selectedWidth) dikirim ke printer!'
+                            : 'Printer Bluetooth tidak terhubung. Cek Pengaturan > Printer.',
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.print_rounded, size: 17),
+                label: const Text('Cetak Bluetooth'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Tutup'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -97,14 +234,84 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     );
   }
 
+  Future<void> _handlePrintKot() async {
+    try {
+      final rawItems = (widget.receiptData['items'] as List<dynamic>? ?? []);
+      final kotItems = rawItems
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final tableName =
+          (widget.receiptData['table_name'] ?? 'Meja Umum').toString();
+      final pax = (widget.receiptData['pax'] as num?)?.toInt() ?? 1;
+      final kotText = widget.printerService.formatKitchenOrderTicket(
+        tableName: tableName,
+        sectionName: 'Resto',
+        pax: pax,
+        items: kotItems,
+      );
+
+      final printed = await widget.printerService.printReceiptText(
+        kotText,
+        openCashDrawer: false,
+      );
+      if (!mounted) return;
+      if (printed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: AppColors.successDark,
+            content: Text('Tiket Dapur (KOT) berhasil dikirim ke printer!'),
+          ),
+        );
+        return;
+      }
+
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Pratinjau Tiket Dapur (KOT)'),
+          content: SingleChildScrollView(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Text(
+                kotText,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5),
+              ),
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Tutup'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text('Gagal mencetak KOT: $e'),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final capabilities = context.watch<PosCubit>().state.capabilities;
     final storeProfile = widget.offlineDb.getStoreProfile();
     final sale = widget.receiptData;
     final items = (sale['items'] as List<dynamic>? ?? []);
-    final grandTotal = (sale['grand_total'] as num?) ?? 17000;
-    final paid = (sale['paid_total'] as num?) ?? 20000;
-    final change = (sale['change_returned'] as num?) ?? 3000;
+    final grandTotal = (sale['grand_total'] as num?) ?? 0;
+    final paid = (sale['paid_total'] as num?) ?? grandTotal;
+    final change = (sale['change_returned'] as num?) ?? 0;
     final balanceDue = (sale['balance_due'] as num?) ?? 0;
 
     return Scaffold(
@@ -141,6 +348,22 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                 'Nomor Nota: ${sale['number']} • ${sale['sale_datetime']}',
                 style: const TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
               ),
+              if (sale['notes'] != null && sale['notes'].toString().trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                  ),
+                  child: Text(
+                    sale['notes'].toString().trim(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.primary),
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
 
               // 2. Realistic Thermal Paper Card
@@ -156,16 +379,16 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                 child: Column(
                   children: [
                     Text(
-                      (storeProfile['name'] ?? 'Toko Berkah Jaya').toString(),
+                      (storeProfile['name'] ?? 'NusaCommerce POS').toString(),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      (storeProfile['address'] ?? 'Jl. Melati No. 12, Jakarta').toString(),
+                      (storeProfile['address'] ?? '-').toString(),
                       style: const TextStyle(fontSize: 12, color: AppColors.slate500),
                     ),
                     Text(
-                      'Telp: ${storeProfile['phone'] ?? '0812 3456 7890'}',
+                      'Telp: ${storeProfile['phone'] ?? '-'}',
                       style: const TextStyle(fontSize: 12, color: AppColors.slate500),
                     ),
                     const Padding(
@@ -244,53 +467,76 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                   prefixIcon: Icon(Icons.chat_bubble_outline_rounded, color: AppColors.whatsapp),
                 ),
               ),
-              const SizedBox(height: 12),
-
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _handleThermalPrint,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: const BorderSide(color: AppColors.primary, width: 1.5),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.print_rounded, color: AppColors.primary),
-                      label: const Text(
-                        'Cetak Thermal',
-                        style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary),
-                      ),
+                    child: NusaButton(
+                      label: _isPrinting ? 'Mencetak...' : 'Cetak Struk',
+                      icon: Icons.print_rounded,
+                      variant: NusaButtonVariant.outline,
+                      isLoading: _isPrinting,
+                      onPressed: _isPrinting ? null : _handleThermalPrint,
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: ElevatedButton.icon(
+                    child: NusaButton(
+                      label: 'Kirim Struk WA',
+                      icon: Icons.send_rounded,
+                      variant: NusaButtonVariant.success,
                       onPressed: _handleSendWhatsApp,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.send_rounded, color: Colors.white),
-                      label: const Text(
-                        'Kirim Struk WA',
-                        style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white),
-                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  onPressed: () => context.go('/pos'),
-                  icon: const Icon(Icons.add_shopping_cart_rounded),
-                  label: const Text('Transaksi Kasir Baru'),
-                ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: NusaButton(
+                      label: 'Buka Laci Kasir',
+                      icon: Icons.point_of_sale_rounded,
+                      variant: NusaButtonVariant.outline,
+                      onPressed: () async {
+                        final ok = await widget.printerService.kickCashDrawer();
+                        final kick = widget.printerService.buildCashDrawerKickBytes();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                            content: Text(
+                              ok
+                                  ? 'Laci kasir RJ-11 berhasil dibuka (${kick.length} bytes)!'
+                                  : 'Pulse RJ-11 gagal: hubungkan printer Bluetooth di Pengaturan.',
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: NusaButton(
+                      label: 'Transaksi Baru',
+                      icon: Icons.add_shopping_cart_rounded,
+                      onPressed: () => context.go('/pos'),
+                    ),
+                  ),
+                ],
               ),
+              if (capabilities.hasKitchenOrderTicket) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: NusaButton(
+                    label: 'Cetak Tiket Dapur (KOT)',
+                    icon: Icons.restaurant_menu_rounded,
+                    variant: NusaButtonVariant.outline,
+                    onPressed: _handlePrintKot,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

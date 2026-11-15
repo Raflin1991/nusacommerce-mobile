@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// NusaCommerce Official Enterprise Color Palette & Design Tokens
-/// Matched 1:1 with Papan Konsep UI KasirKu Modern-1.png & PRD v2.0.0
+/// Matched 1:1 with NusaCommerce Mobile UI Blueprint & PRD v2.0.0
 class AppColors {
   AppColors._();
 
@@ -19,6 +19,8 @@ class AppColors {
   static const Color slate600 = Color(0xFF475569);
   static const Color slate500 = Color(0xFF64748B);
   static const Color slate400 = Color(0xFF94A3B8);
+  static const Color slate200 = Color(0xFFE2E8F0);
+  static const Color slate100 = Color(0xFFF1F5F9);
 
   // Surface & Canvas
   static const Color background = Color(0xFFF8FAFC);
@@ -66,6 +68,8 @@ class AppColors {
     ],
   );
 
+  static const LinearGradient heroNavyGradient = executiveNavyGradient;
+
   static const LinearGradient promoAmberGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -77,17 +81,17 @@ class AppColors {
 
   static List<BoxShadow> get cardShadow => [
         const BoxShadow(
-          color: Color(0x0D0F172A),
-          blurRadius: 16,
-          offset: Offset(0, 6),
+          color: Color(0x060F172A),
+          blurRadius: 8,
+          offset: Offset(0, 2),
         ),
       ];
 
   static List<BoxShadow> get floatingCartShadow => [
         const BoxShadow(
-          color: Color(0x1F0F172A),
-          blurRadius: 24,
-          offset: Offset(0, -6),
+          color: Color(0x140F172A),
+          blurRadius: 16,
+          offset: Offset(0, -4),
         ),
       ];
 }

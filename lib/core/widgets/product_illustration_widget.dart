@@ -1,37 +1,89 @@
 import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
 import '../constants/app_colors.dart';
+import '../network/api_client.dart';
 
-/// Crisp Vector/Illustrated Product & Store Graphics matching Mockup KasirKu
+/// Crisp Vector/Illustrated Product & Store Graphics for NusaCommerce Mobile
 class ProductIllustrationWidget extends StatelessWidget {
   final String iconType;
   final String? imageUrl;
   final double size;
+  final double? width;
+  final double? height;
+  final BorderRadiusGeometry? borderRadius;
+  final bool showBorder;
+  final BoxFit fit;
+  final EdgeInsetsGeometry? padding;
+  final Color? backgroundColor;
 
   const ProductIllustrationWidget({
     super.key,
     required this.iconType,
     this.imageUrl,
     this.size = 64,
+    this.width,
+    this.height,
+    this.borderRadius,
+    this.showBorder = true,
+    this.fit = BoxFit.cover,
+    this.padding,
+    this.backgroundColor,
   });
+
+  String? _resolveEffectiveUrl() {
+    if (imageUrl == null || imageUrl!.trim().isEmpty) return null;
+    if (GetIt.instance.isRegistered<ApiClient>()) {
+      return GetIt.instance<ApiClient>().resolveMediaUrl(imageUrl);
+    }
+    return imageUrl!.trim();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (imageUrl != null && imageUrl!.startsWith('http')) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+    final double w = width ?? size;
+    final double h = height ?? size;
+    final BorderRadiusGeometry resolvedRadius = borderRadius ?? BorderRadius.circular(12);
+    final double spinnerSide = (h.isFinite ? h : size).clamp(28.0, 120.0) * 0.28;
+
+    final effectiveUrl = _resolveEffectiveUrl();
+    if (effectiveUrl != null &&
+        (effectiveUrl.startsWith('http://') ||
+            effectiveUrl.startsWith('https://'))) {
+      return Container(
+        width: w,
+        height: h,
+        padding: padding,
+        decoration: BoxDecoration(
+          color: backgroundColor ?? Colors.white,
+          borderRadius: resolvedRadius,
+          border: showBorder ? Border.all(color: AppColors.border) : null,
+        ),
+        clipBehavior: Clip.antiAlias,
         child: Image.network(
-          imageUrl!,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildVectorBadge(),
+          effectiveUrl,
+          width: w,
+          height: h,
+          fit: fit,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              color: backgroundColor ?? const Color(0xFFF8FAFC),
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: spinnerSide,
+                height: spinnerSide,
+                child: const CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          },
+          errorBuilder: (_, __, ___) => _buildVectorBadge(w, h, resolvedRadius),
         ),
       );
     }
-    return _buildVectorBadge();
+    return _buildVectorBadge(w, h, resolvedRadius);
   }
 
-  Widget _buildVectorBadge() {
+  Widget _buildVectorBadge(double w, double h, BorderRadiusGeometry resolvedRadius) {
     late Color bgColor;
     late Color accentColor;
     late IconData icon;
@@ -93,22 +145,24 @@ class ProductIllustrationWidget extends StatelessWidget {
         badgeText = 'POS';
     }
 
+    final double effectiveHeight = (h.isFinite ? h : size).clamp(32.0, 140.0);
+
     return Container(
-      width: size,
-      height: size,
+      width: w,
+      height: h,
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accentColor.withOpacity(0.18)),
+        borderRadius: resolvedRadius,
+        border: showBorder ? Border.all(color: accentColor.withOpacity(0.18)) : null,
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Icon(icon, size: size * 0.54, color: accentColor),
+          Icon(icon, size: effectiveHeight * 0.44, color: accentColor),
           Positioned(
-            bottom: 4,
+            bottom: 6,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: accentColor,
                 borderRadius: BorderRadius.circular(6),
@@ -179,7 +233,7 @@ class Store3DIllustrationWidget extends StatelessWidget {
             ),
             child: Column(
               children: [
-                // Blue Awning Roof (Striped like KasirKu Mockup)
+                // Blue Awning Roof (NusaCommerce Storefront Banner)
                 Container(
                   height: height * 0.24,
                   decoration: const BoxDecoration(
