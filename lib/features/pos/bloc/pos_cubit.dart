@@ -381,9 +381,9 @@ class PosCubit extends Cubit<PosState> {
     // Start reactive connectivity listener (Offline -> Online auto-drain & refresh)
     await _startConnectivityListener();
 
-    // Sync with Cloud API if token is present and online
+    // Sync with Cloud API only when NOT in Local Standalone mode and token is present
     final token = await _apiClient.getToken();
-    if (currentlyOnline && token != null && token.isNotEmpty) {
+    if (!_isLocalStandalone && currentlyOnline && token != null && token.isNotEmpty) {
       await syncWithCloud(force: false);
     }
   }
@@ -409,7 +409,7 @@ class PosCubit extends Cubit<PosState> {
   }
 
   Future<void> _triggerReactiveAutoSync() async {
-    if (_isAutoSyncRunning || isClosed) return;
+    if (_isAutoSyncRunning || isClosed || _isLocalStandalone) return;
     final token = await _apiClient.getToken();
     if (token == null || token.isEmpty) return;
 
@@ -443,6 +443,21 @@ class PosCubit extends Cubit<PosState> {
     bool force = false,
     bool preserveActiveCart = false,
   }) async {
+    if (_isLocalStandalone) {
+      emit(state.copyWith(
+        isLoading: false,
+        isSyncingOfflineQueue: false,
+        allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
+        categories: _offlineDb.getCachedCategories(),
+        customers: _offlineDb.getCachedCustomers(),
+        suppliers: _offlineDb.getCachedSuppliers(),
+        salesHistory: _offlineDb.getLocalSalesHistory(),
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      ));
+      return;
+    }
+
     emit(state.copyWith(
       isLoading: true,
       isSyncingOfflineQueue: state.offlinePendingCount > 0 || state.isSyncingOfflineQueue,
@@ -2326,6 +2341,14 @@ class PosCubit extends Cubit<PosState> {
 
   /// Sync pending offline transactions manually
   Future<int> syncOfflineTransactions() async {
+    if (_isLocalStandalone) {
+      emit(state.copyWith(
+        isSyncingOfflineQueue: false,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      ));
+      return 0;
+    }
     emit(state.copyWith(isSyncingOfflineQueue: true));
     try {
       final synced = await _offlineDb.syncOfflineQueue(_apiClient);

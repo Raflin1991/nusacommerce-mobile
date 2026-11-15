@@ -175,48 +175,26 @@ class SplashWelcomeScreen extends StatelessWidget {
   }
 
   Widget _buildBrandEmblem() {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 64,
-          height: 64,
-          decoration: BoxDecoration(
-            gradient: AppColors.executiveNavyGradient,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.navyDark.withOpacity(0.22),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
+    return Container(
+      width: 68,
+      height: 68,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.navyDark.withOpacity(0.14),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
           ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.point_of_sale_rounded, color: Colors.white, size: 30),
-        ),
-        Positioned(
-          right: -6,
-          bottom: -4,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Text(
-              'NC',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-                letterSpacing: 0.4,
-              ),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
+      child: Image.asset(
+        'assets/images/nusacommerce_icon.png',
+        fit: BoxFit.contain,
+      ),
     );
   }
 }

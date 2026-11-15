@@ -5,6 +5,7 @@ import 'package:nusacommerce_mobile/core/database/offline_database.dart';
 import 'package:nusacommerce_mobile/core/hardware/barcode_service.dart';
 import 'package:nusacommerce_mobile/core/hardware/printer_service.dart';
 import 'package:nusacommerce_mobile/core/network/api_client.dart';
+import 'package:nusacommerce_mobile/features/auth/bloc/auth_cubit.dart';
 import 'package:nusacommerce_mobile/features/auth/models/auth_session_model.dart';
 import 'package:nusacommerce_mobile/features/pos/bloc/pos_cubit.dart';
 import 'package:nusacommerce_mobile/features/pos/models/pos_models.dart';
@@ -936,6 +937,55 @@ void main() {
       expect(report['total_payables'], 100000.0);
 
       await cubit.close();
+    });
+
+    test('test_local_trial_session_never_triggers_unauthorized_logout_or_cloud_sync', () async {
+      SharedPreferences.setMockInitialValues({
+        'nusa_mobile_bearer_token': '999.stale_expired_token',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      apiClient.dio.options.baseUrl = 'http://127.0.0.1:59999/api/v1';
+      apiClient.dio.options.connectTimeout = const Duration(milliseconds: 50);
+      apiClient.dio.options.receiveTimeout = const Duration(milliseconds: 50);
+
+      expect(await apiClient.getToken(), '999.stale_expired_token');
+
+      final offlineDb = OfflineDatabase(prefs);
+      final authCubit = AuthCubit(apiClient: apiClient, offlineDb: offlineDb);
+      final posCubit = PosCubit(apiClient: apiClient, offlineDb: offlineDb);
+
+      await authCubit.startLocalTrialSession(
+        storeName: 'Toko Mandiri Bebas Logout',
+        businessVertical: 'retail',
+        openingCash: 100000,
+      );
+
+      expect(await apiClient.getToken(), isNull);
+      expect(authCubit.state.isAuthenticated, isTrue);
+      expect(authCubit.state.session.isLocalTrial, isTrue);
+      expect(authCubit.state.errorMessage, isNull);
+
+      await posCubit.initializeCatalog(seedDefaultCart: false);
+      await posCubit.syncWithCloud(force: true);
+
+      expect(posCubit.state.allProducts, isNotEmpty);
+      expect(authCubit.state.isAuthenticated, isTrue);
+      expect(authCubit.state.errorMessage, isNull);
+
+      // Re-checking session on restart restores Local Trial cleanly without logout
+      final authCubit2 = AuthCubit(apiClient: apiClient, offlineDb: offlineDb);
+      await authCubit2.checkExistingSession();
+      expect(authCubit2.state.isAuthenticated, isTrue);
+      expect(authCubit2.state.session.isLocalTrial, isTrue);
+      expect(authCubit2.state.errorMessage, isNull);
+
+      await posCubit.close();
+      await authCubit.close();
+      await authCubit2.close();
     });
   });
 }

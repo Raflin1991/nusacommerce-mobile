@@ -79,16 +79,8 @@ class ApiClient {
               e.type == DioExceptionType.connectionTimeout) {
             isOnline = false;
           }
-          if (e.response?.statusCode == 401) {
-            final path = e.requestOptions.path;
-            // Jangan hapus sesi kasir atau paksa logout saat sedang transaksi/operasional POS di lapangan
-            // agar kasir dapat tetap melanjutkan transaksi ke Offline Queue meski token expired.
-            if (!path.contains('/auth/login') &&
-                !path.contains('/pos/verify-pin') &&
-                !path.contains('/pos/')) {
-              onUnauthorized?.call();
-            }
-          }
+          // Jangan pernah melakukan auto-logout / memicu "Sesi login telah berakhir"
+          // pada background request atau saat mode lokal mandiri aktif.
           handler.next(e);
         },
       ),

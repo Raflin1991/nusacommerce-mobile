@@ -390,19 +390,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         width: 50,
                         height: 50,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.14),
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.white24),
+                          border: Border.all(color: Colors.white38),
                         ),
-                        alignment: Alignment.center,
-                        child: const Text(
-                          'NC',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.5,
-                          ),
+                        padding: const EdgeInsets.all(7),
+                        child: Image.asset(
+                          'assets/images/nusacommerce_icon.png',
+                          fit: BoxFit.contain,
                         ),
                       ),
                       const SizedBox(width: 14),

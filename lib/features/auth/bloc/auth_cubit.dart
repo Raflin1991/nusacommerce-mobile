@@ -40,7 +40,6 @@ class AuthState extends Equatable {
 class AuthCubit extends Cubit<AuthState> {
   final ApiClient _apiClient;
   final OfflineDatabase _offlineDb;
-  bool _handlingUnauthorized = false;
 
   AuthCubit({
     required ApiClient apiClient,
@@ -49,30 +48,9 @@ class AuthCubit extends Cubit<AuthState> {
         _offlineDb = offlineDb,
         super(AuthState(
           session: AuthSessionModel.empty(),
-        )) {
-    _apiClient.onUnauthorized = _handleUnauthorizedSession;
-  }
-
-  Future<void> _handleUnauthorizedSession() async {
-    if (_handlingUnauthorized) return;
-    _handlingUnauthorized = true;
-    try {
-      await _apiClient.clearSession();
-      await _offlineDb.clearAuthSession();
-      if (!isClosed) {
-        emit(AuthState(
-          isLoading: false,
-          isAuthenticated: false,
-          session: AuthSessionModel.empty(),
-          errorMessage: 'Sesi login telah berakhir atau diperbarui. Silakan masuk kembali.',
         ));
-      }
-    } finally {
-      _handlingUnauthorized = false;
-    }
-  }
 
-  /// Check existing Bearer token on startup & validate against GET /api/v1/auth/me
+  /// Check existing session on startup without ever forcing auto-logout on transient/expired responses
   Future<void> checkExistingSession() async {
     final cachedMap = _offlineDb.getCachedAuthSession();
     final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
@@ -92,6 +70,14 @@ class AuthCubit extends Cubit<AuthState> {
 
     final token = await _apiClient.getToken();
     if (token == null || token.isEmpty) {
+      if (cachedSession != null && cachedSession.userId > 0) {
+        emit(AuthState(
+          isLoading: false,
+          isAuthenticated: true,
+          session: cachedSession,
+        ));
+        return;
+      }
       await _offlineDb.clearAuthSession();
       emit(AuthState(
         isLoading: false,
@@ -101,11 +87,19 @@ class AuthCubit extends Cubit<AuthState> {
       return;
     }
 
-    emit(state.copyWith(
-      isLoading: true,
-      session: cachedSession ?? state.session,
-      errorMessage: null,
-    ));
+    if (cachedSession != null && cachedSession.userId > 0) {
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: true,
+        session: cachedSession,
+      ));
+    } else {
+      emit(state.copyWith(
+        isLoading: true,
+        session: state.session,
+        errorMessage: null,
+      ));
+    }
 
     try {
       final response = await _apiClient.dio.get(ApiEndpoints.me);
@@ -128,34 +122,20 @@ class AuthCubit extends Cubit<AuthState> {
         ));
         return;
       }
-    } catch (e) {
-      final isNetworkOffline = e is DioException && e.response == null;
-      final statusCode = e is DioException ? e.response?.statusCode : null;
-
-      if (statusCode == 401 || statusCode == 403 || statusCode == 404) {
-        await _apiClient.clearSession();
-        await _offlineDb.clearAuthSession();
-        emit(AuthState(
-          isLoading: false,
-          isAuthenticated: false,
-          session: AuthSessionModel.empty(),
-          errorMessage: 'Sesi login tidak valid atau telah kedaluwarsa. Silakan login kembali.',
-        ));
-        return;
-      }
-
-      if (isNetworkOffline && cachedSession != null && cachedSession.userId > 0) {
-        emit(AuthState(
-          isLoading: false,
-          isAuthenticated: true,
-          session: cachedSession,
-        ));
-        return;
-      }
+    } catch (_) {
+      // Jangan pernah paksa logout ("Sesi login telah berakhir") saat refresh background gagal.
+      // Pertahankan sesi aktif di perangkat hingga pengguna menekan Keluar Sesi (Logout).
     }
 
-    await _apiClient.clearSession();
-    await _offlineDb.clearAuthSession();
+    if (cachedSession != null && cachedSession.userId > 0) {
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: true,
+        session: cachedSession,
+      ));
+      return;
+    }
+
     emit(AuthState(
       isLoading: false,
       isAuthenticated: false,
@@ -237,6 +217,9 @@ class AuthCubit extends Cubit<AuthState> {
     double openingCash = 100000,
   }) async {
     emit(state.copyWith(isLoading: true, errorMessage: null));
+
+    // Purge any stale Cloud Bearer token so local trial never triggers Cloud auth errors
+    await _apiClient.clearSession();
 
     final normalizedVertical = businessVertical.trim().isEmpty
         ? 'retail'
