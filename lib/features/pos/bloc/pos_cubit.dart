@@ -113,7 +113,11 @@ class PosState extends Equatable {
 
   double get loyaltyDiscountValue => redeemedLoyaltyPoints * 100.0; // 1 point = Rp 100
 
-  double get totalDiscount => cartDiscountAmount + customerGroupDiscount + loyaltyDiscountValue;
+  double get totalDiscount {
+    final rawTotal = cartDiscountAmount + customerGroupDiscount + loyaltyDiscountValue;
+    final maxAllowed = subtotal > 0 ? subtotal : 0.0;
+    return rawTotal.clamp(0.0, maxAllowed).roundToDouble();
+  }
 
   double get exchangeSurplusCredit {
     if (!isExchangeMode) return 0.0;
@@ -128,6 +132,18 @@ class PosState extends Equatable {
   int get expiringSoonCount => allProducts.where((p) => p.hasExpiringSoonBatch).length;
 
   VerticalCapabilities get capabilities => VerticalConfig.getCapabilities(currentVertical);
+
+  /// C.2: Pharmacy prescription items currently in cart
+  List<CartItemModel> get prescriptionRequiredCartProducts =>
+      cart.where((item) => !item.isExchangeReturn && item.product.requiresPrescription).toList();
+
+  /// C.2: True when cart contains prescription drugs without doctor/patient metadata
+  bool get hasUnfulfilledPrescriptionRequirement {
+    if (prescriptionRequiredCartProducts.isEmpty) return false;
+    final doc = (verticalMetadata['doctor_name'] ?? '').toString().trim();
+    final patient = (verticalMetadata['patient_name'] ?? '').toString().trim();
+    return doc.isEmpty || patient.isEmpty;
+  }
 
   PosState copyWith({
     bool? isLoading,
@@ -241,6 +257,21 @@ class PosCubit extends Cubit<PosState> {
   StreamSubscription<bool>? _connectivitySubscription;
   bool _wasOffline = false;
   bool _isAutoSyncRunning = false;
+  bool _isCheckoutInProgress = false;
+  String? _lastCompletedIdempotencyKey;
+  Map<String, dynamic>? _lastCompletedReceipt;
+
+  bool get isCheckoutInProgress => _isCheckoutInProgress;
+
+  /// C.2: Explicit prescription validation helper returning warning text or null when valid.
+  String? validatePrescriptionRequirements() {
+    if (!state.hasUnfulfilledPrescriptionRequirement) return null;
+    final names = state.prescriptionRequiredCartProducts
+        .map((e) => e.displayName)
+        .take(2)
+        .join(', ');
+    return 'Item wajib resep dokter ($names). Lengkapi Nama Dokter & Nama Pasien terlebih dahulu.';
+  }
 
   PosCubit({
     required ApiClient apiClient,
@@ -787,12 +818,14 @@ class PosCubit extends Cubit<PosState> {
         product.sellingPrice;
     final updated = List<CartItemModel>.from(state.cart);
 
+    final normalizedStylist = (stylistName ?? '').trim();
     final existingIdx = updated.indexWhere(
       (item) =>
           !item.isExchangeReturn &&
           item.product.id == product.id &&
           item.variant?.id == variant?.id &&
-          item.effectiveUnitCode == unitCode,
+          item.effectiveUnitCode == unitCode &&
+          (item.stylistName ?? '').trim() == normalizedStylist,
     );
 
     if (existingIdx >= 0) {
@@ -939,6 +972,7 @@ class PosCubit extends Cubit<PosState> {
   void updateCartItemDetails(
     int index, {
     double? quantity,
+    double? unitPrice,
     double? discountAmount,
     String? notes,
     String? stylistName,
@@ -949,14 +983,29 @@ class PosCubit extends Cubit<PosState> {
     if (quantity != null && quantity <= 0) {
       updated.removeAt(index);
     } else {
-      updated[index] = updated[index].copyWith(
+      final current = updated[index];
+      final effectiveQty = quantity ?? current.quantity;
+      final effectivePrice = unitPrice ?? current.unitPrice;
+      final maxLineSubtotal =
+          (effectiveQty * effectivePrice).roundToDouble().clamp(0.0, double.infinity);
+      final clampedDiscount = discountAmount != null
+          ? PosFinancialCalculator.clampDiscount(discountAmount, maxLineSubtotal)
+          : PosFinancialCalculator.clampDiscount(current.discountAmount, maxLineSubtotal);
+      updated[index] = current.copyWith(
         quantity: quantity,
-        discountAmount: discountAmount,
+        unitPrice: unitPrice,
+        discountAmount: clampedDiscount,
         notes: notes,
         stylistName: stylistName,
       );
     }
-    emit(state.copyWith(cart: _recalculateVolumeTiers(updated, productId)));
+    emit(state.copyWith(
+      cart: _recalculateVolumeTiers(
+        updated,
+        productId,
+        skipCustomOverride: unitPrice != null,
+      ),
+    ));
   }
 
   void removeCartItem(int index) {
@@ -1076,14 +1125,15 @@ class PosCubit extends Cubit<PosState> {
     return false;
   }
 
-  /// Apply manual cart discount (requires server Manager PIN approval if > 15% of subtotal)
+  /// Apply manual cart discount (A.1 clamped <= subtotal, requires Manager PIN if > 15%)
   bool applyCartDiscount(double discountAmount) {
-    final maxCashierDiscount = state.subtotal * 0.15;
-    if (discountAmount > maxCashierDiscount && !state.managerDiscountApproved) {
+    final clampedDiscount = PosFinancialCalculator.clampDiscount(discountAmount, state.subtotal);
+    final maxCashierDiscount = (state.subtotal * 0.15).roundToDouble();
+    if (clampedDiscount > maxCashierDiscount && !state.managerDiscountApproved) {
       PosFeedback.onGuardBlocked();
       return false; // Trigger Manager PIN Override Dialog in UI
     }
-    emit(state.copyWith(cartDiscountAmount: discountAmount));
+    emit(state.copyWith(cartDiscountAmount: clampedDiscount));
     return true;
   }
 
@@ -1091,15 +1141,47 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(redeemedLoyaltyPoints: points));
   }
 
-  /// Hold / Park current cart (POST /api/v1/pos/hold)
+  /// B.1: Filter held carts by customer name, table name, label, or hold number
+  List<Map<String, dynamic>> searchHeldCarts(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return state.heldCarts;
+    return state.heldCarts.where((h) {
+      final label = (h['held_label'] ?? '').toString().toLowerCase();
+      final cust = (h['customer_name'] ??
+              (h['customer'] is Map ? (h['customer'] as Map)['name'] : null) ??
+              '')
+          .toString()
+          .toLowerCase();
+      final table = (h['table_name'] ?? '').toString().toLowerCase();
+      final number = (h['number'] ?? '').toString().toLowerCase();
+      return label.contains(q) || cust.contains(q) || table.contains(q) || number.contains(q);
+    }).toList();
+  }
+
+  /// Hold / Park current cart with complete customer, table, metadata & discount context
   Future<void> holdCurrentCart(String label) async {
     if (state.cart.isEmpty) return;
     final itemsToHold = List<CartItemModel>.from(state.cart);
+    final resolvedLabel = label.trim().isEmpty
+        ? (state.selectedCustomer?['name']?.toString() ??
+            state.selectedTable?['name']?.toString() ??
+            'Pelanggan Antre')
+        : label.trim();
     final heldEntry = {
       'id': DateTime.now().millisecondsSinceEpoch,
-      'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second}',
-      'held_label': label.trim().isEmpty ? 'Pelanggan Antre' : label.trim(),
+      'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second.toString().padLeft(2, '0')}',
+      'held_label': resolvedLabel,
       'table_name': state.selectedTable?['name'],
+      'selected_table': state.selectedTable,
+      'customer': state.selectedCustomer,
+      'customer_name': state.selectedCustomer?['name'] ?? 'Pelanggan Umum',
+      if (state.verticalMetadata.isNotEmpty)
+        'vertical_metadata': Map<String, dynamic>.from(state.verticalMetadata),
+      'cart_discount_amount': state.cartDiscountAmount,
+      'manager_discount_approved': state.managerDiscountApproved,
+      'redeemed_loyalty_points': state.redeemedLoyaltyPoints,
+      'order_type': state.orderType,
+      'items_count': itemsToHold.length,
       if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
         'notes': state.orderNotes!.trim(),
       'subtotal': state.grandTotal,
@@ -1112,7 +1194,13 @@ class PosCubit extends Cubit<PosState> {
       heldCarts: updatedHeld,
       cart: [],
       cartDiscountAmount: 0,
+      managerDiscountApproved: false,
       redeemedLoyaltyPoints: 0,
+      clearCustomer: true,
+      clearTable: true,
+      clearVerticalMetadata: true,
+      clearActiveHeldSaleId: true,
+      clearExchangeSourceSale: true,
       clearOrderNotes: true,
     ));
 
@@ -1120,6 +1208,8 @@ class PosCubit extends Cubit<PosState> {
       await _apiClient.dio.post(ApiEndpoints.holdCart, data: {
         'held_label': heldEntry['held_label'],
         if (heldEntry['notes'] != null) 'notes': heldEntry['notes'],
+        if (state.selectedCustomer?['id'] != null) 'customer_id': state.selectedCustomer!['id'],
+        if (state.selectedTable?['id'] != null) 'table_id': state.selectedTable!['id'],
         'items': itemsToHold
             .map((c) => {
                   'product_id': c.product.id,
@@ -1132,22 +1222,176 @@ class PosCubit extends Cubit<PosState> {
     } catch (_) {}
   }
 
-  void resumeHeldCart(int index) {
+  /// B.1: Resume a held cart without destroying an active non-empty cart (auto-parks it instead)
+  void resumeHeldCart(int index, {bool autoParkActiveCart = true}) {
     if (index < 0 || index >= state.heldCarts.length) return;
     final held = state.heldCarts[index];
-    final items = (held['cart_items'] as List<CartItemModel>? ?? []);
+    final items = List<CartItemModel>.from(held['cart_items'] as List<CartItemModel>? ?? []);
     final notes = held['notes']?.toString();
     final heldId = (held['id'] as num?)?.toInt();
+    final restoredCustomer =
+        held['customer'] is Map ? Map<String, dynamic>.from(held['customer'] as Map) : null;
+    final restoredTable = held['selected_table'] is Map
+        ? Map<String, dynamic>.from(held['selected_table'] as Map)
+        : null;
+    final restoredMeta = held['vertical_metadata'] is Map
+        ? Map<String, dynamic>.from(held['vertical_metadata'] as Map)
+        : const <String, dynamic>{};
+    final restoredDiscount = (held['cart_discount_amount'] as num?)?.toDouble() ?? 0.0;
+    final restoredApproved = held['manager_discount_approved'] == true;
+    final restoredPoints = (held['redeemed_loyalty_points'] as num?)?.toInt() ?? 0;
+
     final remainingHeld = List<Map<String, dynamic>>.from(state.heldCarts)..removeAt(index);
+
+    if (autoParkActiveCart && state.cart.isNotEmpty) {
+      final activeItems = List<CartItemModel>.from(state.cart);
+      final autoLabel = state.selectedCustomer?['name']?.toString() ??
+          state.selectedTable?['name']?.toString() ??
+          'Antrean Aktif (${DateFormat('HH:mm').format(DateTime.now())})';
+      remainingHeld.insert(0, {
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second.toString().padLeft(2, '0')}',
+        'held_label': autoLabel,
+        'table_name': state.selectedTable?['name'],
+        'selected_table': state.selectedTable,
+        'customer': state.selectedCustomer,
+        'customer_name': state.selectedCustomer?['name'] ?? 'Pelanggan Umum',
+        if (state.verticalMetadata.isNotEmpty)
+          'vertical_metadata': Map<String, dynamic>.from(state.verticalMetadata),
+        'cart_discount_amount': state.cartDiscountAmount,
+        'manager_discount_approved': state.managerDiscountApproved,
+        'redeemed_loyalty_points': state.redeemedLoyaltyPoints,
+        'order_type': state.orderType,
+        'items_count': activeItems.length,
+        if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
+          'notes': state.orderNotes!.trim(),
+        'subtotal': state.grandTotal,
+        'held_at': DateFormat('HH:mm').format(DateTime.now()),
+        'cart_items': activeItems,
+      });
+    }
+
     emit(state.copyWith(
       cart: items,
       heldCarts: remainingHeld,
       activeHeldSaleId: heldId,
       clearActiveHeldSaleId: heldId == null,
       clearExchangeSourceSale: true,
+      selectedCustomer: restoredCustomer,
+      clearCustomer: restoredCustomer == null,
+      selectedTable: restoredTable,
+      clearTable: restoredTable == null,
+      verticalMetadata: restoredMeta,
+      clearVerticalMetadata: restoredMeta.isEmpty,
+      cartDiscountAmount: restoredDiscount,
+      managerDiscountApproved: restoredApproved,
+      redeemedLoyaltyPoints: restoredPoints,
       orderNotes: (notes != null && notes.trim().isNotEmpty) ? notes.trim() : null,
       clearOrderNotes: notes == null || notes.trim().isEmpty,
     ));
+  }
+
+  /// B.2: Gracefully synchronize in-memory cart prices & available stock against latest catalog/server data
+  int reconcileCartWithLatestCatalog({
+    List<ProductModel>? refreshedProducts,
+    Map<String, dynamic>? serverPriceData,
+  }) {
+    if (state.cart.isEmpty) return 0;
+    final sourceProducts = refreshedProducts ?? state.allProducts;
+    final productById = {for (final p in sourceProducts) p.id: p};
+
+    final serverItemsByKey = <String, Map<String, dynamic>>{};
+    final serverItems = serverPriceData?['items'] as List<dynamic>? ?? const [];
+    for (final raw in serverItems) {
+      if (raw is Map) {
+        final pid = (raw['product_id'] as num?)?.toInt();
+        final vid = (raw['variant_id'] as num?)?.toInt();
+        if (pid != null) {
+          serverItemsByKey['$pid:${vid ?? 0}'] = Map<String, dynamic>.from(raw);
+        }
+      }
+    }
+
+    int adjustedCount = 0;
+    final warnings = <String>[];
+    final reconciled = <CartItemModel>[];
+
+    for (final item in state.cart) {
+      if (item.isExchangeReturn) {
+        reconciled.add(item);
+        continue;
+      }
+      final latestProduct = productById[item.product.id] ?? item.product;
+      ProductVariantModel? latestVariant = item.variant;
+      if (item.variant != null && latestProduct.variants.isNotEmpty) {
+        for (final v in latestProduct.variants) {
+          if (v.id == item.variant!.id) {
+            latestVariant = v;
+            break;
+          }
+        }
+      }
+
+      double updatedPrice = item.unitPrice;
+      final serverEntry = serverItemsByKey['${item.product.id}:${item.variant?.id ?? 0}'];
+      final serverUnitPrice = (serverEntry?['unit_price'] as num?)?.toDouble();
+      if (serverUnitPrice != null && (serverUnitPrice - item.unitPrice).abs() > 0.5) {
+        updatedPrice = serverUnitPrice;
+        adjustedCount++;
+        warnings.add('Harga ${item.displayName} diperbarui sesuai tarif server terbaru.');
+      } else if (refreshedProducts != null && (item.multiplier - 1.0).abs() < 0.0001) {
+        final catalogPrice = latestVariant?.sellingPrice ?? latestProduct.sellingPrice;
+        if ((catalogPrice - item.unitPrice).abs() > 0.5 && (item.notes ?? '').isEmpty) {
+          updatedPrice = catalogPrice;
+          adjustedCount++;
+        }
+      }
+
+      double updatedQty = item.quantity;
+      if (!latestProduct.isServiceOrNonStockItem && latestProduct.stock > 0) {
+        final availableInUnit = latestProduct.stock / item.multiplier;
+        if (updatedQty > availableInUnit && availableInUnit > 0) {
+          updatedQty = latestProduct.soldByWeight
+              ? double.parse(availableInUnit.toStringAsFixed(2))
+              : availableInUnit.floorToDouble();
+          if (updatedQty > 0) {
+            adjustedCount++;
+            warnings.add('Qty ${item.displayName} disesuaikan ke sisa stok ($updatedQty).');
+          }
+        }
+      }
+
+      if (updatedQty > 0) {
+        final clampedDisc = PosFinancialCalculator.clampDiscount(
+          item.discountAmount,
+          (updatedQty * updatedPrice).roundToDouble(),
+        );
+        reconciled.add(CartItemModel(
+          saleItemId: item.saleItemId,
+          isExchangeReturn: item.isExchangeReturn,
+          product: latestProduct,
+          variant: latestVariant,
+          quantity: updatedQty,
+          unitPrice: updatedPrice,
+          discountAmount: clampedDisc,
+          notes: item.notes,
+          digitalTargetValue: item.digitalTargetValue,
+          stylistName: item.stylistName,
+          batch: latestProduct.fefoBatch ?? item.batch,
+          selectedUnitCode: item.selectedUnitCode,
+          multiplier: item.multiplier,
+        ));
+      }
+    }
+
+    if (adjustedCount > 0 || refreshedProducts != null) {
+      emit(state.copyWith(
+        cart: reconciled,
+        allProducts: refreshedProducts ?? state.allProducts,
+        alertMessage: warnings.isNotEmpty ? warnings.first : state.alertMessage,
+      ));
+    }
+    return adjustedCount;
   }
 
   /// Sync Split Bill by Item with Backend `SplitBillAction` (`POST /api/v1/pos/tables/{table}/split`)
@@ -1227,6 +1471,7 @@ class PosCubit extends Cubit<PosState> {
 
   /// Complete POS Checkout (POST /api/v1/pos/checkout with UUIDv4 Idempotency,
   /// Multi-Tender Split, Kasbon DP, Store Credit, Held Table Split Sync & 1-Click Exchange)
+  /// D.2: Protected by synchronous + async double-submit mutex and idempotency key cache.
   Future<Map<String, dynamic>> completeCheckout({
     required List<Map<String, dynamic>> payments,
     required List<String> paymentMethodNames,
@@ -1240,6 +1485,59 @@ class PosCubit extends Cubit<PosState> {
     List<int>? splitItemIndices,
     String? orderTypeOverride,
     String? dueDate,
+    String? idempotencyKey,
+  }) async {
+    final trimmedKey = idempotencyKey?.trim();
+    if (trimmedKey != null &&
+        trimmedKey.isNotEmpty &&
+        trimmedKey == _lastCompletedIdempotencyKey &&
+        _lastCompletedReceipt != null) {
+      return Map<String, dynamic>.from(_lastCompletedReceipt!);
+    }
+    if (_isCheckoutInProgress) {
+      throw StateError('Transaksi sedang diproses. Mohon tunggu hingga selesai.');
+    }
+    _isCheckoutInProgress = true;
+    try {
+      final receipt = await _executeCompleteCheckout(
+        payments: payments,
+        paymentMethodNames: paymentMethodNames,
+        paidTotal: paidTotal,
+        changeReturned: changeReturned,
+        balanceDue: balanceDue,
+        storeCreditAmount: storeCreditAmount,
+        grandTotalOverride: grandTotalOverride,
+        overrideHeldSaleId: overrideHeldSaleId,
+        refundSurplusToStoreCredit: refundSurplusToStoreCredit,
+        splitItemIndices: splitItemIndices,
+        orderTypeOverride: orderTypeOverride,
+        dueDate: dueDate,
+        idempotencyKey: trimmedKey,
+      );
+      if (trimmedKey != null && trimmedKey.isNotEmpty) {
+        _lastCompletedIdempotencyKey = trimmedKey;
+      }
+      _lastCompletedReceipt = Map<String, dynamic>.from(receipt);
+      return receipt;
+    } finally {
+      _isCheckoutInProgress = false;
+    }
+  }
+
+  Future<Map<String, dynamic>> _executeCompleteCheckout({
+    required List<Map<String, dynamic>> payments,
+    required List<String> paymentMethodNames,
+    required double paidTotal,
+    required double changeReturned,
+    required double balanceDue,
+    double storeCreditAmount = 0.0,
+    double? grandTotalOverride,
+    int? overrideHeldSaleId,
+    bool refundSurplusToStoreCredit = false,
+    List<int>? splitItemIndices,
+    String? orderTypeOverride,
+    String? dueDate,
+    String? idempotencyKey,
   }) async {
     final isPartialSplit = splitItemIndices != null && splitItemIndices.isNotEmpty;
     final selectedSet = splitItemIndices?.toSet() ?? <int>{};
@@ -1250,7 +1548,8 @@ class PosCubit extends Cubit<PosState> {
           ]
         : List<CartItemModel>.from(state.cart);
 
-    final localUuid = _uuid.v4();
+    final localUuid =
+        (idempotencyKey != null && idempotencyKey.isNotEmpty) ? idempotencyKey : _uuid.v4();
     final invoiceNo = '#INV-${(state.salesHistory.length + 1).toString().padLeft(4, '0')}';
     final nowFormatted = DateFormat('dd MMM yyyy • HH:mm').format(DateTime.now());
     final resolvedOrderType = orderTypeOverride ??
@@ -1283,7 +1582,10 @@ class PosCubit extends Cubit<PosState> {
           remainingOrderDisc -= extraDisc;
         }
       }
-      final combinedDiscount = c.discountAmount + extraDisc;
+      final combinedDiscount = PosFinancialCalculator.clampDiscount(
+        c.effectiveDiscountAmount + extraDisc,
+        c.lineSubtotal,
+      );
       final resolvedBatch = c.batch ?? c.product.fefoBatch;
       positiveItemMaps.add({
         'product_id': c.product.id,
@@ -1293,12 +1595,14 @@ class PosCubit extends Cubit<PosState> {
         if (resolvedBatch?.expiryDate != null) 'expiry_date': resolvedBatch!.expiryDate,
         'category_name': c.product.categoryName,
         'product_name': c.displayName,
+        'product_type': c.product.type,
+        'is_service': c.product.isServiceOrNonStockItem,
         'unit_code': c.effectiveUnitCode,
         'multiplier': c.multiplier,
         'quantity': c.quantity,
         'unit_price': c.unitPrice,
         'discount_amount': combinedDiscount,
-        'line_total': (c.lineSubtotal - combinedDiscount).clamp(0.0, double.infinity),
+        'line_total': (c.lineSubtotal - combinedDiscount).clamp(0.0, double.infinity).roundToDouble(),
         'notes': c.notes,
         if (c.stylistName != null && c.stylistName!.trim().isNotEmpty)
           'stylist_name': c.stylistName!.trim(),
@@ -1355,8 +1659,9 @@ class PosCubit extends Cubit<PosState> {
       'payments': payments,
     };
 
-    // Adjust local stock immediately (subtract sold replacement qty, add returned exchange qty)
+    // Adjust local stock immediately (C.1: skip non-stock/service items; subtract sold qty, add returned qty)
     final updatedProducts = state.allProducts.map((p) {
+      if (p.isServiceOrNonStockItem) return p;
       final soldBaseQty = positiveLines
           .where((c) => c.product.id == p.id)
           .fold<double>(0.0, (sum, c) => sum + (c.quantity * c.multiplier));
@@ -1482,11 +1787,37 @@ class PosCubit extends Cubit<PosState> {
           ]
         : <CartItemModel>[];
 
+    // Sync local customer deposit / kasbon balances so offline checkout + void remain consistent
+    List<Map<String, dynamic>> nextCustomers = state.customers;
+    Map<String, dynamic>? nextSelectedCustomer = state.selectedCustomer;
+    final checkoutCustomerId = (state.selectedCustomer?['id'] as num?)?.toInt();
+    if (checkoutCustomerId != null &&
+        checkoutCustomerId > 0 &&
+        (storeCreditAmount > 0 || balanceDue > 0)) {
+      nextCustomers = state.customers.map((c) {
+        if ((c['id'] as num?)?.toInt() != checkoutCustomerId) return c;
+        final updatedCust = Map<String, dynamic>.from(c);
+        final curDeposit = (updatedCust['store_credit_balance'] as num?)?.toDouble() ?? 0.0;
+        final curDebt = (updatedCust['outstanding_balance'] as num?)?.toDouble() ?? 0.0;
+        updatedCust['store_credit_balance'] =
+            (curDeposit - storeCreditAmount).clamp(0.0, double.infinity).roundToDouble();
+        updatedCust['outstanding_balance'] = (curDebt + balanceDue).roundToDouble();
+        return updatedCust;
+      }).toList();
+      await _offlineDb.cacheCustomers(nextCustomers);
+      nextSelectedCustomer = nextCustomers.firstWhere(
+        (c) => (c['id'] as num?)?.toInt() == checkoutCustomerId,
+        orElse: () => nextSelectedCustomer!,
+      );
+    }
+
     await PosFeedback.onCheckoutSuccess();
 
     emit(state.copyWith(
       isOnline: checkoutSyncedOnline ? true : state.isOnline,
       allProducts: updatedProducts,
+      customers: nextCustomers,
+      selectedCustomer: nextSelectedCustomer,
       cart: remainingCart,
       cartDiscountAmount: remainingCart.isEmpty ? 0 : state.cartDiscountAmount,
       managerDiscountApproved: remainingCart.isEmpty ? false : state.managerDiscountApproved,
@@ -1564,7 +1895,17 @@ class PosCubit extends Cubit<PosState> {
   }
 
   /// Void a completed sale (POST /api/v1/pos/sales/{id}/void)
+  /// A.4: Also locally reverses physical stock (skipping service items) and restores Store Credit / Kasbon.
   Future<void> voidSaleTransaction(int saleId, String reason) async {
+    final existingHistory = _offlineDb.getLocalSalesHistory();
+    Map<String, dynamic>? targetSale;
+    for (final s in existingHistory) {
+      if ((s['id'] as num?)?.toInt() == saleId) {
+        targetSale = Map<String, dynamic>.from(s);
+        break;
+      }
+    }
+
     await _offlineDb.updateLocalSaleStatus(saleId, 'voided', voidReason: reason);
     try {
       await _apiClient.dio.post(
@@ -1572,7 +1913,62 @@ class PosCubit extends Cubit<PosState> {
         data: {'reason': reason},
       );
     } catch (_) {}
-    emit(state.copyWith(salesHistory: _offlineDb.getLocalSalesHistory()));
+
+    List<ProductModel> nextProducts = state.allProducts;
+    List<Map<String, dynamic>> nextCustomers = state.customers;
+    Map<String, dynamic>? nextSelectedCustomer = state.selectedCustomer;
+
+    if (targetSale != null && targetSale['status']?.toString() != 'voided') {
+      final reversal = PosFinancialCalculator.computeVoidReversal(targetSale);
+
+      if (reversal.restoredPhysicalStockByProduct.isNotEmpty) {
+        nextProducts = state.allProducts.map((p) {
+          final restoreQty = reversal.restoredPhysicalStockByProduct[p.id] ?? 0.0;
+          if (restoreQty <= 0 || p.isServiceOrNonStockItem) return p;
+          final restoredStock = (p.stock + restoreQty).clamp(0.0, double.infinity);
+          _offlineDb.updateLocalProductStock(p.id, restoredStock);
+          return ProductModel.fromJson({
+            ...p.toJson(),
+            'stock': restoredStock,
+            'is_low_stock': restoredStock <= 5,
+          });
+        }).toList();
+      }
+
+      final custId = (targetSale['customer'] is Map)
+          ? ((targetSale['customer'] as Map)['id'] as num?)?.toInt()
+          : (targetSale['customer_id'] as num?)?.toInt();
+      if (custId != null &&
+          custId > 0 &&
+          (reversal.restoredStoreCredit > 0 || reversal.reversedCreditBalanceDue > 0)) {
+        nextCustomers = state.customers.map((c) {
+          if ((c['id'] as num?)?.toInt() != custId) return c;
+          final updated = Map<String, dynamic>.from(c);
+          final curDeposit = (updated['store_credit_balance'] as num?)?.toDouble() ?? 0.0;
+          final curDebt = (updated['outstanding_balance'] as num?)?.toDouble() ?? 0.0;
+          updated['store_credit_balance'] =
+              (curDeposit + reversal.restoredStoreCredit).roundToDouble();
+          updated['outstanding_balance'] = (curDebt - reversal.reversedCreditBalanceDue)
+              .clamp(0.0, double.infinity)
+              .roundToDouble();
+          return updated;
+        }).toList();
+        await _offlineDb.cacheCustomers(nextCustomers);
+        if ((nextSelectedCustomer?['id'] as num?)?.toInt() == custId) {
+          nextSelectedCustomer = nextCustomers.firstWhere(
+            (c) => (c['id'] as num?)?.toInt() == custId,
+            orElse: () => nextSelectedCustomer!,
+          );
+        }
+      }
+    }
+
+    emit(state.copyWith(
+      allProducts: nextProducts,
+      customers: nextCustomers,
+      selectedCustomer: nextSelectedCustomer,
+      salesHistory: _offlineDb.getLocalSalesHistory(),
+    ));
   }
 
   /// Refund / Return a completed sale (POST /api/v1/pos/sales/{id}/refund)

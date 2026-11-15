@@ -81,7 +81,11 @@ class ApiClient {
           }
           if (e.response?.statusCode == 401) {
             final path = e.requestOptions.path;
-            if (!path.contains('/auth/login') && !path.contains('/pos/verify-pin')) {
+            // Jangan hapus sesi kasir atau paksa logout saat sedang transaksi/operasional POS di lapangan
+            // agar kasir dapat tetap melanjutkan transaksi ke Offline Queue meski token expired.
+            if (!path.contains('/auth/login') &&
+                !path.contains('/pos/verify-pin') &&
+                !path.contains('/pos/')) {
               onUnauthorized?.call();
             }
           }

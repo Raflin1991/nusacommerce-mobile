@@ -444,69 +444,131 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   void _showHeldCartsSheet(BuildContext context, PosState state) {
+    final searchCtrl = TextEditingController();
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Antrean Keranjang Diparkir (${state.heldCarts.length})',
-              style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final posCubit = context.read<PosCubit>();
+          final filteredHeld = posCubit.searchHeldCarts(searchCtrl.text);
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             ),
-            const SizedBox(height: 12),
-            if (state.heldCarts.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 18),
-                child: Text('Belum ada keranjang ditahan.', style: TextStyle(color: AppColors.slate500)),
-              )
-            else
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 320),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: state.heldCarts.length,
-                  separatorBuilder: (_, __) => const Divider(height: 12),
-                  itemBuilder: (_, idx) {
-                    final held = state.heldCarts[idx];
-                    final items = (held['cart_items'] as List?) ?? [];
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppColors.warningSoft,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.pause_circle_filled_rounded, color: AppColors.warningDark),
-                      ),
-                      title: Text(
-                        (held['held_label'] ?? held['number'] ?? 'Antrean').toString(),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      subtitle: Text(
-                        '${held['held_at'] ?? ''} • ${items.length} item • ${IdrCurrencyFormatter.format((held['subtotal'] as num?) ?? 0)}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.slate500),
-                      ),
-                      trailing: ElevatedButton(
-                        onPressed: () {
-                          context.read<PosCubit>().resumeHeldCart(idx);
-                          Navigator.pop(ctx);
-                        },
-                        child: const Text('Buka'),
-                      ),
-                    );
-                  },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Antrean Keranjang Diparkir (${state.heldCarts.length})',
+                  style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                 ),
-              ),
-          ],
-        ),
+                if (state.cart.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.warningSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+                    ),
+                    child: Text(
+                      'Keranjang aktif (${state.cart.length} item) akan otomatis diparkir agar tidak hilang saat membuka antrean.',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.warningDark,
+                      ),
+                    ),
+                  ),
+                ],
+                if (state.heldCarts.length > 1) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: searchCtrl,
+                    onChanged: (_) => setModalState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Cari nama pelanggan, label, atau meja...',
+                      prefixIcon: Icon(Icons.search_rounded, size: 19),
+                      isDense: true,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (filteredHeld.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Text(
+                      state.heldCarts.isEmpty
+                          ? 'Belum ada keranjang ditahan.'
+                          : 'Antrean tidak ditemukan untuk pencarian "${searchCtrl.text}".',
+                      style: const TextStyle(color: AppColors.slate500),
+                    ),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 320),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: filteredHeld.length,
+                      separatorBuilder: (_, __) => const Divider(height: 12),
+                      itemBuilder: (_, idx) {
+                        final held = filteredHeld[idx];
+                        final originalIndex = state.heldCarts.indexOf(held);
+                        final items = (held['cart_items'] as List?) ?? [];
+                        final custName = (held['customer_name'] ?? '').toString();
+                        final tableName = (held['table_name'] ?? '').toString();
+                        final metaParts = [
+                          if (custName.isNotEmpty && custName != 'Pelanggan Umum') custName,
+                          if (tableName.isNotEmpty) 'Meja $tableName',
+                          if ((held['held_at'] ?? '').toString().isNotEmpty) '${held['held_at']}',
+                          '${items.length} item',
+                          IdrCurrencyFormatter.format((held['subtotal'] as num?) ?? 0),
+                        ];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppColors.warningSoft,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.pause_circle_filled_rounded, color: AppColors.warningDark),
+                          ),
+                          title: Text(
+                            (held['held_label'] ?? held['number'] ?? 'Antrean').toString(),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text(
+                            metaParts.join(' • '),
+                            style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                          ),
+                          trailing: ElevatedButton(
+                            onPressed: () {
+                              if (originalIndex >= 0) {
+                                posCubit.resumeHeldCart(originalIndex);
+                              }
+                              Navigator.pop(ctx);
+                            },
+                            child: const Text('Buka'),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -519,7 +581,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     final noteCtrl = TextEditingController(text: item.notes ?? '');
     final stylistCtrl = TextEditingController(text: item.stylistName ?? '');
     final pinCtrl = TextEditingController();
-    final isSalonMode = context.read<PosCubit>().state.capabilities.hasSalonStylistWorkflow;
+    final posState = context.read<PosCubit>().state;
+    final isSalonMode = posState.capabilities.hasSalonStylistWorkflow;
+    final isLaundryMode = posState.capabilities.hasLaundryOrderMetadata;
+    bool isExpressLaundry = (item.notes ?? '').toLowerCase().contains('express');
+    double effectiveUnitPrice = item.unitPrice;
     String discMode = 'rp';
 
     showModalBottomSheet(
@@ -547,18 +613,43 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                 ),
                 Text(
-                  'Harga Satuan: ${IdrCurrencyFormatter.format(item.unitPrice)} / ${item.product.unitCode}',
+                  'Harga Satuan: ${IdrCurrencyFormatter.format(effectiveUnitPrice)} / ${item.product.unitCode}',
                   style: const TextStyle(fontSize: 12.5, color: AppColors.slate500),
                 ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: qtyCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Kuantitas (Mendukung desimal misal 0.5)',
-                    prefixIcon: Icon(Icons.scale_outlined),
+                  decoration: InputDecoration(
+                    labelText: isLaundryMode
+                        ? 'Berat / Kuantitas Desimal (misal 2.4 kg)'
+                        : 'Kuantitas (Mendukung desimal misal 0.5)',
+                    prefixIcon: const Icon(Icons.scale_outlined),
                   ),
                 ),
+                if (isLaundryMode) ...[
+                  const SizedBox(height: 10),
+                  NusaPillFilter(
+                    label: 'Layanan Express (+Rp 5.000 / ${item.effectiveUnitCode})',
+                    icon: Icons.bolt_rounded,
+                    selected: isExpressLaundry,
+                    selectedColor: AppColors.warningDark,
+                    onTap: () {
+                      setModalState(() {
+                        isExpressLaundry = !isExpressLaundry;
+                        if (isExpressLaundry) {
+                          effectiveUnitPrice += 5000.0;
+                          if (!noteCtrl.text.contains('[Express]')) {
+                            noteCtrl.text = ('[Express] ${noteCtrl.text}').trim();
+                          }
+                        } else {
+                          effectiveUnitPrice = (effectiveUnitPrice - 5000.0).clamp(0.0, double.infinity);
+                          noteCtrl.text = noteCtrl.text.replaceAll('[Express]', '').trim();
+                        }
+                      });
+                    },
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -655,7 +746,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           final parsedQty = double.tryParse(qtyCtrl.text.replaceAll(',', '.').trim()) ?? item.quantity;
                           final rawDisc = double.tryParse(discCtrl.text.replaceAll(',', '.').trim()) ??
                               IdrCurrencyFormatter.parse(discCtrl.text);
-                          final lineSub = parsedQty * item.unitPrice;
+                          final lineSub = (parsedQty * effectiveUnitPrice).roundToDouble();
                           final discRp = discMode == 'pct'
                               ? (lineSub * (rawDisc.clamp(0, 100) / 100.0)).roundToDouble()
                               : rawDisc;
@@ -682,6 +773,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           posCubit.updateCartItemDetails(
                             idx,
                             quantity: parsedQty,
+                            unitPrice: isLaundryMode ? effectiveUnitPrice : null,
                             discountAmount: discRp.clamp(0, lineSub),
                             notes: noteCtrl.text.trim(),
                             stylistName: isSalonMode ? stylistCtrl.text.trim() : null,
@@ -1213,6 +1305,47 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         capabilities.hasLaundryOrderMetadata ||
                         capabilities.hasSalonStylistWorkflow) ...[
                       _buildVerticalMetadataBar(context, state),
+                      if (capabilities.hasPrescriptionWorkflow &&
+                          state.hasUnfulfilledPrescriptionRequirement) ...[
+                        const SizedBox(height: 6),
+                        GestureDetector(
+                          onTap: () => _showVerticalMetadataSheet(context, state),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerSoft,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.medical_information_rounded,
+                                  color: AppColors.danger,
+                                  size: 17,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${state.prescriptionRequiredCartProducts.length} obat resep belum dilengkapi Nama Dokter & Pasien. Ketuk untuk isi.',
+                                    style: const TextStyle(
+                                      color: AppColors.danger,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: AppColors.danger,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                     ],
                     // Order Type Chips: Ritel | Dine-In | Takeaway | Delivery (Hanya tampil pada F&B/Resto)

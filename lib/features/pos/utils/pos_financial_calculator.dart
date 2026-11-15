@@ -33,8 +33,13 @@ class MultiTenderValidation {
   final double paidTotal;
   final double remainingDue;
   final double overpayment;
+  final double cashChangeReturned;
   final bool isExactMatch;
+  final bool isValidWithCashChange;
   final bool hasValidNonZeroLines;
+  final List<double> effectiveRecordedAmounts;
+
+  bool get isValidCheckout => isExactMatch || isValidWithCashChange;
 
   const MultiTenderValidation({
     required this.grandTotal,
@@ -43,8 +48,47 @@ class MultiTenderValidation {
     required this.paidTotal,
     required this.remainingDue,
     required this.overpayment,
+    this.cashChangeReturned = 0.0,
     required this.isExactMatch,
+    this.isValidWithCashChange = false,
     required this.hasValidNonZeroLines,
+    this.effectiveRecordedAmounts = const [],
+  });
+}
+
+class OrderTotalsBreakdown {
+  final List<double> roundedLineTotals;
+  final double subtotal;
+  final double discountTotal;
+  final double netSubtotal;
+  final double serviceChargeAmount;
+  final double taxAmount;
+  final double grandTotal;
+
+  const OrderTotalsBreakdown({
+    required this.roundedLineTotals,
+    required this.subtotal,
+    required this.discountTotal,
+    required this.netSubtotal,
+    required this.serviceChargeAmount,
+    required this.taxAmount,
+    required this.grandTotal,
+  });
+}
+
+class VoidReversalSummary {
+  final double restoredStoreCredit;
+  final double reversedCashInDrawer;
+  final double reversedNonCashTotal;
+  final double reversedCreditBalanceDue;
+  final Map<int, double> restoredPhysicalStockByProduct;
+
+  const VoidReversalSummary({
+    required this.restoredStoreCredit,
+    required this.reversedCashInDrawer,
+    required this.reversedNonCashTotal,
+    required this.reversedCreditBalanceDue,
+    required this.restoredPhysicalStockByProduct,
   });
 }
 
@@ -90,6 +134,145 @@ class ExchangeComputationResult {
 /// and unit tests in `test/pos_financial_integrity_test.dart`.
 class PosFinancialCalculator {
   PosFinancialCalculator._();
+
+  /// A.1: Clamp discount strictly within [0, maxSubtotal] so grand total never goes negative.
+  static double clampDiscount(double discountAmount, double maxSubtotal) {
+    final safeMax = math.max(0.0, maxSubtotal.roundToDouble());
+    if (discountAmount.isNaN || discountAmount.isInfinite) return 0.0;
+    return discountAmount.clamp(0.0, safeMax).roundToDouble();
+  }
+
+  /// A.1: Compute grand total with discount clamped to subtotal.
+  static double computeClampedGrandTotal({
+    required double subtotal,
+    required double discountAmount,
+  }) {
+    final safeSub = math.max(0.0, subtotal.roundToDouble());
+    final clampedDisc = clampDiscount(discountAmount, safeSub);
+    return math.max(0.0, (safeSub - clampedDisc).roundToDouble());
+  }
+
+  /// A.2: Consistent Rupiah rounding across line items, subtotal, discount, service charge, and PPN tax.
+  static OrderTotalsBreakdown computeOrderTotalsWithTaxAndService({
+    required List<double> rawLineTotals,
+    double discountTotal = 0.0,
+    double serviceChargePercent = 0.0,
+    double taxPercent = 0.0,
+  }) {
+    final roundedLines = rawLineTotals.map((l) => math.max(0.0, l.roundToDouble())).toList();
+    final subtotal = roundedLines.fold<double>(0.0, (sum, l) => sum + l).roundToDouble();
+    final clampedDiscount = clampDiscount(discountTotal, subtotal);
+    final netSubtotal = math.max(0.0, subtotal - clampedDiscount).roundToDouble();
+    final serviceChargeAmount =
+        ((netSubtotal * math.max(0.0, serviceChargePercent)) / 100.0).roundToDouble();
+    final taxAmount =
+        (((netSubtotal + serviceChargeAmount) * math.max(0.0, taxPercent)) / 100.0).roundToDouble();
+    final grandTotal = (netSubtotal + serviceChargeAmount + taxAmount).roundToDouble();
+
+    return OrderTotalsBreakdown(
+      roundedLineTotals: roundedLines,
+      subtotal: subtotal,
+      discountTotal: clampedDiscount,
+      netSubtotal: netSubtotal,
+      serviceChargeAmount: serviceChargeAmount,
+      taxAmount: taxAmount,
+      grandTotal: grandTotal,
+    );
+  }
+
+  /// C.3: Laundry decimal weight * (base rate + express surcharge) rounded cleanly.
+  static double computeLaundryLineTotal({
+    required double weightKg,
+    required double baseRatePerKg,
+    double expressSurchargePerKg = 0.0,
+    double discountAmount = 0.0,
+  }) {
+    final unitRate = math.max(0.0, baseRatePerKg + expressSurchargePerKg);
+    final gross = (math.max(0.0, weightKg) * unitRate).roundToDouble();
+    final clampedDisc = clampDiscount(discountAmount, gross);
+    return (gross - clampedDisc).roundToDouble();
+  }
+
+  /// A.4: Compute store credit restoration, cash drawer reversal, non-cash reversal, and physical stock returns on sale void.
+  static VoidReversalSummary computeVoidReversal(Map<String, dynamic> sale) {
+    double restoredStoreCredit = (sale['store_credit_amount'] as num?)?.toDouble() ?? 0.0;
+    double reversedCashInDrawer = 0.0;
+    double reversedNonCashTotal = 0.0;
+    final double reversedCreditBalanceDue = (sale['balance_due'] as num?)?.toDouble() ?? 0.0;
+
+    bool isCashLabel(String raw) {
+      final lower = raw.trim().toLowerCase();
+      return lower == 'cash' || lower.contains('tunai');
+    }
+
+    bool isStoreCreditLabel(String raw) {
+      final lower = raw.trim().toLowerCase();
+      return lower == 'store_credit' || lower.contains('deposit') || lower.contains('saldo');
+    }
+
+    final payments = (sale['payments'] as List<dynamic>? ?? []);
+    if (payments.isNotEmpty) {
+      for (final raw in payments) {
+        if (raw is! Map) continue;
+        final amt = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        if (amt <= 0) continue;
+        final label = (raw['method_code'] ?? raw['code'] ?? raw['method'] ?? raw['name'] ?? raw['reference'] ?? '').toString();
+        if (isStoreCreditLabel(label)) {
+          restoredStoreCredit += amt;
+        } else if (isCashLabel(label)) {
+          reversedCashInDrawer += amt;
+        } else {
+          reversedNonCashTotal += amt;
+        }
+      }
+    } else {
+      final methods = (sale['payment_methods'] as List<dynamic>? ?? []);
+      final grand = (sale['grand_total'] as num?)?.toDouble() ?? 0.0;
+      final paid = (sale['paid_total'] as num?)?.toDouble() ?? grand;
+      final netCashCollected = math.max(0.0, paid - ((sale['change_returned'] as num?)?.toDouble() ?? 0.0));
+      if (methods.any((m) => isCashLabel(m.toString()))) {
+        reversedCashInDrawer = netCashCollected;
+      } else {
+        reversedNonCashTotal = netCashCollected;
+      }
+    }
+
+    final restoredPhysicalStock = <int, double>{};
+    final items = (sale['items'] as List<dynamic>? ?? []);
+    for (final raw in items) {
+      if (raw is! Map) continue;
+      if (raw['is_exchange_return'] == true) continue;
+      final productId = (raw['product_id'] as num?)?.toInt();
+      if (productId == null || productId <= 0) continue;
+
+      final typeStr = (raw['product_type'] ?? raw['type'] ?? '').toString().toLowerCase();
+      final catStr = (raw['category_name'] ?? '').toString().toLowerCase();
+      final nameStr = (raw['product_name'] ?? '').toString().toLowerCase();
+      final isService = raw['is_service'] == true ||
+          typeStr == 'service' ||
+          typeStr == 'jasa' ||
+          typeStr == 'digital' ||
+          catStr.contains('jasa') ||
+          catStr.contains('servis') ||
+          nameStr.startsWith('jasa ');
+      if (isService) continue;
+
+      final qty = (raw['quantity'] as num?)?.toDouble() ?? 0.0;
+      final mult = (raw['multiplier'] as num?)?.toDouble() ?? 1.0;
+      final restoreQty = qty * mult;
+      if (restoreQty > 0) {
+        restoredPhysicalStock[productId] = (restoredPhysicalStock[productId] ?? 0.0) + restoreQty;
+      }
+    }
+
+    return VoidReversalSummary(
+      restoredStoreCredit: restoredStoreCredit.roundToDouble(),
+      reversedCashInDrawer: reversedCashInDrawer.roundToDouble(),
+      reversedNonCashTotal: reversedNonCashTotal.roundToDouble(),
+      reversedCreditBalanceDue: reversedCreditBalanceDue.roundToDouble(),
+      restoredPhysicalStockByProduct: restoredPhysicalStock,
+    );
+  }
 
   static KasbonDpComputation computeKasbonDp({
     required double grandTotal,
@@ -145,6 +328,7 @@ class PosFinancialCalculator {
   static MultiTenderValidation validateMultiTenderPayments({
     required double grandTotal,
     required List<double> tenderAmounts,
+    List<String>? tenderMethodCodes,
     double storeCreditAmount = 0.0,
   }) {
     final normalizedGrand = math.max(0.0, grandTotal);
@@ -164,6 +348,42 @@ class PosFinancialCalculator {
 
     final isExactMatch = diff.abs() <= 0.5 && hasValidNonZeroLines;
 
+    double cashChangeReturned = 0.0;
+    bool isValidWithCashChange = false;
+    final effectiveRecordedAmounts = tenderAmounts.map((a) => math.max(0.0, a)).toList();
+
+    if (overpayment > 0.5 &&
+        hasValidNonZeroLines &&
+        tenderMethodCodes != null &&
+        tenderMethodCodes.length == tenderAmounts.length) {
+      double cashTotal = 0.0;
+      double nonCashTotal = 0.0;
+      for (int i = 0; i < tenderAmounts.length; i++) {
+        final code = tenderMethodCodes[i].trim().toLowerCase();
+        final amt = math.max(0.0, tenderAmounts[i]);
+        if (code == 'cash' || code.contains('tunai')) {
+          cashTotal += amt;
+        } else {
+          nonCashTotal += amt;
+        }
+      }
+      final netTargetAfterStoreCredit = math.max(0.0, normalizedGrand - normalizedStoreCredit);
+      if (nonCashTotal <= netTargetAfterStoreCredit + 0.5 && cashTotal >= overpayment - 0.5) {
+        cashChangeReturned = overpayment;
+        isValidWithCashChange = true;
+        double remainingChangeToDeduct = overpayment;
+        for (int i = 0; i < effectiveRecordedAmounts.length && remainingChangeToDeduct > 0; i++) {
+          final code = tenderMethodCodes[i].trim().toLowerCase();
+          if (code == 'cash' || code.contains('tunai')) {
+            final avail = effectiveRecordedAmounts[i];
+            final deduct = math.min(avail, remainingChangeToDeduct);
+            effectiveRecordedAmounts[i] = (avail - deduct).roundToDouble();
+            remainingChangeToDeduct -= deduct;
+          }
+        }
+      }
+    }
+
     return MultiTenderValidation(
       grandTotal: normalizedGrand,
       tendersTotal: tendersTotal,
@@ -171,8 +391,11 @@ class PosFinancialCalculator {
       paidTotal: paidTotal,
       remainingDue: remainingDue,
       overpayment: overpayment,
+      cashChangeReturned: cashChangeReturned,
       isExactMatch: isExactMatch,
+      isValidWithCashChange: isValidWithCashChange,
       hasValidNonZeroLines: hasValidNonZeroLines,
+      effectiveRecordedAmounts: effectiveRecordedAmounts,
     );
   }
 

@@ -475,4 +475,327 @@ void main() {
       await cubit.close();
     });
   });
+
+  group('Phase 6 — Exhaustive Real-World Edge-Case Hardening (A-D)', () {
+    Future<(PosCubit, ApiClient, OfflineDatabase)> createTestCubit() async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      apiClient.dio.options.baseUrl = 'http://127.0.0.1:59999/api/v1';
+      apiClient.dio.options.connectTimeout = const Duration(milliseconds: 50);
+      apiClient.dio.options.receiveTimeout = const Duration(milliseconds: 50);
+      final offlineDb = OfflineDatabase(prefs);
+      final cubit = PosCubit(apiClient: apiClient, offlineDb: offlineDb);
+      return (cubit, apiClient, offlineDb);
+    }
+
+    test('test_discount_exceeding_subtotal_clamped_to_zero', () {
+      expect(PosFinancialCalculator.clampDiscount(150000, 100000), 100000);
+      expect(PosFinancialCalculator.clampDiscount(-5000, 100000), 0);
+      expect(
+        PosFinancialCalculator.computeClampedGrandTotal(
+          subtotal: 100000,
+          discountAmount: 150000,
+        ),
+        0,
+      );
+
+      final item = CartItemModel(
+        product: ProductModel.fromJson({
+          'id': 10,
+          'name': 'Kemeja Linen',
+          'selling_price': 100000,
+          'stock': 10,
+        }),
+        quantity: 1,
+        unitPrice: 100000,
+        discountAmount: 150000,
+      );
+      expect(item.effectiveDiscountAmount, 100000);
+      expect(item.lineTotal, 0);
+    });
+
+    test('test_consistent_rupiah_rounding_with_ppn_and_service_charge', () {
+      final breakdown = PosFinancialCalculator.computeOrderTotalsWithTaxAndService(
+        rawLineTotals: const [33333.33, 66666.67],
+        discountTotal: 15000,
+        serviceChargePercent: 5,
+        taxPercent: 11,
+      );
+
+      // Lines round to 33333 + 66667 = 100000 -> net 85000
+      expect(breakdown.subtotal, 100000);
+      expect(breakdown.discountTotal, 15000);
+      expect(breakdown.netSubtotal, 85000);
+      expect(breakdown.serviceChargeAmount, 4250);
+      expect(breakdown.taxAmount, ((85000 + 4250) * 0.11).roundToDouble());
+      expect(
+        breakdown.grandTotal,
+        breakdown.netSubtotal + breakdown.serviceChargeAmount + breakdown.taxAmount,
+      );
+    });
+
+    test('test_mixed_split_payment_cash_and_transfer_with_overpayment_change', () {
+      final validCashOver = PosFinancialCalculator.validateMultiTenderPayments(
+        grandTotal: 150000,
+        tenderAmounts: const [100000, 100000],
+        tenderMethodCodes: const ['transfer', 'cash'],
+      );
+      expect(validCashOver.isValidWithCashChange, isTrue);
+      expect(validCashOver.isValidCheckout, isTrue);
+      expect(validCashOver.cashChangeReturned, 50000);
+      expect(validCashOver.effectiveRecordedAmounts, const [100000, 50000]);
+
+      final invalidNonCashOver = PosFinancialCalculator.validateMultiTenderPayments(
+        grandTotal: 150000,
+        tenderAmounts: const [100000, 100000],
+        tenderMethodCodes: const ['transfer', 'qris'],
+      );
+      expect(invalidNonCashOver.isValidCheckout, isFalse);
+      expect(invalidNonCashOver.cashChangeReturned, 0);
+    });
+
+    test('test_void_split_sale_restores_store_credit_and_reverses_tenders', () {
+      final reversal = PosFinancialCalculator.computeVoidReversal({
+        'store_credit_amount': 40000,
+        'balance_due': 25000,
+        'payments': const [
+          {'method_code': 'transfer', 'amount': 60000, 'tendered_amount': 60000},
+          {'method_code': 'cash', 'amount': 50000, 'tendered_amount': 100000},
+        ],
+        'items': const [
+          {'product_id': 1, 'quantity': 2, 'multiplier': 1, 'is_service': false},
+          {'product_id': 2, 'quantity': 1, 'multiplier': 1, 'is_service': true},
+        ],
+      });
+
+      expect(reversal.restoredStoreCredit, 40000);
+      expect(reversal.reversedNonCashTotal, 60000);
+      expect(reversal.reversedCashInDrawer, 50000);
+      expect(reversal.reversedCreditBalanceDue, 25000);
+      expect(reversal.restoredPhysicalStockByProduct[1], 2);
+      expect(reversal.restoredPhysicalStockByProduct.containsKey(2), isFalse);
+    });
+
+    test('test_multiple_held_carts_preserve_active_cart_on_resume', () async {
+      final (cubit, _, _) = await createTestCubit();
+      final itemA = ProductModel.fromJson({
+        'id': 101,
+        'name': 'Produk Antre A',
+        'selling_price': 25000,
+        'stock': 20,
+      });
+      final itemB = ProductModel.fromJson({
+        'id': 102,
+        'name': 'Produk Aktif B',
+        'selling_price': 45000,
+        'stock': 20,
+      });
+
+      cubit.addToCart(itemA, quantity: 2);
+      cubit.selectCustomer({'id': 77, 'name': 'Budi Santoso'});
+      await cubit.holdCurrentCart('Meja VIP 1');
+
+      expect(cubit.state.cart, isEmpty);
+      expect(cubit.state.heldCarts.length, 1);
+
+      cubit.addToCart(itemB, quantity: 1);
+      expect(cubit.searchHeldCarts('Budi').length, 1);
+
+      // Resuming Cart A while Cart B is active auto-parks Cart B instead of overwriting it
+      cubit.resumeHeldCart(0);
+      expect(cubit.state.cart.length, 1);
+      expect(cubit.state.cart.first.product.id, 101);
+      expect(cubit.state.selectedCustomer?['name'], 'Budi Santoso');
+      expect(cubit.state.heldCarts.length, 1);
+      expect(
+        (cubit.state.heldCarts.first['cart_items'] as List<CartItemModel>).first.product.id,
+        102,
+      );
+
+      await cubit.close();
+    });
+
+    test('test_workshop_service_item_does_not_deduct_physical_stock', () async {
+      final (cubit, _, _) = await createTestCubit();
+      await cubit.setBusinessVertical(BusinessVertical.workshop);
+
+      final sparepart = ProductModel.fromJson({
+        'id': 1,
+        'name': 'Busi Iridium',
+        'selling_price': 50000,
+        'stock': 10,
+        'type': 'product',
+      });
+      final serviceItem = ProductModel.fromJson({
+        'id': 2,
+        'name': 'Jasa Servis Tune Up',
+        'selling_price': 100000,
+        'stock': 0,
+        'type': 'service',
+      });
+
+      cubit.addToCart(sparepart, quantity: 1);
+      cubit.addToCart(serviceItem, quantity: 1);
+      cubit.reconcileCartWithLatestCatalog(refreshedProducts: [sparepart, serviceItem]);
+
+      await cubit.completeCheckout(
+        payments: const [
+          {'payment_method_id': 1, 'amount': 150000, 'tendered_amount': 150000},
+        ],
+        paymentMethodNames: const ['Tunai'],
+        paidTotal: 150000,
+        changeReturned: 0,
+        balanceDue: 0,
+      );
+
+      expect(cubit.state.allProducts.firstWhere((p) => p.id == 1).stock, 9.0);
+      expect(cubit.state.allProducts.firstWhere((p) => p.id == 2).stock, 0.0);
+
+      await cubit.close();
+    });
+
+    test('test_pharmacy_prescription_guard_detects_missing_doctor_info', () async {
+      final (cubit, _, _) = await createTestCubit();
+      await cubit.setBusinessVertical(BusinessVertical.pharmacy);
+
+      final rxDrug = ProductModel.fromJson({
+        'id': 301,
+        'name': 'Amoxicillin 500mg',
+        'selling_price': 22000,
+        'stock': 50,
+        'requires_prescription': true,
+      });
+
+      cubit.addToCart(rxDrug, quantity: 1);
+      expect(cubit.state.hasUnfulfilledPrescriptionRequirement, isTrue);
+      expect(cubit.validatePrescriptionRequirements(), isNotNull);
+
+      cubit.setVerticalMetadata({
+        'doctor_name': 'dr. Ratna Sari',
+        'patient_name': 'Ny. Ani',
+      });
+      expect(cubit.state.hasUnfulfilledPrescriptionRequirement, isFalse);
+      expect(cubit.validatePrescriptionRequirements(), isNull);
+
+      await cubit.close();
+    });
+
+    test('test_laundry_decimal_weight_and_express_surcharge_calculation', () async {
+      final (cubit, _, _) = await createTestCubit();
+      await cubit.setBusinessVertical(BusinessVertical.laundry);
+
+      final computed = PosFinancialCalculator.computeLaundryLineTotal(
+        weightKg: 2.35,
+        baseRatePerKg: 8000,
+        expressSurchargePerKg: 5000,
+      );
+      expect(computed, 30550);
+
+      final kiloProduct = ProductModel.fromJson({
+        'id': 401,
+        'name': 'Cuci Setrika Kiloan',
+        'selling_price': 8000,
+        'unit_code': 'kg',
+        'sold_by_weight': true,
+        'type': 'service',
+      });
+      cubit.addToCart(kiloProduct, quantity: 2.35);
+      cubit.updateCartItemDetails(
+        0,
+        quantity: 2.35,
+        unitPrice: 13000,
+        notes: '[Express]',
+      );
+
+      expect(cubit.state.cart.first.quantity, 2.35);
+      expect(cubit.state.cart.first.unitPrice, 13000);
+      expect(cubit.state.cart.first.lineTotal, 30550);
+
+      await cubit.close();
+    });
+
+    test('test_salon_multiple_stylists_per_cart_line', () async {
+      final (cubit, _, _) = await createTestCubit();
+      await cubit.setBusinessVertical(BusinessVertical.salon);
+
+      final hairCare = ProductModel.fromJson({
+        'id': 501,
+        'name': 'Creambath & Hair Spa',
+        'selling_price': 125000,
+        'type': 'service',
+      });
+
+      cubit.addToCart(hairCare, quantity: 1, stylistName: 'Rina (Senior)');
+      cubit.addToCart(hairCare, quantity: 1, stylistName: 'Budi (Kapster)');
+
+      expect(cubit.state.cart.length, 2);
+      expect(cubit.state.cart[0].stylistName, 'Rina (Senior)');
+      expect(cubit.state.cart[1].stylistName, 'Budi (Kapster)');
+
+      await cubit.close();
+    });
+
+    test('test_double_checkout_idempotency_mutex_prevents_duplicate_sale', () async {
+      final (cubit, _, _) = await createTestCubit();
+      final item = ProductModel.fromJson({
+        'id': 601,
+        'name': 'Parfum Eau De Parfum',
+        'selling_price': 200000,
+        'stock': 5,
+      });
+
+      cubit.addToCart(item, quantity: 1);
+      cubit.reconcileCartWithLatestCatalog(refreshedProducts: [item]);
+
+      const key = 'idem-uuid-1234-5678';
+      final firstFuture = cubit.completeCheckout(
+        payments: const [
+          {'payment_method_id': 1, 'amount': 200000, 'tendered_amount': 200000},
+        ],
+        paymentMethodNames: const ['Tunai'],
+        paidTotal: 200000,
+        changeReturned: 0,
+        balanceDue: 0,
+        idempotencyKey: key,
+      );
+
+      // Concurrent invocation while firstFuture is still awaiting I/O must be rejected immediately
+      await expectLater(
+        () => cubit.completeCheckout(
+          payments: const [
+            {'payment_method_id': 1, 'amount': 200000, 'tendered_amount': 200000},
+          ],
+          paymentMethodNames: const ['Tunai'],
+          paidTotal: 200000,
+          changeReturned: 0,
+          balanceDue: 0,
+          idempotencyKey: 'different-key',
+        ),
+        throwsStateError,
+      );
+
+      final firstReceipt = await firstFuture;
+      // Retrying with the exact same idempotencyKey returns the cached receipt with 1 sale recorded
+      final retryReceipt = await cubit.completeCheckout(
+        payments: const [
+          {'payment_method_id': 1, 'amount': 200000, 'tendered_amount': 200000},
+        ],
+        paymentMethodNames: const ['Tunai'],
+        paidTotal: 200000,
+        changeReturned: 0,
+        balanceDue: 0,
+        idempotencyKey: key,
+      );
+
+      expect(retryReceipt['local_uuid'], firstReceipt['local_uuid']);
+      expect(cubit.state.salesHistory.length, 1);
+      expect(cubit.state.allProducts.firstWhere((p) => p.id == 601).stock, 4.0);
+
+      await cubit.close();
+    });
+  });
 }

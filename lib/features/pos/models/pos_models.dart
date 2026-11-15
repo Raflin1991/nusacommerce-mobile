@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:equatable/equatable.dart';
 
 class ProductVolumeTier extends Equatable {
@@ -181,6 +182,7 @@ class ProductModel extends Equatable {
   final String categoryName;
   final bool isLowStock;
   final bool soldByWeight;
+  final bool requiresPrescription;
   final String? scalePlu;
   final String? digitalTargetLabel;
   final String? shelfLocation;
@@ -205,6 +207,7 @@ class ProductModel extends Equatable {
     this.categoryName = 'Umum',
     this.isLowStock = false,
     this.soldByWeight = false,
+    this.requiresPrescription = false,
     this.scalePlu,
     this.digitalTargetLabel,
     this.shelfLocation,
@@ -326,6 +329,9 @@ class ProductModel extends Equatable {
           : (json['category_name'] ?? 'Umum').toString(),
       isLowStock: lowStock,
       soldByWeight: soldByWeight,
+      requiresPrescription: json['requires_prescription'] == true ||
+          json['is_prescription_required'] == true ||
+          (json['drug_class'] ?? '').toString().toLowerCase() == 'obat_keras',
       scalePlu: json['scale_plu']?.toString(),
       digitalTargetLabel: digitalMap != null
           ? digitalMap['target_label']?.toString()
@@ -354,6 +360,7 @@ class ProductModel extends Equatable {
         'category_name': categoryName,
         'is_low_stock': isLowStock,
         'sold_by_weight': soldByWeight,
+        'requires_prescription': requiresPrescription,
         'scale_plu': scalePlu,
         'digital_target_label': digitalTargetLabel,
         'shelf_location': shelfLocation,
@@ -390,8 +397,33 @@ class ProductModel extends Equatable {
   /// True when any active batch expires within <= 30 days (FEFO alert)
   bool get hasExpiringSoonBatch => batches.any((b) => b.isExpiringSoon);
 
+  /// C.1: True for workshop labor/service fees or non-inventory items that must NOT deduct physical stock.
+  bool get isServiceOrNonStockItem {
+    final t = type.trim().toLowerCase();
+    final cat = categoryName.trim().toLowerCase();
+    final nm = name.trim().toLowerCase();
+    return t == 'service' ||
+        t == 'jasa' ||
+        t == 'digital' ||
+        cat.contains('jasa') ||
+        cat.contains('servis') ||
+        cat.contains('service') ||
+        nm.startsWith('jasa ');
+  }
+
   @override
-  List<Object?> get props => [id, name, sku, sellingPrice, stock, isLowStock, batches, unitConversions, volumeTiers];
+  List<Object?> get props => [
+        id,
+        name,
+        sku,
+        sellingPrice,
+        stock,
+        isLowStock,
+        requiresPrescription,
+        batches,
+        unitConversions,
+        volumeTiers,
+      ];
 }
 
 class CartItemModel extends Equatable {
@@ -435,11 +467,16 @@ class CartItemModel extends Equatable {
     return product.name;
   }
 
-  double get lineSubtotal => quantity * unitPrice;
+  double get lineSubtotal => (quantity * unitPrice).roundToDouble();
+
+  /// A.1 & A.2: Clamp item-level discount so lineTotal is never negative and stays consistent at Rupiah precision.
+  double get effectiveDiscountAmount => isExchangeReturn
+      ? 0.0
+      : discountAmount.clamp(0.0, math.max(0.0, lineSubtotal)).roundToDouble();
 
   double get lineTotal => isExchangeReturn
       ? lineSubtotal
-      : (lineSubtotal - discountAmount).clamp(0, double.infinity);
+      : (lineSubtotal - effectiveDiscountAmount).clamp(0.0, double.infinity).roundToDouble();
 
   CartItemModel copyWith({
     int? saleItemId,

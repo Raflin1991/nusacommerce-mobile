@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
@@ -66,6 +67,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   DateTime _kasbonDueDate = DateTime.now().add(const Duration(days: 7));
   Map<String, dynamic>? _selectedCustomer;
   bool _isSubmitting = false;
+  String? _pendingIdempotencyKey;
 
   // Additional payment sub-options
   String _qrisType = 'Dinamis'; // 'Dinamis' | 'Statis'
@@ -90,12 +92,16 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       text: IdrCurrencyFormatter.format(state.grandTotal),
     );
     _selectedCustomer = state.selectedCustomer;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted && state.isOnline && state.cart.isNotEmpty) {
-        context.read<PosCubit>().verifyServerCartPrice(
-              customerId: (state.selectedCustomer?['id'] as num?)?.toInt(),
-              redeemPoints: state.redeemedLoyaltyPoints,
-            );
+        final cubit = context.read<PosCubit>();
+        final serverData = await cubit.verifyServerCartPrice(
+          customerId: (state.selectedCustomer?['id'] as num?)?.toInt(),
+          redeemPoints: state.redeemedLoyaltyPoints,
+        );
+        if (mounted && serverData != null) {
+          cubit.reconcileCartWithLatestCatalog(serverPriceData: serverData);
+        }
       }
     });
   }
@@ -262,6 +268,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     return PosFinancialCalculator.validateMultiTenderPayments(
       grandTotal: grandTotal,
       tenderAmounts: _splitLines.map((l) => l.amount).toList(),
+      tenderMethodCodes: _splitLines.map((l) => l.methodCode).toList(),
       storeCreditAmount: _appliedStoreCredit(grandTotal),
     );
   }
@@ -691,194 +698,231 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }
 
   Future<void> _submitPayment(double grandTotal) async {
-    if (_isSubmitting) return;
+    final posCubit = context.read<PosCubit>();
+    if (_isSubmitting || posCubit.isCheckoutInProgress) return;
+    setState(() => _isSubmitting = true);
 
-    final posState = context.read<PosCubit>().state;
-    final availableMethods = posState.paymentMethods;
-    final appliedStoreCredit = _appliedStoreCredit(grandTotal);
-    final netDue = _netTotalAfterStoreCredit(grandTotal);
-
-    final paymentsList = <Map<String, dynamic>>[];
-    final methodNames = <String>[];
-    double paidTotal = 0.0;
-    double changeReturned = 0.0;
-    double balanceDue = 0.0;
-    String? dueDateStr;
-
-    if (appliedStoreCredit > 0) {
-      methodNames.add('Saldo Deposit (${IdrCurrencyFormatter.format(appliedStoreCredit)})');
-    }
-
-    if (_isKasbonMode) {
-      if (_selectedCustomer == null) {
-        PosFeedback.onGuardBlocked();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: AppColors.danger,
-            content: Text('Pilih pelanggan terlebih dahulu untuk transaksi Kasbon.'),
-          ),
-        );
-        return;
-      }
-      final kasbonCalc = _buildKasbonCalculation(grandTotal);
-      if (kasbonCalc.validationError != null || !kasbonCalc.isWithinCreditLimit) {
+    try {
+      final rxWarning = posCubit.validatePrescriptionRequirements();
+      if (rxWarning != null) {
         PosFeedback.onGuardBlocked();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: AppColors.danger,
-            content: Text(kasbonCalc.validationError ?? 'Melebihi plafon kredit pelanggan!'),
+            content: Text(rxWarning),
           ),
         );
         return;
       }
 
-      paidTotal = kasbonCalc.downPayment;
-      balanceDue = kasbonCalc.balanceDue;
-      dueDateStr = DateFormat('yyyy-MM-dd').format(_kasbonDueDate);
+      final posState = posCubit.state;
+      final availableMethods = posState.paymentMethods;
+      final appliedStoreCredit = _appliedStoreCredit(grandTotal);
+      final netDue = _netTotalAfterStoreCredit(grandTotal);
 
-      if (kasbonCalc.downPayment > 0) {
-        final dpLabel = _labelForCode(_kasbonDpMethod);
-        paymentsList.add({
-          'payment_method_id': _resolvePaymentMethodId(availableMethods, _kasbonDpMethod),
-          'amount': kasbonCalc.downPayment,
-          'tendered_amount': kasbonCalc.downPayment,
-          'reference': 'DP-$dpLabel',
-        });
-        methodNames.add('DP $dpLabel (${IdrCurrencyFormatter.format(kasbonCalc.downPayment)})');
-      }
-      methodNames.add('Kasbon (${IdrCurrencyFormatter.format(balanceDue)})');
-    } else if (_isSplitPayment) {
-      final validation = _buildMultiTenderValidation(grandTotal);
-      if (!validation.isExactMatch) {
-        PosFeedback.onGuardBlocked();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.danger,
-            content: Text(
-              validation.remainingDue > 0
-                  ? 'Multi-Tender masih kurang ${IdrCurrencyFormatter.format(validation.remainingDue)}!'
-                  : 'Nominal Multi-Tender melebihi total tagihan!',
-            ),
-          ),
-        );
-        return;
+      final paymentsList = <Map<String, dynamic>>[];
+      final methodNames = <String>[];
+      double paidTotal = 0.0;
+      double changeReturned = 0.0;
+      double balanceDue = 0.0;
+      String? dueDateStr;
+
+      if (appliedStoreCredit > 0) {
+        methodNames.add('Saldo Deposit (${IdrCurrencyFormatter.format(appliedStoreCredit)})');
       }
 
-      paidTotal = validation.tendersTotal;
-      for (final line in _splitLines) {
-        if (line.amount <= 0) continue;
-        final label = line.subType.isNotEmpty
-            ? '${line.methodLabel} (${line.subType})'
-            : line.methodLabel;
-        final ref = line.referenceController.text.trim().isNotEmpty
-            ? line.referenceController.text.trim()
-            : '$label-SPLIT';
-        paymentsList.add({
-          'payment_method_id': _resolvePaymentMethodId(availableMethods, line.methodCode),
-          'amount': line.amount,
-          'tendered_amount': line.amount,
-          if (line.methodCode != 'cash') 'reference': ref,
-        });
-        methodNames.add('$label (${IdrCurrencyFormatter.format(line.amount)})');
-      }
-    } else {
-      if (netDue <= 0.5) {
-        paidTotal = 0.0;
-        changeReturned = 0.0;
-        if (posState.isExchangeMode && posState.exchangeSurplusCredit > 0) {
-          methodNames.add(
-            _refundSurplusToStoreCredit && (_selectedCustomer?['id'] as num?) != null
-                ? 'Tukar Barang (Simpan Deposit)'
-                : 'Tukar Barang (Kembali Tunai)',
-          );
-        } else if (posState.isExchangeMode) {
-          methodNames.add('Tukar Barang (Impas)');
-        }
-      } else {
-        final rawPaid = _paidAmount;
-        if (rawPaid < netDue - 0.5) {
+      if (_isKasbonMode) {
+        if (_selectedCustomer == null) {
           PosFeedback.onGuardBlocked();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: AppColors.danger,
-              content: Text('Jumlah bayar kurang dari Sisa Tagihan!'),
+              content: Text('Pilih pelanggan terlebih dahulu untuk transaksi Kasbon.'),
             ),
           );
           return;
         }
-        paidTotal = rawPaid;
-        changeReturned = (rawPaid - netDue).clamp(0.0, double.infinity);
+        final kasbonCalc = _buildKasbonCalculation(grandTotal);
+        if (kasbonCalc.validationError != null || !kasbonCalc.isWithinCreditLimit) {
+          PosFeedback.onGuardBlocked();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.danger,
+              content: Text(kasbonCalc.validationError ?? 'Melebihi plafon kredit pelanggan!'),
+            ),
+          );
+          return;
+        }
 
-        String resolvedName = _selectedMethodName;
-        if (_selectedMethodCode == 'qris') resolvedName = 'QRIS $_qrisType';
-        if (_selectedMethodCode == 'transfer') resolvedName = 'Transfer $_selectedBank';
-        if (_selectedMethodCode == 'card') resolvedName = 'EDC $_edcCardType';
+        paidTotal = kasbonCalc.downPayment;
+        balanceDue = kasbonCalc.balanceDue;
+        dueDateStr = DateFormat('yyyy-MM-dd').format(_kasbonDueDate);
 
-        paymentsList.add({
-          'payment_method_id': _resolvePaymentMethodId(availableMethods, _selectedMethodCode),
-          'amount': netDue,
-          'tendered_amount': rawPaid,
-          'reference': _referenceController.text.trim().isNotEmpty
-              ? _referenceController.text.trim()
-              : resolvedName,
-        });
-        methodNames.add(resolvedName);
+        if (kasbonCalc.downPayment > 0) {
+          final dpLabel = _labelForCode(_kasbonDpMethod);
+          paymentsList.add({
+            'payment_method_id': _resolvePaymentMethodId(availableMethods, _kasbonDpMethod),
+            'amount': kasbonCalc.downPayment,
+            'tendered_amount': kasbonCalc.downPayment,
+            'reference': 'DP-$dpLabel',
+          });
+          methodNames.add('DP $dpLabel (${IdrCurrencyFormatter.format(kasbonCalc.downPayment)})');
+        }
+        methodNames.add('Kasbon (${IdrCurrencyFormatter.format(balanceDue)})');
+      } else if (_isSplitPayment) {
+        final validation = _buildMultiTenderValidation(grandTotal);
+        if (!validation.isValidCheckout) {
+          PosFeedback.onGuardBlocked();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.danger,
+              content: Text(
+                validation.remainingDue > 0
+                    ? 'Multi-Tender masih kurang ${IdrCurrencyFormatter.format(validation.remainingDue)}!'
+                    : 'Kelebihan bayar non-tunai tidak diperbolehkan!',
+              ),
+            ),
+          );
+          return;
+        }
+
+        paidTotal = validation.tendersTotal;
+        changeReturned = validation.cashChangeReturned;
+        for (int i = 0; i < _splitLines.length; i++) {
+          final line = _splitLines[i];
+          if (line.amount <= 0) continue;
+          final recordedAmount = i < validation.effectiveRecordedAmounts.length
+              ? validation.effectiveRecordedAmounts[i]
+              : line.amount;
+          final label = line.subType.isNotEmpty
+              ? '${line.methodLabel} (${line.subType})'
+              : line.methodLabel;
+          final ref = line.referenceController.text.trim().isNotEmpty
+              ? line.referenceController.text.trim()
+              : '$label-SPLIT';
+          paymentsList.add({
+            'payment_method_id': _resolvePaymentMethodId(availableMethods, line.methodCode),
+            'amount': recordedAmount,
+            'tendered_amount': line.amount,
+            if (line.methodCode != 'cash') 'reference': ref,
+          });
+          methodNames.add('$label (${IdrCurrencyFormatter.format(recordedAmount)})');
+        }
+      } else {
+        if (netDue <= 0.5) {
+          paidTotal = 0.0;
+          changeReturned = 0.0;
+          if (posState.isExchangeMode && posState.exchangeSurplusCredit > 0) {
+            methodNames.add(
+              _refundSurplusToStoreCredit && (_selectedCustomer?['id'] as num?) != null
+                  ? 'Tukar Barang (Simpan Deposit)'
+                  : 'Tukar Barang (Kembali Tunai)',
+            );
+          } else if (posState.isExchangeMode) {
+            methodNames.add('Tukar Barang (Impas)');
+          }
+        } else {
+          final rawPaid = _paidAmount;
+          if (rawPaid < netDue - 0.5) {
+            PosFeedback.onGuardBlocked();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: AppColors.danger,
+                content: Text('Jumlah bayar kurang dari Sisa Tagihan!'),
+              ),
+            );
+            return;
+          }
+          paidTotal = rawPaid;
+          changeReturned = (rawPaid - netDue).clamp(0.0, double.infinity);
+
+          String resolvedName = _selectedMethodName;
+          if (_selectedMethodCode == 'qris') resolvedName = 'QRIS $_qrisType';
+          if (_selectedMethodCode == 'transfer') resolvedName = 'Transfer $_selectedBank';
+          if (_selectedMethodCode == 'card') resolvedName = 'EDC $_edcCardType';
+
+          paymentsList.add({
+            'payment_method_id': _resolvePaymentMethodId(availableMethods, _selectedMethodCode),
+            'amount': netDue,
+            'tendered_amount': rawPaid,
+            'reference': _referenceController.text.trim().isNotEmpty
+                ? _referenceController.text.trim()
+                : resolvedName,
+          });
+          methodNames.add(resolvedName);
+        }
       }
-    }
 
-    setState(() => _isSubmitting = true);
+      _pendingIdempotencyKey ??= const Uuid().v4();
 
-    final receipt = await context.read<PosCubit>().completeCheckout(
-          payments: paymentsList,
-          paymentMethodNames: methodNames.isEmpty ? ['Tunai'] : methodNames,
-          paidTotal: paidTotal,
-          changeReturned: changeReturned,
-          balanceDue: balanceDue,
-          storeCreditAmount: appliedStoreCredit,
-          grandTotalOverride: _splitOverrideGrandTotal,
-          overrideHeldSaleId: _splitChildHeldSaleId,
-          refundSurplusToStoreCredit: _refundSurplusToStoreCredit,
-          splitItemIndices: _splitItemIndices,
-          dueDate: dueDateStr,
-        );
+      final receipt = await posCubit.completeCheckout(
+        payments: paymentsList,
+        paymentMethodNames: methodNames.isEmpty ? ['Tunai'] : methodNames,
+        paidTotal: paidTotal,
+        changeReturned: changeReturned,
+        balanceDue: balanceDue,
+        storeCreditAmount: appliedStoreCredit,
+        grandTotalOverride: _splitOverrideGrandTotal,
+        overrideHeldSaleId: _splitChildHeldSaleId,
+        refundSurplusToStoreCredit: _refundSurplusToStoreCredit,
+        splitItemIndices: _splitItemIndices,
+        dueDate: dueDateStr,
+        idempotencyKey: _pendingIdempotencyKey,
+      );
 
-    final enrichedReceipt = Map<String, dynamic>.from(receipt);
-    if (_splitServiceCharge > 0) {
-      enrichedReceipt['service_charge_amount'] = _splitServiceCharge;
-    }
-    if (_splitTaxTotal > 0) {
-      enrichedReceipt['tax_total'] = _splitTaxTotal;
-    }
+      _pendingIdempotencyKey = null;
 
-    final hasCashComponent = PrinterService.shouldKickCashDrawer(
-      payments: paymentsList,
-      paymentMethods: methodNames,
-      isKasbonZeroDp: _isKasbonMode && paidTotal <= 0,
-      isReprint: false,
-    );
-    enrichedReceipt['has_cash_payment'] = hasCashComponent;
+      final enrichedReceipt = Map<String, dynamic>.from(receipt);
+      if (_splitServiceCharge > 0) {
+        enrichedReceipt['service_charge_amount'] = _splitServiceCharge;
+      }
+      if (_splitTaxTotal > 0) {
+        enrichedReceipt['tax_total'] = _splitTaxTotal;
+      }
 
-    // Phase 3.1: Non-blocking multi-printer KOT & Bar routing when configured
-    if (GetIt.instance.isRegistered<PrinterService>()) {
-      final printer = GetIt.instance<PrinterService>();
-      final hasStationPrinters =
-          (printer.printerDapurMac != null && printer.printerDapurMac!.isNotEmpty) ||
-              (printer.printerBarMac != null && printer.printerBarMac!.isNotEmpty);
-      if (hasStationPrinters || posState.capabilities.hasKitchenOrderTicket) {
-        unawaited(
-          printer.routeOrderTicketsAndReceipt(
-            sale: enrichedReceipt,
-            store: widget.offlineDb.getStoreProfile(),
-            openCashDrawer: hasCashComponent && printer.autoOpenCashDrawer,
-            printReceipt: false,
+      final hasCashComponent = PrinterService.shouldKickCashDrawer(
+        payments: paymentsList,
+        paymentMethods: methodNames,
+        isKasbonZeroDp: _isKasbonMode && paidTotal <= 0,
+        isReprint: false,
+      );
+      enrichedReceipt['has_cash_payment'] = hasCashComponent;
+
+      // Phase 3.1: Non-blocking multi-printer KOT & Bar routing when configured
+      if (GetIt.instance.isRegistered<PrinterService>()) {
+        final printer = GetIt.instance<PrinterService>();
+        final hasStationPrinters =
+            (printer.printerDapurMac != null && printer.printerDapurMac!.isNotEmpty) ||
+                (printer.printerBarMac != null && printer.printerBarMac!.isNotEmpty);
+        if (hasStationPrinters || posState.capabilities.hasKitchenOrderTicket) {
+          unawaited(
+            printer.routeOrderTicketsAndReceipt(
+              sale: enrichedReceipt,
+              store: widget.offlineDb.getStoreProfile(),
+              openCashDrawer: hasCashComponent && printer.autoOpenCashDrawer,
+              printReceipt: false,
+            ),
+          );
+        }
+      }
+
+      if (mounted) {
+        context.pushReplacement('/pos/receipt', extra: enrichedReceipt);
+      }
+    } catch (e) {
+      if (mounted) {
+        PosFeedback.onGuardBlocked();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.danger,
+            content: Text('Gagal memproses transaksi: $e'),
           ),
         );
       }
-    }
-
-    if (mounted) {
-      setState(() => _isSubmitting = false);
-      context.pushReplacement('/pos/receipt', extra: enrichedReceipt);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -1664,7 +1708,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                 const SizedBox(height: 14),
                 NusaCard(
                   backgroundColor: AppColors.primarySoft,
-                  borderColor: multiValidation.isExactMatch
+                  borderColor: multiValidation.isValidCheckout
                       ? AppColors.success.withOpacity(0.45)
                       : AppColors.primary.withOpacity(0.3),
                   child: Column(
@@ -1684,7 +1728,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                           ),
                           NusaBadge(
                             label: '${_splitLines.length} Metode',
-                            variant: multiValidation.isExactMatch
+                            variant: multiValidation.isValidCheckout
                                 ? NusaBadgeVariant.success
                                 : NusaBadgeVariant.warning,
                           ),
@@ -1698,7 +1742,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: multiValidation.isExactMatch
+                            color: multiValidation.isValidCheckout
                                 ? AppColors.success.withOpacity(0.45)
                                 : AppColors.warning.withOpacity(0.45),
                           ),
@@ -1735,25 +1779,29 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  multiValidation.overpayment > 0
-                                      ? 'Kelebihan Input'
-                                      : 'Sisa Kurang',
+                                  multiValidation.isValidWithCashChange
+                                      ? 'Kembalian Tunai'
+                                      : (multiValidation.overpayment > 0
+                                          ? 'Kelebihan Non-Tunai'
+                                          : 'Sisa Kurang'),
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w800,
-                                    color: multiValidation.isExactMatch
+                                    color: multiValidation.isValidCheckout
                                         ? AppColors.successDark
                                         : AppColors.danger,
                                   ),
                                 ),
                                 Text(
-                                  multiValidation.overpayment > 0
-                                      ? IdrCurrencyFormatter.format(multiValidation.overpayment)
-                                      : IdrCurrencyFormatter.format(multiValidation.remainingDue),
+                                  multiValidation.isValidWithCashChange
+                                      ? IdrCurrencyFormatter.format(multiValidation.cashChangeReturned)
+                                      : (multiValidation.overpayment > 0
+                                          ? IdrCurrencyFormatter.format(multiValidation.overpayment)
+                                          : IdrCurrencyFormatter.format(multiValidation.remainingDue)),
                                   style: AppTheme.moneyStyle(
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w900,
-                                    color: multiValidation.isExactMatch
+                                    color: multiValidation.isValidCheckout
                                         ? AppColors.successDark
                                         : AppColors.danger,
                                   ),
@@ -2110,7 +2158,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                   (_selectedCustomer == null ||
                       !kasbonCalc.isWithinCreditLimit ||
                       kasbonCalc.validationError != null);
-              final isSplitBlocked = _isSplitPayment && !multiValidation.isExactMatch;
+              final isSplitBlocked = _isSplitPayment && !multiValidation.isValidCheckout;
               final canSubmit = !_isSubmitting && !isKasbonBlocked && !isSplitBlocked;
 
               String bannerLabel;
@@ -2138,14 +2186,20 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     : AppColors.warning.withOpacity(0.35);
                 bannerTextColor = isKasbonBlocked ? AppColors.danger : AppColors.warningDark;
               } else if (_isSplitPayment) {
-                if (multiValidation.isExactMatch) {
+                if (multiValidation.isValidWithCashChange) {
+                  bannerLabel = 'Kembalian Tunai (Split Valid)';
+                  bannerAmount = multiValidation.cashChangeReturned;
+                  bannerBg = AppColors.successSoft;
+                  bannerBorder = AppColors.success.withOpacity(0.35);
+                  bannerTextColor = AppColors.successDark;
+                } else if (multiValidation.isExactMatch) {
                   bannerLabel = 'Multi-Tender Pas & Valid (${_splitLines.length} Metode)';
                   bannerAmount = multiValidation.grandTotal;
                   bannerBg = AppColors.successSoft;
                   bannerBorder = AppColors.success.withOpacity(0.35);
                   bannerTextColor = AppColors.successDark;
                 } else if (multiValidation.overpayment > 0) {
-                  bannerLabel = 'Kelebihan Input Split';
+                  bannerLabel = 'Kelebihan Non-Tunai Split';
                   bannerAmount = multiValidation.overpayment;
                   bannerBg = AppColors.dangerSoft;
                   bannerBorder = AppColors.danger.withOpacity(0.35);
