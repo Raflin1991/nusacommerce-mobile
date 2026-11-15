@@ -1,4 +1,7 @@
 # NusaCommerce POS — Android R8 / ProGuard Keep Rules
+-dontwarn **
+-dontoptimize
+-ignorewarnings
 
 # Keep Flutter Engine & Plugin Channels
 -keep class io.flutter.** { *; }
