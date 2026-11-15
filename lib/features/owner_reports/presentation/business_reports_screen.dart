@@ -5,8 +5,10 @@ import 'package:get_it/get_it.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/network_connectivity_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
@@ -22,6 +24,8 @@ class BusinessReportsScreen extends StatefulWidget {
 
 class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
   final ApiClient _api = GetIt.instance<ApiClient>();
+  final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
+  final NetworkConnectivityService _connectivity = GetIt.instance<NetworkConnectivityService>();
 
   String _periodKey = '7d';
   String _selectedDateRange = '7 Hari Terakhir';
@@ -61,11 +65,83 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
     _fetchReports();
   }
 
+  (DateTime?, DateTime?) _resolveLocalDateRange() {
+    final now = DateTime.now();
+    switch (_periodKey) {
+      case 'today':
+        return (DateTime(now.year, now.month, now.day), now);
+      case 'yesterday':
+        final yStart = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
+        final yEnd = DateTime(now.year, now.month, now.day).subtract(const Duration(milliseconds: 1));
+        return (yStart, yEnd);
+      case '7d':
+        return (DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6)), now);
+      case '30d':
+        return (DateTime(now.year, now.month, now.day).subtract(const Duration(days: 29)), now);
+      case 'month':
+        return (DateTime(now.year, now.month, 1), now);
+      case 'custom':
+        final s = _customStartDate;
+        final e = _customEndDate != null
+            ? DateTime(_customEndDate!.year, _customEndDate!.month, _customEndDate!.day, 23, 59, 59)
+            : now;
+        return (s, e);
+      default:
+        return (null, null);
+    }
+  }
+
+  void _applyLocalReport() {
+    final (start, end) = _resolveLocalDateRange();
+    final report = _offlineDb.computeLocalBusinessReport(startDate: start, endDate: end);
+    final fraud = Map<String, dynamic>.from((report['fraud_indicators'] as Map?) ?? {});
+    final trend = (report['daily_trend'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final payBreakdown = (report['payment_breakdown'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final topProds = (report['top_products'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    if (!mounted) return;
+    setState(() {
+      _profitVisible = true;
+      _netSales = (report['net_sales'] as num?)?.toDouble() ?? 0;
+      _grossProfit = (report['gross_profit'] as num?)?.toDouble() ?? 0;
+      _netProfit = (report['net_profit'] as num?)?.toDouble() ?? 0;
+      _marginPercent = (report['profit_margin'] as num?)?.toDouble() ?? 0;
+      _expensesTotal = (report['store_expenses'] as num?)?.toDouble() ?? 0;
+      _growthPercent = 0;
+      _transactionsCount = (report['transactions_count'] as num?)?.toInt() ?? 0;
+      _receivablesTotal = (report['total_receivables'] as num?)?.toDouble() ?? 0;
+      _payablesTotal = (report['total_payables'] as num?)?.toDouble() ?? 0;
+      _voidCount = (fraud['void_count'] as num?)?.toInt() ?? 0;
+      _refundCount = (fraud['refund_count'] as num?)?.toInt() ?? 0;
+      _varianceShiftsCount = (fraud['variance_shifts_count'] as num?)?.toInt() ?? 0;
+      _noSaleOpensCount = (fraud['no_sale_opens_count'] as num?)?.toInt() ?? 0;
+      _trend7d = trend;
+      _paymentBreakdown = payBreakdown;
+      _topProducts = topProds;
+      _cashierPerformance = const [];
+      _branchComparison = const [];
+      _error = null;
+      _loading = false;
+    });
+  }
+
   Future<void> _fetchReports() async {
     setState(() {
       _loading = true;
       _error = null;
     });
+
+    final isLocalTrial = context.read<AuthCubit>().state.session.isLocalTrial;
+    if (isLocalTrial || !(await _connectivity.checkOnline())) {
+      _applyLocalReport();
+      return;
+    }
 
     final params = <String, dynamic>{
       'period': _periodKey,
@@ -178,6 +254,12 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
           _loading = false;
         });
       } catch (_) {
+        if (_offlineDb.getLocalSalesHistory().isNotEmpty ||
+            _offlineDb.getLocalExpenses().isNotEmpty ||
+            _offlineDb.getCachedProducts().isNotEmpty) {
+          _applyLocalReport();
+          return;
+        }
         if (!mounted) return;
         setState(() {
           _error = ApiClient.extractErrorMessage(e);

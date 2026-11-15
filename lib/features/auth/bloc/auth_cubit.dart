@@ -74,6 +74,22 @@ class AuthCubit extends Cubit<AuthState> {
 
   /// Check existing Bearer token on startup & validate against GET /api/v1/auth/me
   Future<void> checkExistingSession() async {
+    final cachedMap = _offlineDb.getCachedAuthSession();
+    final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
+
+    if (cachedSession != null && cachedSession.isLocalTrial) {
+      final vertical = cachedSession.activeStore.preferredVerticalRaw;
+      if (vertical != null && vertical.isNotEmpty && (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
+        await _offlineDb.setSavedBusinessVertical(vertical);
+      }
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: true,
+        session: cachedSession,
+      ));
+      return;
+    }
+
     final token = await _apiClient.getToken();
     if (token == null || token.isEmpty) {
       await _offlineDb.clearAuthSession();
@@ -84,9 +100,6 @@ class AuthCubit extends Cubit<AuthState> {
       ));
       return;
     }
-
-    final cachedMap = _offlineDb.getCachedAuthSession();
-    final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
 
     emit(state.copyWith(
       isLoading: true,
@@ -208,13 +221,61 @@ class AuthCubit extends Cubit<AuthState> {
       final isNetworkOffline = e is DioException && e.response == null;
       emit(state.copyWith(
         isLoading: false,
-        isAuthenticated: false,
+        isAuthenticated: state.session.isLocalTrial ? state.isAuthenticated : false,
         errorMessage: isNetworkOffline
             ? 'Gagal terhubung ke server Cloud. Periksa koneksi jaringan atau URL Server API.'
             : ApiClient.extractErrorMessage(e),
       ));
       return false;
     }
+  }
+
+  /// Day-0 Zero-Barrier Onboarding: Mode Toko Mandiri (100% Lokal & Offline)
+  Future<void> startLocalTrialSession({
+    required String storeName,
+    required String businessVertical,
+    double openingCash = 100000,
+  }) async {
+    emit(state.copyWith(isLoading: true, errorMessage: null));
+
+    final normalizedVertical = businessVertical.trim().isEmpty
+        ? 'retail'
+        : businessVertical.trim().toLowerCase();
+
+    final session = AuthSessionModel.createLocalTrialSession(
+      storeName: storeName,
+      businessVertical: normalizedVertical,
+      openingCash: openingCash,
+    );
+
+    await _apiClient.setActiveStoreId(session.activeStore.id);
+    await _apiClient.setTenantSlug(session.tenantSubdomain);
+    await _offlineDb.saveAuthSession(session.toJson());
+    await _offlineDb.setSavedBusinessVertical(normalizedVertical);
+
+    await _offlineDb.saveStoreProfile({
+      'name': session.tenantName,
+      'branch': session.activeStore.name,
+      'address': session.activeStore.address ?? 'Mode Toko Mandiri (Offline Lokal)',
+      'phone': '-',
+      'receipt_footer': 'Terima kasih telah berbelanja di ${session.tenantName}!',
+    });
+
+    await _offlineDb.seedVerticalSampleProductsIfEmpty(normalizedVertical);
+
+    if (_offlineDb.getCurrentLocalShift() == null) {
+      await _offlineDb.openLocalShift(
+        openingCash: openingCash,
+        cashierName: session.userName,
+        notes: 'Shift Awal Mode Mandiri',
+      );
+    }
+
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: true,
+      session: session,
+    ));
   }
 
   /// Switch active Store Branch (POST /api/v1/auth/switch-store)

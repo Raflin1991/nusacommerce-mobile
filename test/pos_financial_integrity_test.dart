@@ -798,4 +798,144 @@ void main() {
       await cubit.close();
     });
   });
+
+  group('Standalone UMKM Day-0 Engine (Offline Trial, Vertical Seeding, Shifts, Debt Book & Profit)', () {
+    test('test_create_local_trial_session_sets_standalone_flags_and_vertical', () {
+      final session = AuthSessionModel.createLocalTrialSession(
+        storeName: 'Kedai Kopi Nusantara',
+        businessVertical: 'restaurant',
+        openingCash: 150000,
+      );
+
+      expect(session.isLocalTrial, isTrue);
+      expect(session.tenantName, 'Kedai Kopi Nusantara');
+      expect(session.activeStore.preferredVerticalRaw, 'restaurant');
+
+      final roundTripped = AuthSessionModel.fromJson(session.toJson());
+      expect(roundTripped.isLocalTrial, isTrue);
+      expect(roundTripped.activeStore.name, 'Kedai Kopi Nusantara');
+      expect(roundTripped.activeStore.preferredVerticalRaw, 'restaurant');
+    });
+
+    test('test_vertical_sample_seeding_populates_products_with_hpp_and_stock', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final offlineDb = OfflineDatabase(prefs);
+
+      await offlineDb.seedVerticalSampleProductsIfEmpty('pharmacy');
+      final firstProducts = offlineDb.getCachedProducts();
+      expect(firstProducts.length, greaterThanOrEqualTo(5));
+      for (final p in firstProducts) {
+        expect((p['selling_price'] as num).toDouble(), greaterThan(0));
+        expect((p['cost_price'] as num).toDouble(), greaterThan(0));
+      }
+
+      // Calling seed again with a different vertical must not overwrite existing catalog
+      await offlineDb.seedVerticalSampleProductsIfEmpty('retail');
+      final afterSecondSeed = offlineDb.getCachedProducts();
+      expect(afterSecondSeed.length, firstProducts.length);
+      expect(afterSecondSeed.first['name'], firstProducts.first['name']);
+    });
+
+    test('test_local_shift_open_cash_mutation_and_blind_close_variance', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final offlineDb = OfflineDatabase(prefs);
+
+      final opened = await offlineDb.openLocalShift(
+        openingCash: 100000,
+        cashierName: 'Siti',
+      );
+      expect(opened['status'], 'open');
+      expect(opened['expected_cash'], 100000.0);
+
+      await offlineDb.addLocalShiftCashEntry(
+        type: 'pay_in',
+        amount: 50000,
+        reason: 'Tambah Uang Receh',
+      );
+      final afterOut = await offlineDb.addLocalShiftCashEntry(
+        type: 'pay_out',
+        amount: 20000,
+        reason: 'Beli Plastik Kemasan',
+      );
+      expect(afterOut, isNotNull);
+      expect(afterOut!['expected_cash'], 130000.0);
+
+      final closed = await offlineDb.closeLocalShift(
+        actualClosingCash: 125000,
+        notes: 'Selisih Rp 5.000',
+      );
+      expect(closed, isNotNull);
+      expect(closed!['status'], 'closed');
+      expect(closed['expected_cash'], 130000.0);
+      expect(closed['variance'], -5000.0);
+    });
+
+    test('test_local_debt_book_payable_expense_and_hpp_net_profit_report', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      apiClient.dio.options.baseUrl = 'http://127.0.0.1:59999/api/v1';
+      apiClient.dio.options.connectTimeout = const Duration(milliseconds: 50);
+      apiClient.dio.options.receiveTimeout = const Duration(milliseconds: 50);
+      final offlineDb = OfflineDatabase(prefs);
+      final cubit = PosCubit(apiClient: apiClient, offlineDb: offlineDb);
+
+      final coffee = ProductModel.fromJson({
+        'id': 701,
+        'name': 'Kopi Arabika 250g',
+        'selling_price': 60000,
+        'cost_price': 35000,
+        'stock': 10,
+      });
+
+      cubit.addToCart(coffee, quantity: 2);
+      cubit.reconcileCartWithLatestCatalog(refreshedProducts: [coffee]);
+      await cubit.completeCheckout(
+        payments: const [
+          {'payment_method_id': 1, 'amount': 120000, 'tendered_amount': 120000},
+        ],
+        paymentMethodNames: const ['Tunai'],
+        paidTotal: 120000,
+        changeReturned: 0,
+        balanceDue: 0,
+      );
+
+      await offlineDb.addLocalExpense(
+        category: 'Listrik & Air',
+        amount: 15000,
+        description: 'Token Listrik Kios',
+        paymentMethod: 'QRIS',
+      );
+
+      final payable = await offlineDb.addLocalPayable(
+        supplierName: 'UD Sumber Kopi',
+        totalAmount: 200000,
+        paidAmount: 50000,
+      );
+      expect(offlineDb.getLocalPayables().first['supplier']['name'], 'UD Sumber Kopi');
+      expect(payable['balance_due'], 150000.0);
+
+      await offlineDb.payLocalPayable(
+        payableId: (payable['purchase_id'] as num).toInt(),
+        amount: 50000,
+        paymentMethod: 'Transfer Bank',
+      );
+
+      final report = offlineDb.computeLocalBusinessReport();
+      expect(report['transactions_count'], 1);
+      expect(report['net_sales'], 120000.0);
+      expect(report['total_cogs'], 70000.0);
+      expect(report['gross_profit'], 50000.0);
+      expect(report['store_expenses'], 15000.0);
+      expect(report['net_profit'], 35000.0);
+      expect(report['total_payables'], 100000.0);
+
+      await cubit.close();
+    });
+  });
 }

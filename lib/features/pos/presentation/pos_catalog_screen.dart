@@ -1103,9 +1103,12 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         final activeStore = context.watch<AuthCubit>().state.session.activeStore;
         final capabilities = state.capabilities;
         final screenWidth = MediaQuery.of(context).size.width;
-        final gridColumns = screenWidth >= 960
+        final isTablet = screenWidth >= 600;
+        final sideCartWidth = screenWidth >= 960 ? 380.0 : (screenWidth >= 760 ? 340.0 : 300.0);
+        final catalogWidth = isTablet ? (screenWidth - sideCartWidth) : screenWidth;
+        final gridColumns = catalogWidth >= 780
             ? 4
-            : (screenWidth >= 600 ? 3 : 2);
+            : (catalogWidth >= 450 ? 3 : 2);
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -1239,8 +1242,44 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               ),
             ],
           ),
-          body: Column(
-            children: [
+          body: isTablet
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _buildCatalogColumn(
+                        context,
+                        state,
+                        gridColumns,
+                        screenWidth,
+                        isTablet: true,
+                      ),
+                    ),
+                    _buildTabletSideCartPanel(context, state, sideCartWidth),
+                  ],
+                )
+              : _buildCatalogColumn(
+                  context,
+                  state,
+                  gridColumns,
+                  screenWidth,
+                  isTablet: false,
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCatalogColumn(
+    BuildContext context,
+    PosState state,
+    int gridColumns,
+    double screenWidth, {
+    required bool isTablet,
+  }) {
+    final capabilities = state.capabilities;
+    return Column(
+      children: [
               // 1. Compact Operational Bar (Customer + Sync), Fixed Search/Scan & Category Chips
               Container(
                 decoration: const BoxDecoration(
@@ -1587,13 +1626,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           ),
               ),
 
-              // 3. Thumb-Zone Sticky Expandable Cart Panel
-              _buildBottomCartPanel(context, state),
+              // 3. Thumb-Zone Sticky Expandable Cart Panel (Phone only; Tablet uses Pinned Side Cart)
+              if (!isTablet) _buildBottomCartPanel(context, state),
             ],
-          ),
-        );
-      },
-    );
+          );
   }
 
   double _productQtyInCart(PosState state, int productId) {
@@ -2370,42 +2406,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     ),
                   ),
                 ),
-                if (hasItems) ...[
-                  const SizedBox(width: 6),
-                  InkWell(
-                    onTap: () => _showDiscountAndHoldModal(context, state),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: state.totalDiscount > 0 ? AppColors.successSoft : AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        state.totalDiscount > 0
-                            ? 'Disc -${IdrCurrencyFormatter.formatCompact(state.totalDiscount)}'
-                            : '+ Diskon',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: state.totalDiscount > 0 ? AppColors.successDark : AppColors.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  InkWell(
-                    onTap: () {
-                      context.read<PosCubit>().clearCart();
-                      setState(() => _isCartExpanded = false);
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-                      child: Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
-                    ),
-                  ),
-                ],
+                if (hasItems) ..._buildCartActionToolbar(context, state, hasItems),
               ],
             ),
 
@@ -2419,10 +2420,209 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       padding: const EdgeInsets.only(top: 6),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxHeight: 168),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: state.cart.length,
-                          separatorBuilder: (_, __) => const Divider(height: 8, color: AppColors.divider),
+                        child: _buildCartItemsListView(context, state, shrinkWrap: true),
+                      ),
+                    ),
+            ),
+
+            ..._buildCartCheckoutFooter(context, state, hasItems),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildCartActionToolbar(BuildContext context, PosState state, bool hasItems) {
+    return [
+      const SizedBox(width: 6),
+      InkWell(
+        onTap: hasItems ? () => _showDiscountAndHoldModal(context, state) : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: state.totalDiscount > 0 ? AppColors.successSoft : AppColors.primarySoft,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            state.totalDiscount > 0
+                ? 'Disc -${IdrCurrencyFormatter.formatCompact(state.totalDiscount)}'
+                : '+ Diskon',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: state.totalDiscount > 0 ? AppColors.successDark : AppColors.primary,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 4),
+      InkWell(
+        onTap: hasItems
+            ? () {
+                context.read<PosCubit>().clearCart();
+                setState(() => _isCartExpanded = false);
+              }
+            : null,
+        borderRadius: BorderRadius.circular(8),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          child: Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildCartCheckoutFooter(BuildContext context, PosState state, bool hasItems) {
+    final hasSurplusCredit = state.isExchangeMode && state.exchangeSurplusCredit > 0;
+    return [
+      const Divider(height: 12, color: AppColors.divider),
+      Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasSurplusCredit ? 'Kelebihan Retur' : 'Total Tagihan',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: hasSurplusCredit ? AppColors.primary : AppColors.slate500,
+                  ),
+                ),
+                NusaPriceTag(
+                  amount: hasSurplusCredit ? state.exchangeSurplusCredit : state.grandTotal,
+                  fontSize: 18,
+                  color: hasSurplusCredit ? AppColors.primary : AppColors.navyDark,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: hasItems ? () => _showDiscountAndHoldModal(context, state) : null,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                side: const BorderSide(color: AppColors.border),
+              ),
+              icon: const Icon(Icons.pause_rounded, size: 18),
+              label: const Text('Hold', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 5,
+            child: NusaButton(
+              label: 'Bayar',
+              trailingIcon: Icons.arrow_forward_rounded,
+              minHeight: 48,
+              onPressed: hasItems ? () => context.push('/pos/payment') : null,
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _buildTabletSideCartPanel(BuildContext context, PosState state, double width) {
+    final hasItems = state.cart.isNotEmpty;
+    return Container(
+      width: width,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(left: BorderSide(color: AppColors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        left: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: hasItems ? AppColors.primary : AppColors.slate200,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      IdrCurrencyFormatter.formatQty(state.totalItemsCount),
+                      style: AppTheme.moneyStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: hasItems ? Colors.white : AppColors.slate600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Keranjang Kasir',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                  ),
+                  if (hasItems) ..._buildCartActionToolbar(context, state, hasItems),
+                ],
+              ),
+              const Divider(height: 16, color: AppColors.divider),
+              Expanded(
+                child: !hasItems
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.shopping_cart_outlined, size: 42, color: AppColors.slate400),
+                            SizedBox(height: 10),
+                            Text(
+                              'Keranjang Masih Kosong',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.slate600,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Ketuk produk di katalog kiri\nuntuk menambah ke nota.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _buildCartItemsListView(context, state, shrinkWrap: false),
+              ),
+              ..._buildCartCheckoutFooter(context, state, hasItems),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCartItemsListView(
+    BuildContext context,
+    PosState state, {
+    required bool shrinkWrap,
+  }) {
+    return ListView.separated(
+      shrinkWrap: shrinkWrap,
+      itemCount: state.cart.length,
+      separatorBuilder: (_, __) => const Divider(height: 8, color: AppColors.divider),
                           itemBuilder: (context, idx) {
                             final item = state.cart[idx];
                             return Row(
@@ -2709,73 +2909,6 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               ],
                             );
                           },
-                        ),
-                      ),
-                    ),
-            ),
-
-            const Divider(height: 12, color: AppColors.divider),
-            // Sticky Thumb-Zone Action Row: Total Tagihan + [Hold] + [Bayar ->] (>= 48dp)
-            Row(
-              children: [
-                Expanded(
-                  flex: 4,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        state.isExchangeMode && state.exchangeSurplusCredit > 0
-                            ? 'Kelebihan Retur'
-                            : 'Total Tagihan',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: state.isExchangeMode && state.exchangeSurplusCredit > 0
-                              ? AppColors.primary
-                              : AppColors.slate500,
-                        ),
-                      ),
-                      NusaPriceTag(
-                        amount: state.isExchangeMode && state.exchangeSurplusCredit > 0
-                            ? state.exchangeSurplusCredit
-                            : state.grandTotal,
-                        fontSize: 18,
-                        color: state.isExchangeMode && state.exchangeSurplusCredit > 0
-                            ? AppColors.primary
-                            : AppColors.navyDark,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: hasItems ? () => _showDiscountAndHoldModal(context, state) : null,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      side: const BorderSide(color: AppColors.border),
-                    ),
-                    icon: const Icon(Icons.pause_rounded, size: 18),
-                    label: const Text('Hold', style: TextStyle(fontWeight: FontWeight.w800)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 5,
-                  child: NusaButton(
-                    label: 'Bayar',
-                    trailingIcon: Icons.arrow_forward_rounded,
-                    minHeight: 48,
-                    onPressed: hasItems ? () => context.push('/pos/payment') : null,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+                        );
   }
 }

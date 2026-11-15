@@ -5,13 +5,16 @@ import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/network_connectivity_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/cascade_entitlement_teaser.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/models/auth_session_model.dart';
+import '../../auth/presentation/cloud_upgrade_sheet.dart';
 import '../../notifications/presentation/alert_notifications_modal.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
@@ -32,6 +35,8 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final ApiClient _api = GetIt.instance<ApiClient>();
+  final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
+  final NetworkConnectivityService _connectivity = GetIt.instance<NetworkConnectivityService>();
 
   bool _loading = true;
   String? _error;
@@ -59,9 +64,50 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     super.initState();
     _loadDashboard();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && !context.read<AuthCubit>().state.session.isLocalTrial) {
         context.read<PosCubit>().syncWithCloud(force: false);
       }
+    });
+  }
+
+  void _applyLocalDashboardMetrics({int? storeId}) {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final report = _offlineDb.computeLocalBusinessReport(
+      startDate: todayStart,
+      endDate: now,
+    );
+    final fraud = Map<String, dynamic>.from((report['fraud_indicators'] as Map?) ?? {});
+    final receivables = _offlineDb.getLocalReceivables();
+    final expiring = context
+        .read<PosCubit>()
+        .state
+        .allProducts
+        .where((p) => p.hasExpiringSoonBatch)
+        .length;
+
+    if (!mounted) return;
+    setState(() {
+      _todaySales = (report['net_sales'] as num?)?.toDouble() ?? 0;
+      _todayTxCount = (report['transactions_count'] as num?)?.toInt() ?? 0;
+      _grossProfit = (report['gross_profit'] as num?)?.toDouble() ?? 0;
+      _growthPercent = 0;
+      _totalReceivables = (report['total_receivables'] as num?)?.toDouble() ?? 0;
+      _totalPayables = (report['total_payables'] as num?)?.toDouble() ?? 0;
+      _lowStockCount = (report['low_stock_count'] as num?)?.toInt() ?? 0;
+      _expiringCount = expiring;
+      _pendingOnlineOrdersCount = 0;
+      _voidCount = (fraud['void_count'] as num?)?.toInt() ?? 0;
+      _varianceShiftsCount = (fraud['variance_shifts_count'] as num?)?.toInt() ?? 0;
+      _overdueReceivables = receivables;
+      _tasksList = const [];
+      _approvalsList = const [];
+      _offlineConflictsList = const [];
+      _openTasksCount = 0;
+      _pendingApprovalsCount = 0;
+      _lastStoreId = storeId ?? context.read<AuthCubit>().state.session.activeStore.id;
+      _error = null;
+      _loading = false;
     });
   }
 
@@ -70,6 +116,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _loading = true;
       _error = null;
     });
+
+    final session = context.read<AuthCubit>().state.session;
+    if (session.isLocalTrial || !(await _connectivity.checkOnline())) {
+      _applyLocalDashboardMetrics(storeId: storeId);
+      return;
+    }
 
     try {
       final activeStoreId = storeId ?? context.read<AuthCubit>().state.session.activeStore.id;
@@ -161,6 +213,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      final isLocalTrial = context.read<AuthCubit>().state.session.isLocalTrial;
+      if (isLocalTrial ||
+          _offlineDb.getCachedProducts().isNotEmpty ||
+          _offlineDb.getLocalSalesHistory().isNotEmpty) {
+        _applyLocalDashboardMetrics(storeId: storeId);
+        return;
+      }
       setState(() {
         _error = ApiClient.extractErrorMessage(e);
         _loading = false;
@@ -300,6 +359,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       ),
                     ),
                   ),
+
+                if (authState.session.isLocalTrial)
+                  _buildLocalTrialUpgradeBanner(context, activeStoreId),
 
                 if (_error != null)
                   Container(
@@ -1575,6 +1637,85 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLocalTrialUpgradeBanner(BuildContext context, int activeStoreId) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withOpacity(0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.cloud_upload_outlined, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Mode Usaha Mandiri (Tersimpan di HP ini)',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Cadangkan ke NusaCommerce Cloud agar aman jika HP ganti atau rusak.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final migrated = await showCloudMigrationSheet(context);
+                if (migrated == true && mounted) {
+                  await _loadDashboard(storeId: activeStoreId);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.cloud_sync_rounded, size: 18),
+              label: const Text(
+                'Hubungkan Akun Cloud',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

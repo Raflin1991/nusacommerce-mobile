@@ -9,6 +9,7 @@ import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../auth/presentation/cloud_upgrade_sheet.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
 /// LAYAR 9 — PENGATURAN SISTEM NUSACOMMERCE (TAB 5 NAVIGASI)
@@ -780,7 +781,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final displayName = session.userName.trim().isEmpty
         ? 'Pengguna NusaCommerce'
         : session.userName.trim();
-    final tenantLabel = session.tenantName.trim().isEmpty ? 'NusaCommerce' : session.tenantName.trim();
+    final tenantLabel = session.isLocalTrial
+        ? 'Mode Toko Mandiri (Offline Lokal)'
+        : (session.tenantName.trim().isEmpty ? 'NusaCommerce' : session.tenantName.trim());
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -858,6 +861,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
+
+            if (session.isLocalTrial) ...[
+              NusaCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.cloud_upload_outlined, color: AppColors.primary),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Upgrade & Cadangkan ke NusaCommerce Cloud',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Sinkronkan seluruh produk, pelanggan, buku bon & riwayat transaksi lokal dari HP ini ke server Cloud.',
+                                style: TextStyle(fontSize: 12, color: AppColors.slate600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    NusaButton(
+                      label: 'Hubungkan Akun Cloud & Migrasi Data',
+                      icon: Icons.cloud_sync_outlined,
+                      minHeight: 46,
+                      onPressed: () => showCloudMigrationSheet(context),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // 2. Operational Master Data & Branch Switcher Shortcuts
             NusaCard(

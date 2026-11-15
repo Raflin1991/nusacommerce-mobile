@@ -1601,6 +1601,7 @@ class PosCubit extends Cubit<PosState> {
         'multiplier': c.multiplier,
         'quantity': c.quantity,
         'unit_price': c.unitPrice,
+        'cost_price': c.product.costPrice,
         'discount_amount': combinedDiscount,
         'line_total': (c.lineSubtotal - combinedDiscount).clamp(0.0, double.infinity).roundToDouble(),
         'notes': c.notes,
@@ -1633,6 +1634,7 @@ class PosCubit extends Cubit<PosState> {
       'number': invoiceNo,
       'local_uuid': localUuid,
       'sale_datetime': nowFormatted,
+      'created_at': DateTime.now().toIso8601String(),
       'subtotal': checkoutSubtotal,
       'discount_total': appliedOrderDiscount,
       'tax_total': 0.0,
@@ -1764,16 +1766,21 @@ class PosCubit extends Cubit<PosState> {
         'payments': apiPayments,
       };
 
-      try {
-        final res = await _apiClient.dio.post(ApiEndpoints.checkout, data: apiBody);
-        final serverData = res.data['data'] as Map<String, dynamic>?;
-        if (serverData != null) {
-          if (serverData['number'] != null) receiptPayload['number'] = serverData['number'];
-          if (serverData['id'] != null) receiptPayload['id'] = serverData['id'];
-        }
-      } catch (_) {
+      if (_isLocalStandalone) {
         checkoutSyncedOnline = false;
         await _offlineDb.enqueueOfflineSale(apiBody);
+      } else {
+        try {
+          final res = await _apiClient.dio.post(ApiEndpoints.checkout, data: apiBody);
+          final serverData = res.data['data'] as Map<String, dynamic>?;
+          if (serverData != null) {
+            if (serverData['number'] != null) receiptPayload['number'] = serverData['number'];
+            if (serverData['id'] != null) receiptPayload['id'] = serverData['id'];
+          }
+        } catch (_) {
+          checkoutSyncedOnline = false;
+          await _offlineDb.enqueueOfflineSale(apiBody);
+        }
       }
     }
 
@@ -1991,6 +1998,9 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(salesHistory: _offlineDb.getLocalSalesHistory()));
   }
 
+  bool get _isLocalStandalone =>
+      _offlineDb.getCachedAuthSession()?['is_local_trial'] == true;
+
   /// Add or update product in Inventory & Stock Opname
   /// Supports POST /api/v1/products (new) and POST /api/v1/products/{id}/adjust-stock (existing)
   Future<void> saveProductInventory(
@@ -2000,45 +2010,56 @@ class PosCubit extends Cubit<PosState> {
   }) async {
     final bool isBrandNew = isNew || product.id <= 0 || product.id > 1000000000;
 
-    try {
-      if (isBrandNew) {
-        await _apiClient.dio.post(
-          ApiEndpoints.products,
-          data: {
-            'name': product.name,
-            'sku': product.sku,
-            'barcode': product.barcode,
-            'selling_price': product.sellingPrice,
-            'cost_price': product.costPrice,
-            'initial_stock': product.stock,
-            'category_id': product.categoryId > 0 ? product.categoryId : null,
-            'shelf_location': product.shelfLocation,
-            'type': product.type,
-            'sold_by_weight': product.soldByWeight,
-          },
-        );
-      } else {
-        await _apiClient.dio.post(
-          ApiEndpoints.adjustProductStock(product.id),
-          data: {
-            'new_quantity': product.stock,
-            'name': product.name,
-            'barcode': product.barcode,
-            'selling_price': product.sellingPrice,
-            'unit_cost': product.costPrice,
-            'category_id': product.categoryId > 0 ? product.categoryId : null,
-            'shelf_location': product.shelfLocation,
-            'notes': notes,
-          },
-        );
-      }
-      await syncWithCloud(force: false);
-    } catch (_) {
-      // Local fallback for offline mode
-      await _offlineDb.addOrUpdateLocalProduct(product.toJson());
-      final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
-      emit(state.copyWith(allProducts: updated));
+    if (!_isLocalStandalone) {
+      try {
+        if (isBrandNew) {
+          await _apiClient.dio.post(
+            ApiEndpoints.products,
+            data: {
+              'name': product.name,
+              'sku': product.sku,
+              'barcode': product.barcode,
+              'selling_price': product.sellingPrice,
+              'cost_price': product.costPrice,
+              'initial_stock': product.stock,
+              'category_id': product.categoryId > 0 ? product.categoryId : null,
+              'shelf_location': product.shelfLocation,
+              'type': product.type,
+              'sold_by_weight': product.soldByWeight,
+            },
+          );
+        } else {
+          await _apiClient.dio.post(
+            ApiEndpoints.adjustProductStock(product.id),
+            data: {
+              'new_quantity': product.stock,
+              'name': product.name,
+              'barcode': product.barcode,
+              'selling_price': product.sellingPrice,
+              'unit_cost': product.costPrice,
+              'category_id': product.categoryId > 0 ? product.categoryId : null,
+              'shelf_location': product.shelfLocation,
+              'notes': notes,
+            },
+          );
+        }
+        await syncWithCloud(force: false);
+        return;
+      } catch (_) {}
     }
+
+    // Local fallback for offline / standalone mode
+    final int localId = (isBrandNew && product.id >= 0)
+        ? -DateTime.now().millisecondsSinceEpoch
+        : product.id;
+    final map = <String, dynamic>{
+      ...product.toJson(),
+      'id': localId,
+      if (isBrandNew || localId < 0) 'is_local_only': true,
+    };
+    await _offlineDb.addOrUpdateLocalProduct(map);
+    final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
+    emit(state.copyWith(allProducts: updated));
   }
 
   /// Create or update Customer & Member (POST/PUT /api/v1/customers)
@@ -2047,38 +2068,48 @@ class PosCubit extends Cubit<PosState> {
     int? id,
     bool selectAfterSave = false,
   }) async {
-    try {
-      final res = id != null && id > 0
-          ? await _apiClient.dio.put(ApiEndpoints.customerDetail(id), data: payload)
-          : await _apiClient.dio.post(ApiEndpoints.customers, data: payload);
-      final saved = Map<String, dynamic>.from((res.data['data'] as Map?) ?? payload);
-      await _offlineDb.addOrUpdateLocalCustomer(saved);
-      final updatedList = _offlineDb.getCachedCustomers();
-      final shouldSelect = selectAfterSave || (state.selectedCustomer?['id'] == saved['id']);
-      emit(state.copyWith(
-        customers: updatedList,
-        selectedCustomer: shouldSelect ? saved : state.selectedCustomer,
-      ));
-      return {'success': true, 'data': saved};
-    } catch (e) {
-      // Offline cache fallback if backend unreachable during demo/offline
-      if (id == null) {
-        final localEntry = {
-          'id': DateTime.now().millisecondsSinceEpoch,
-          ...payload,
-          'loyalty_points': payload['loyalty_points'] ?? 0,
-          'outstanding_balance': 0.0,
-        };
-        await _offlineDb.addOrUpdateLocalCustomer(localEntry);
+    if (!_isLocalStandalone) {
+      try {
+        final res = id != null && id > 0
+            ? await _apiClient.dio.put(ApiEndpoints.customerDetail(id), data: payload)
+            : await _apiClient.dio.post(ApiEndpoints.customers, data: payload);
+        final saved = Map<String, dynamic>.from((res.data['data'] as Map?) ?? payload);
+        await _offlineDb.addOrUpdateLocalCustomer(saved);
         final updatedList = _offlineDb.getCachedCustomers();
+        final shouldSelect = selectAfterSave || (state.selectedCustomer?['id'] == saved['id']);
         emit(state.copyWith(
           customers: updatedList,
-          selectedCustomer: selectAfterSave ? localEntry : state.selectedCustomer,
+          selectedCustomer: shouldSelect ? saved : state.selectedCustomer,
         ));
-        return {'success': true, 'offline': true, 'data': localEntry};
+        return {'success': true, 'data': saved};
+      } catch (e) {
+        if (id != null && id > 0 && state.isOnline) {
+          return {'success': false, 'message': ApiClient.extractErrorMessage(e)};
+        }
       }
-      return {'success': false, 'message': ApiClient.extractErrorMessage(e)};
     }
+
+    final resolvedId = id ?? -DateTime.now().millisecondsSinceEpoch;
+    final existingIdx = _offlineDb.getCachedCustomers().indexWhere(
+      (c) => (c['id'] as num?)?.toInt() == resolvedId,
+    );
+    final existing = existingIdx >= 0 ? _offlineDb.getCachedCustomers()[existingIdx] : <String, dynamic>{};
+    final localEntry = <String, dynamic>{
+      ...existing,
+      'id': resolvedId,
+      ...payload,
+      'loyalty_points': payload['loyalty_points'] ?? existing['loyalty_points'] ?? 0,
+      'outstanding_balance': existing['outstanding_balance'] ?? 0.0,
+      if (resolvedId < 0) 'is_local_only': true,
+    };
+    await _offlineDb.addOrUpdateLocalCustomer(localEntry);
+    final updatedList = _offlineDb.getCachedCustomers();
+    final shouldSelect = selectAfterSave || (state.selectedCustomer?['id'] == localEntry['id']);
+    emit(state.copyWith(
+      customers: updatedList,
+      selectedCustomer: shouldSelect ? localEntry : state.selectedCustomer,
+    ));
+    return {'success': true, 'offline': true, 'data': localEntry};
   }
 
   /// Create or update Supplier (POST/PUT /api/v1/suppliers)
@@ -2086,28 +2117,187 @@ class PosCubit extends Cubit<PosState> {
     Map<String, dynamic> payload, {
     int? id,
   }) async {
-    try {
-      final res = id != null && id > 0
-          ? await _apiClient.dio.put(ApiEndpoints.supplierDetail(id), data: payload)
-          : await _apiClient.dio.post(ApiEndpoints.suppliers, data: payload);
-      final saved = Map<String, dynamic>.from((res.data['data'] as Map?) ?? payload);
-      await _offlineDb.addOrUpdateLocalSupplier(saved);
-      emit(state.copyWith(suppliers: _offlineDb.getCachedSuppliers()));
-      return {'success': true, 'data': saved};
-    } catch (e) {
-      return {'success': false, 'message': ApiClient.extractErrorMessage(e)};
+    if (!_isLocalStandalone) {
+      try {
+        final res = id != null && id > 0
+            ? await _apiClient.dio.put(ApiEndpoints.supplierDetail(id), data: payload)
+            : await _apiClient.dio.post(ApiEndpoints.suppliers, data: payload);
+        final saved = Map<String, dynamic>.from((res.data['data'] as Map?) ?? payload);
+        await _offlineDb.addOrUpdateLocalSupplier(saved);
+        emit(state.copyWith(suppliers: _offlineDb.getCachedSuppliers()));
+        return {'success': true, 'data': saved};
+      } catch (_) {}
     }
+
+    final resolvedId = id ?? -DateTime.now().millisecondsSinceEpoch;
+    final localEntry = <String, dynamic>{
+      'id': resolvedId,
+      ...payload,
+      if (resolvedId < 0) 'is_local_only': true,
+    };
+    await _offlineDb.addOrUpdateLocalSupplier(localEntry);
+    emit(state.copyWith(suppliers: _offlineDb.getCachedSuppliers()));
+    return {'success': true, 'offline': true, 'data': localEntry};
   }
 
   /// Record Quick Stock In Purchase (POST /api/v1/purchases/quick-stock-in)
   Future<Map<String, dynamic>> submitQuickStockIn(Map<String, dynamic> payload) async {
-    try {
-      final res = await _apiClient.dio.post(ApiEndpoints.quickStockIn, data: payload);
-      await syncWithCloud(force: false);
-      return {'success': true, 'data': res.data['data']};
-    } catch (e) {
-      return {'success': false, 'message': ApiClient.extractErrorMessage(e)};
+    if (!_isLocalStandalone) {
+      try {
+        final res = await _apiClient.dio.post(ApiEndpoints.quickStockIn, data: payload);
+        await syncWithCloud(force: false);
+        return {'success': true, 'data': res.data['data']};
+      } catch (_) {}
     }
+
+    // Standalone / offline stock-in + optional credit payable recording
+    final pid = (payload['product_id'] as num?)?.toInt();
+    final sid = (payload['supplier_id'] as num?)?.toInt();
+    final qty = (payload['quantity'] as num?)?.toDouble() ?? 0.0;
+    final unitCost = (payload['unit_cost'] as num?)?.toDouble() ?? 0.0;
+    final payStatus = (payload['payment_status'] ?? payload['payment_type'] ?? 'paid').toString().toLowerCase();
+
+    if (pid != null && qty > 0) {
+      final cached = _offlineDb.getCachedProducts();
+      final idx = cached.indexWhere((p) => (p['id'] as num?)?.toInt() == pid);
+      if (idx >= 0) {
+        final item = Map<String, dynamic>.from(cached[idx]);
+        final oldStock = (item['stock'] as num?)?.toDouble() ?? 0.0;
+        item['stock'] = oldStock + qty;
+        if (unitCost > 0) {
+          item['cost_price'] = unitCost;
+        }
+        await _offlineDb.addOrUpdateLocalProduct(item);
+        final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
+        emit(state.copyWith(allProducts: updated));
+      }
+    }
+
+    final totalCost = qty * unitCost;
+    if (totalCost > 0 && (payStatus == 'credit' || payStatus == 'unpaid' || payStatus == 'tempo' || payStatus == 'hutang')) {
+      final sup = state.suppliers.firstWhere(
+        (s) => (s['id'] as num?)?.toInt() == sid,
+        orElse: () => {'id': sid, 'name': 'Supplier', 'phone': ''},
+      );
+      await _offlineDb.addLocalPayable(
+        supplierId: sid,
+        supplierName: (sup['name'] ?? 'Supplier').toString(),
+        supplierPhone: sup['phone']?.toString(),
+        totalAmount: totalCost,
+        paidAmount: 0.0,
+        dueDate: payload['due_date']?.toString(),
+        invoiceNumber: payload['invoice_number']?.toString(),
+        notes: payload['notes']?.toString(),
+      );
+    } else if (totalCost > 0 && (payStatus == 'paid' || payStatus == 'tunai' || payStatus == 'cash')) {
+      if (_offlineDb.getCurrentLocalShift() != null) {
+        await _offlineDb.addLocalShiftCashEntry(
+          type: 'pay_out',
+          amount: totalCost,
+          reason: 'Belanja Stok Tunai (${payload['invoice_number'] ?? 'Stok Masuk'})',
+        );
+      }
+    }
+
+    return {'success': true, 'offline': true};
+  }
+
+  /// One-Click Local-to-Cloud Data Migration when upgrading Standalone Mode to NusaCommerce Cloud
+  Future<Map<String, int>> migrateLocalStandaloneDataToCloud() async {
+    int uploadedProducts = 0;
+    int uploadedCustomers = 0;
+    int uploadedSuppliers = 0;
+    int syncedSales = 0;
+
+    final productIdMap = <int, int>{};
+    final customerIdMap = <int, int>{};
+
+    // 1. Migrate local-only suppliers
+    final suppliers = _offlineDb.getCachedSuppliers();
+    for (final s in suppliers) {
+      final id = (s['id'] as num?)?.toInt() ?? 0;
+      if (id < 0 || s['is_local_only'] == true) {
+        try {
+          await _apiClient.dio.post(
+            ApiEndpoints.suppliers,
+            data: {
+              'name': s['name'] ?? 'Supplier',
+              'phone': s['phone'] ?? '-',
+              'address': s['address'] ?? '',
+              'email': s['email'] ?? '',
+            },
+          );
+          uploadedSuppliers++;
+        } catch (_) {}
+      }
+    }
+
+    // 2. Migrate local-only customers & map old negative IDs -> new server IDs
+    final customers = _offlineDb.getCachedCustomers();
+    for (final c in customers) {
+      final id = (c['id'] as num?)?.toInt() ?? 0;
+      if (id < 0 || c['is_local_only'] == true) {
+        try {
+          final res = await _apiClient.dio.post(
+            ApiEndpoints.customers,
+            data: {
+              'name': c['name'] ?? 'Pelanggan',
+              'phone': c['phone'] ?? '-',
+              'email': c['email'] ?? '',
+              'address': c['address'] ?? '',
+            },
+          );
+          final serverId = ((res.data['data'] as Map?)?['id'] as num?)?.toInt();
+          if (serverId != null && id != 0) {
+            customerIdMap[id] = serverId;
+          }
+          uploadedCustomers++;
+        } catch (_) {}
+      }
+    }
+
+    // 3. Migrate local-only products & map old negative IDs -> new server IDs
+    final products = _offlineDb.getCachedProducts();
+    for (final p in products) {
+      final id = (p['id'] as num?)?.toInt() ?? 0;
+      if (id < 0 || p['is_local_only'] == true) {
+        try {
+          final res = await _apiClient.dio.post(
+            ApiEndpoints.products,
+            data: {
+              'name': p['name'] ?? 'Produk',
+              'sku': p['sku'] ?? 'SKU-${id.abs()}',
+              'barcode': p['barcode'] ?? '',
+              'selling_price': (p['selling_price'] as num?)?.toDouble() ?? 0.0,
+              'cost_price': (p['cost_price'] as num?)?.toDouble() ?? 0.0,
+              'initial_stock': (p['stock'] as num?)?.toDouble() ?? 0.0,
+              'type': p['type'] ?? 'standard',
+              'sold_by_weight': p['sold_by_weight'] == true,
+              'shelf_location': p['shelf_location'],
+            },
+          );
+          final serverId = ((res.data['data'] as Map?)?['id'] as num?)?.toInt();
+          if (serverId != null && id != 0) {
+            productIdMap[id] = serverId;
+          }
+          uploadedProducts++;
+        } catch (_) {}
+      }
+    }
+
+    // 4. Remap IDs inside offline sales queue & push to Cloud
+    await _offlineDb.remapOfflineSalesIds(productIdMap, customerIdMap);
+    syncedSales = await _offlineDb.syncOfflineQueue(_apiClient);
+
+    // 5. Refresh clean authoritative Cloud catalog
+    await syncWithCloud(force: true, preserveActiveCart: true);
+
+    return {
+      'products': uploadedProducts,
+      'customers': uploadedCustomers,
+      'suppliers': uploadedSuppliers,
+      'sales': syncedSales,
+    };
   }
 
   /// Resolve an offline `InsufficientStock` conflict either by approving oversell

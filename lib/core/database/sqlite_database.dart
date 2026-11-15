@@ -12,7 +12,7 @@ class SqliteDatabase {
   static final SqliteDatabase instance = SqliteDatabase._();
 
   static const String _dbName = 'nusacommerce_local.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
 
   Database? _db;
 
@@ -85,12 +85,72 @@ class SqliteDatabase {
             )
           ''');
           await db.execute('CREATE INDEX idx_sup_name ON suppliers(name)');
+          await _ensureStandaloneTables(db);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          await _ensureStandaloneTables(db);
         },
       );
+      if (_db != null) {
+        await _ensureStandaloneTables(_db!);
+      }
       return _db;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> _ensureStandaloneTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shifts (
+        id INTEGER PRIMARY KEY,
+        shift_number TEXT,
+        cashier_name TEXT,
+        status TEXT,
+        opened_at TEXT,
+        closed_at TEXT,
+        opening_cash REAL DEFAULT 0,
+        cash_sales REAL DEFAULT 0,
+        cash_in REAL DEFAULT 0,
+        cash_out REAL DEFAULT 0,
+        expected_cash REAL DEFAULT 0,
+        closing_cash REAL DEFAULT 0,
+        variance REAL DEFAULT 0,
+        notes TEXT,
+        entries_json TEXT,
+        is_synced INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_expenses (
+        id INTEGER PRIMARY KEY,
+        category TEXT,
+        amount REAL DEFAULT 0,
+        description TEXT,
+        payment_method TEXT,
+        recorded_by TEXT,
+        expense_date TEXT,
+        created_at TEXT,
+        is_synced INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_payables (
+        id INTEGER PRIMARY KEY,
+        invoice_number TEXT,
+        supplier_id INTEGER,
+        supplier_name TEXT,
+        supplier_phone TEXT,
+        total_amount REAL DEFAULT 0,
+        paid_amount REAL DEFAULT 0,
+        balance_due REAL DEFAULT 0,
+        status TEXT,
+        due_date TEXT,
+        created_at TEXT,
+        notes TEXT,
+        is_synced INTEGER DEFAULT 0
+      )
+    ''');
   }
 
   Map<String, dynamic> _productToRow(Map<String, dynamic> product) {
@@ -477,6 +537,85 @@ class SqliteDatabase {
     } catch (_) {}
   }
 
+  Future<void> upsertShift(Map<String, dynamic> shift) async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      await db.insert(
+        'shifts',
+        {
+          'id': (shift['id'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+          'shift_number': (shift['shift_number'] ?? '').toString(),
+          'cashier_name': (shift['cashier_name'] ?? 'Kasir').toString(),
+          'status': (shift['status'] ?? 'open').toString(),
+          'opened_at': (shift['opened_at'] ?? '').toString(),
+          'closed_at': shift['closed_at']?.toString(),
+          'opening_cash': (shift['opening_cash'] as num?)?.toDouble() ?? 0.0,
+          'cash_sales': (shift['cash_sales'] as num?)?.toDouble() ?? 0.0,
+          'cash_in': (shift['cash_in'] as num?)?.toDouble() ?? 0.0,
+          'cash_out': (shift['cash_out'] as num?)?.toDouble() ?? 0.0,
+          'expected_cash': (shift['expected_cash'] as num?)?.toDouble() ?? 0.0,
+          'closing_cash': (shift['closing_cash'] as num?)?.toDouble() ?? 0.0,
+          'variance': (shift['variance'] as num?)?.toDouble() ?? 0.0,
+          'notes': shift['notes']?.toString(),
+          'entries_json': jsonEncode(shift['entries'] ?? []),
+          'is_synced': (shift['is_synced'] == true || shift['is_synced'] == 1) ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> upsertLocalExpense(Map<String, dynamic> expense) async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      final catRaw = expense['category'];
+      final catName = (expense['category_name'] ?? (catRaw is Map ? catRaw['name'] : catRaw) ?? 'Lain-lain').toString();
+      await db.insert(
+        'local_expenses',
+        {
+          'id': (expense['id'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+          'category': catName,
+          'amount': (expense['amount'] as num?)?.toDouble() ?? 0.0,
+          'description': (expense['description'] ?? '').toString(),
+          'payment_method': (expense['payment_method'] ?? 'Tunai').toString(),
+          'recorded_by': (expense['recorded_by'] ?? 'Kasir').toString(),
+          'expense_date': (expense['expense_date'] ?? '').toString(),
+          'created_at': (expense['created_at'] ?? '').toString(),
+          'is_synced': (expense['is_synced'] == true || expense['is_synced'] == 1) ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> upsertLocalPayable(Map<String, dynamic> payable) async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      await db.insert(
+        'local_payables',
+        {
+          'id': (payable['id'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+          'invoice_number': (payable['invoice_number'] ?? '').toString(),
+          'supplier_id': (payable['supplier_id'] as num?)?.toInt(),
+          'supplier_name': (payable['supplier_name'] ?? 'Supplier').toString(),
+          'supplier_phone': payable['supplier_phone']?.toString(),
+          'total_amount': (payable['total_amount'] as num?)?.toDouble() ?? 0.0,
+          'paid_amount': (payable['paid_amount'] as num?)?.toDouble() ?? 0.0,
+          'balance_due': (payable['balance_due'] as num?)?.toDouble() ?? 0.0,
+          'status': (payable['status'] ?? 'unpaid').toString(),
+          'due_date': payable['due_date']?.toString(),
+          'created_at': (payable['created_at'] ?? '').toString(),
+          'notes': payable['notes']?.toString(),
+          'is_synced': (payable['is_synced'] == true || payable['is_synced'] == 1) ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (_) {}
+  }
+
   Future<void> clearAll() async {
     final db = await database;
     if (db == null) return;
@@ -485,6 +624,9 @@ class SqliteDatabase {
         await txn.delete('products');
         await txn.delete('customers');
         await txn.delete('suppliers');
+        await txn.delete('shifts');
+        await txn.delete('local_expenses');
+        await txn.delete('local_payables');
       });
     } catch (_) {}
   }

@@ -71,6 +71,7 @@ class AuthSessionModel extends Equatable {
   final StoreBranchModel activeStore;
   final List<StoreBranchModel> availableStores;
   final List<String> permissions;
+  final bool isLocalTrial;
 
   static const List<String> _enterpriseDefaultModules = [
     'cash_debt',
@@ -162,7 +163,43 @@ class AuthSessionModel extends Equatable {
     required this.activeStore,
     required this.availableStores,
     this.permissions = const [],
+    this.isLocalTrial = false,
   });
+
+  factory AuthSessionModel.createLocalTrialSession({
+    required String storeName,
+    required String businessVertical,
+    double openingCash = 100000,
+  }) {
+    final normalizedName = storeName.trim().isEmpty ? 'Toko Saya' : storeName.trim();
+    final mainStore = StoreBranchModel(
+      id: 1,
+      name: normalizedName,
+      code: 'LOKAL-01',
+      city: 'Offline Lokal',
+      address: 'Mode Toko Mandiri (Tersimpan di HP/Tablet)',
+      phone: '-',
+      businessType: businessVertical,
+      posMode: businessVertical,
+    );
+    return AuthSessionModel(
+      userId: 999999,
+      userName: 'Pemilik $normalizedName',
+      userEmail: 'owner@lokal.nusapos.id',
+      userRole: 'Pemilik Usaha',
+      isOwner: true,
+      tenantName: normalizedName,
+      tenantSubdomain: 'local-trial',
+      planName: 'Mode Mandiri (Gratis)',
+      tier: 'starter',
+      activeModules: const ['cash_debt'],
+      hiddenModules: const [],
+      activeStore: mainStore,
+      availableStores: [mainStore],
+      permissions: const [],
+      isLocalTrial: true,
+    );
+  }
 
   /// Checks whether the tenant's active subscription plan unlocks [moduleKey].
   bool hasModule(String moduleKey) {
@@ -321,6 +358,7 @@ class AuthSessionModel extends Equatable {
       activeStore: active,
       availableStores: availableList.isNotEmpty ? availableList : (active.id > 0 ? [active] : []),
       permissions: (json['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      isLocalTrial: json['is_local_trial'] == true,
     );
   }
 
@@ -339,6 +377,7 @@ class AuthSessionModel extends Equatable {
         'active_store': activeStore.toJson(),
         'available_stores': availableStores.map((s) => s.toJson()).toList(),
         'permissions': permissions,
+        'is_local_trial': isLocalTrial,
       };
 
   AuthSessionModel copyWith({
@@ -348,6 +387,7 @@ class AuthSessionModel extends Equatable {
     String? tier,
     List<String>? activeModules,
     List<String>? hiddenModules,
+    bool? isLocalTrial,
   }) {
     return AuthSessionModel(
       userId: userId,
@@ -364,6 +404,7 @@ class AuthSessionModel extends Equatable {
       activeStore: activeStore ?? this.activeStore,
       availableStores: availableStores,
       permissions: permissions,
+      isLocalTrial: isLocalTrial ?? this.isLocalTrial,
     );
   }
 
@@ -376,5 +417,6 @@ class AuthSessionModel extends Equatable {
         activeModules,
         hiddenModules,
         activeStore,
+        isLocalTrial,
       ];
 }

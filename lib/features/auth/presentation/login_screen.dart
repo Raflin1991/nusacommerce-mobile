@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/config/business_vertical_config.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
 import '../../pos/bloc/pos_cubit.dart';
@@ -63,6 +64,221 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         context.go('/home');
       }
+    }
+  }
+
+  void _showStandaloneTrialOnboardingSheet() {
+    final storeNameCtrl = TextEditingController(text: 'Toko Saya');
+    final openingCashCtrl = TextEditingController(text: '100000');
+    BusinessVertical selectedVertical = BusinessVertical.retail;
+    bool isStarting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.storefront_rounded, color: AppColors.primary, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Buka Toko Mandiri (Tanpa Login)',
+                            style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '100% gratis & tersimpan lokal di HP/Tablet. Siap jualan dalam 10 detik.',
+                            style: TextStyle(fontSize: 12, color: AppColors.slate600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  '1. Nama Usaha / Toko',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: storeNameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    hintText: 'Contoh: Warung Maju Jaya / Kopi Senja',
+                    prefixIcon: Icon(Icons.store_mall_directory_outlined),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  '2. Pilih Jenis Usaha Anda',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: BusinessVertical.values.map((v) {
+                    final selected = selectedVertical == v;
+                    return InkWell(
+                      onTap: () => setSheetState(() => selectedVertical = v),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: selected ? AppColors.primary.withOpacity(0.1) : AppColors.slate100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: selected ? AppColors.primary : AppColors.border,
+                            width: selected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _verticalIcon(v),
+                              size: 16,
+                              color: selected ? AppColors.primary : AppColors.slate600,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              v.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                                color: selected ? AppColors.primary : AppColors.navyDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  '3. Modal Kas Awal Laci (Rp)',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: openingCashCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    hintText: '100000',
+                    prefixText: 'Rp ',
+                    prefixIcon: Icon(Icons.payments_outlined),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: isStarting
+                        ? null
+                        : () async {
+                            setSheetState(() => isStarting = true);
+                            final cleanCashStr = openingCashCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+                            final openingCash = double.tryParse(cleanCashStr) ?? 100000.0;
+                            final storeName = storeNameCtrl.text.trim().isEmpty
+                                ? 'Toko Saya'
+                                : storeNameCtrl.text.trim();
+
+                            final authCubit = context.read<AuthCubit>();
+                            final posCubit = context.read<PosCubit>();
+                            await authCubit.startLocalTrialSession(
+                              storeName: storeName,
+                              businessVertical: selectedVertical.key,
+                              openingCash: openingCash,
+                            );
+                            await posCubit.setBusinessVertical(selectedVertical);
+                            await posCubit.initializeCatalog(seedDefaultCart: false);
+
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              context.go('/home');
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.success,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    icon: isStarting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.rocket_launch_rounded, size: 19),
+                    label: Text(
+                      isStarting ? 'Menyiapkan Toko...' : 'Buka Kasir Sekarang',
+                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _verticalIcon(BusinessVertical vertical) {
+    switch (vertical) {
+      case BusinessVertical.retail:
+        return Icons.shopping_basket_rounded;
+      case BusinessVertical.restaurant:
+        return Icons.restaurant_rounded;
+      case BusinessVertical.pharmacy:
+        return Icons.local_pharmacy_rounded;
+      case BusinessVertical.workshop:
+        return Icons.build_rounded;
+      case BusinessVertical.laundry:
+        return Icons.local_laundry_service_rounded;
+      case BusinessVertical.salon:
+        return Icons.content_cut_rounded;
     }
   }
 
@@ -316,6 +532,79 @@ class _LoginScreenState extends State<LoginScreen> {
                               : const Icon(Icons.login_rounded, size: 20),
                           label: Text(
                             state.isLoading ? 'Menghubungkan Toko...' : 'Masuk & Sinkronkan Toko',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppColors.success.withOpacity(0.10),
+                        AppColors.primary.withOpacity(0.06),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.success.withOpacity(0.35)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.rocket_launch_rounded, color: AppColors.success, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Belum Punya Akun Cloud?',
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.navyDark,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Mulai jualan 100% mandiri & offline di HP/Tablet tanpa perlu login.',
+                                  style: TextStyle(fontSize: 11.5, color: AppColors.slate600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          onPressed: state.isLoading ? null : _showStandaloneTrialOnboardingSheet,
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppColors.success,
+                            side: const BorderSide(color: AppColors.success, width: 1.5),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          icon: const Icon(Icons.storefront_rounded, size: 19),
+                          label: const Text(
+                            'Mulai Coba Gratis / Mode Toko Mandiri',
+                            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
                           ),
                         ),
                       ),

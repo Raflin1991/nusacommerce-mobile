@@ -186,7 +186,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'Tenant: ${session.tenantSubdomain.isEmpty ? '-' : '${session.tenantSubdomain}.nusco.id'} ($planLabel)',
+                    session.isLocalTrial
+                        ? 'Mode Toko Mandiri (Offline Lokal)'
+                        : 'Tenant: ${session.tenantSubdomain.isEmpty ? '-' : '${session.tenantSubdomain}.nusco.id'} ($planLabel)',
                     style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
                   ),
                 ),

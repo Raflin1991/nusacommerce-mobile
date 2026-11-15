@@ -89,11 +89,59 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
     super.dispose();
   }
 
+  bool get _isLocalStandalone =>
+      context.read<AuthCubit>().state.session.isLocalTrial;
+
+  void _applyLocalShiftState(Map<String, dynamic>? localShift) {
+    if (!mounted) return;
+    if (localShift != null) {
+      final rawEntries = (localShift['entries'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      setState(() {
+        _hasOpenShift = true;
+        _shiftId = (localShift['id'] as num?)?.toInt();
+        _terminalLabel = 'Kasir Mandiri Lokal';
+        _openingCash = (localShift['opening_cash'] as num?)?.toDouble() ?? 0.0;
+        _cashSales = (localShift['cash_sales'] as num?)?.toDouble() ?? 0.0;
+        _expectedCash = (localShift['expected_cash'] as num?)?.toDouble() ?? 0.0;
+        _payIns = (localShift['cash_in'] as num?)?.toDouble() ?? 0.0;
+        _payOuts = (localShift['cash_out'] as num?)?.toDouble() ?? 0.0;
+        _drawerEntries = rawEntries;
+        _terminals = [];
+        _isBlindCountVerified = false;
+        _error = null;
+        _loading = false;
+      });
+    } else {
+      setState(() {
+        _hasOpenShift = false;
+        _shiftId = null;
+        _terminalLabel = 'Kasir Mandiri Lokal';
+        _openingCash = 0;
+        _cashSales = 0;
+        _expectedCash = 0;
+        _payIns = 0;
+        _payOuts = 0;
+        _drawerEntries = [];
+        _terminals = [];
+        _isBlindCountVerified = false;
+        _error = null;
+        _loading = false;
+      });
+    }
+  }
+
   Future<void> _loadCurrentShift() async {
     setState(() {
       _loading = true;
       _error = null;
     });
+
+    if (_isLocalStandalone) {
+      _applyLocalShiftState(_offlineDb.getCurrentLocalShift());
+      return;
+    }
 
     try {
       final res = await _api.dio.get(ApiEndpoints.currentShift);
@@ -141,12 +189,8 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
           _loading = false;
         });
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = ApiClient.extractErrorMessage(e);
-        _loading = false;
-      });
+    } catch (_) {
+      _applyLocalShiftState(_offlineDb.getCurrentLocalShift());
     }
   }
 
@@ -209,19 +253,27 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                 Navigator.pop(ctx);
                 setState(() => _submitting = true);
                 try {
-                  await _api.dio.post(
-                    ApiEndpoints.openShift,
-                    data: {
-                      'opening_cash': opening,
-                      if (selectedTerminalId != null) 'terminal_id': selectedTerminalId,
-                    },
+                  if (_isLocalStandalone) {
+                    await _offlineDb.openLocalShift(
+                      openingCash: opening,
+                      cashierName: context.read<AuthCubit>().state.session.userName,
+                    );
+                  } else {
+                    await _api.dio.post(
+                      ApiEndpoints.openShift,
+                      data: {
+                        'opening_cash': opening,
+                        if (selectedTerminalId != null) 'terminal_id': selectedTerminalId,
+                      },
+                    );
+                  }
+                  await _loadCurrentShift();
+                } catch (_) {
+                  await _offlineDb.openLocalShift(
+                    openingCash: opening,
+                    cashierName: context.read<AuthCubit>().state.session.userName,
                   );
                   await _loadCurrentShift();
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                  );
                 } finally {
                   if (mounted) setState(() => _submitting = false);
                 }
@@ -285,21 +337,31 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                   Navigator.pop(ctx);
                   setState(() => _submitting = true);
                   try {
-                    await _api.dio.post(
-                      ApiEndpoints.cashEntry,
-                      data: {
-                        'shift_id': _shiftId,
-                        'type': type,
-                        'amount': amt,
-                        'reason': reasonCtrl.text.trim(),
-                      },
+                    if (_isLocalStandalone) {
+                      await _offlineDb.addLocalShiftCashEntry(
+                        type: type,
+                        amount: amt,
+                        reason: reasonCtrl.text.trim(),
+                      );
+                    } else {
+                      await _api.dio.post(
+                        ApiEndpoints.cashEntry,
+                        data: {
+                          'shift_id': _shiftId,
+                          'type': type,
+                          'amount': amt,
+                          'reason': reasonCtrl.text.trim(),
+                        },
+                      );
+                    }
+                    await _loadCurrentShift();
+                  } catch (_) {
+                    await _offlineDb.addLocalShiftCashEntry(
+                      type: type,
+                      amount: amt,
+                      reason: reasonCtrl.text.trim(),
                     );
                     await _loadCurrentShift();
-                  } catch (e) {
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                    );
                   } finally {
                     if (mounted) setState(() => _submitting = false);
                   }
@@ -330,40 +392,49 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
             onPressed: () async {
               Navigator.pop(dCtx);
               setState(() => _submitting = true);
+              final reasonText = reasonCtrl.text.trim().isEmpty
+                  ? 'Buka laci manual (No-Sale)'
+                  : reasonCtrl.text.trim();
               try {
-                await _api.dio.post(
-                  ApiEndpoints.cashEntry,
-                  data: {
-                    'shift_id': _shiftId,
-                    'type': 'drawer_open_no_sale',
-                    'amount': 0,
-                    'reason': reasonCtrl.text.trim().isEmpty
-                        ? 'Buka laci manual (No-Sale)'
-                        : reasonCtrl.text.trim(),
-                  },
+                if (_isLocalStandalone) {
+                  await _offlineDb.addLocalShiftCashEntry(
+                    type: 'drawer_open_no_sale',
+                    amount: 0,
+                    reason: reasonText,
+                  );
+                } else {
+                  await _api.dio.post(
+                    ApiEndpoints.cashEntry,
+                    data: {
+                      'shift_id': _shiftId,
+                      'type': 'drawer_open_no_sale',
+                      'amount': 0,
+                      'reason': reasonText,
+                    },
+                  );
+                }
+              } catch (_) {
+                await _offlineDb.addLocalShiftCashEntry(
+                  type: 'drawer_open_no_sale',
+                  amount: 0,
+                  reason: reasonText,
                 );
-                final kicked = await _printer.kickCashDrawer();
-                await _loadCurrentShift();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      backgroundColor: kicked ? AppColors.successDark : null,
-                      content: Text(
-                        kicked
-                            ? 'Laci kasir RJ-11 dibuka via Bluetooth & kejadian No-Sale dicatat untuk audit.'
-                            : 'Kejadian No-Sale dicatat untuk audit (sambungkan printer Bluetooth untuk membuka laci RJ-11).',
-                      ),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                  );
-                }
               } finally {
                 if (mounted) setState(() => _submitting = false);
+              }
+              final kicked = await _printer.kickCashDrawer();
+              await _loadCurrentShift();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: kicked ? AppColors.successDark : null,
+                    content: Text(
+                      kicked
+                          ? 'Laci kasir RJ-11 dibuka via Bluetooth & kejadian No-Sale dicatat untuk audit.'
+                          : 'Kejadian No-Sale dicatat untuk audit (sambungkan printer Bluetooth untuk membuka laci RJ-11).',
+                    ),
+                  ),
+                );
               }
             },
             child: const Text('Kirim Pulse & Buka'),
@@ -480,20 +551,28 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
 
     setState(() => _submitting = true);
     try {
-      await _api.dio.post(
-        ApiEndpoints.closeShift,
-        data: {
-          'shift_id': _shiftId,
-          'closing_cash_counted': counted,
-          'expected_cash': _expectedCash,
-          'cash_shortage': cashShortage,
-          'cash_overage': cashOverage,
-          'denomination_counts': _denomCounts.map((k, v) => MapEntry(k.toString(), v)),
-        },
-      );
+      if (_isLocalStandalone) {
+        await _offlineDb.closeLocalShift(actualClosingCash: counted);
+      } else {
+        try {
+          await _api.dio.post(
+            ApiEndpoints.closeShift,
+            data: {
+              'shift_id': _shiftId,
+              'closing_cash_counted': counted,
+              'expected_cash': _expectedCash,
+              'cash_shortage': cashShortage,
+              'cash_overage': cashOverage,
+              'denomination_counts': _denomCounts.map((k, v) => MapEntry(k.toString(), v)),
+            },
+          );
+        } catch (_) {
+          await _offlineDb.closeLocalShift(actualClosingCash: counted);
+        }
+      }
 
       final ownerPhone = session.activeStore.phone?.trim() ?? '';
-      if (ownerPhone.isNotEmpty) {
+      if (ownerPhone.isNotEmpty && ownerPhone != '-') {
         await WhatsAppService.sendShiftZReportToOwner(
           ownerPhone: ownerPhone,
           storeName: session.activeStore.name,
@@ -512,9 +591,13 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
       await _loadCurrentShift();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           backgroundColor: AppColors.successDark,
-          content: Text('Shift berhasil ditutup & Z-Report dikirim ke Owner.'),
+          content: Text(
+            _isLocalStandalone
+                ? 'Shift berhasil ditutup & Z-Report disimpan di perangkat.'
+                : 'Shift berhasil ditutup & Z-Report dikirim ke Owner.',
+          ),
         ),
       );
     } catch (e) {

@@ -5,8 +5,10 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/network_connectivity_service.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
@@ -23,6 +25,8 @@ class DebtBookScreen extends StatefulWidget {
 
 class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProviderStateMixin {
   final ApiClient _api = GetIt.instance<ApiClient>();
+  final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
+  final NetworkConnectivityService _connectivity = GetIt.instance<NetworkConnectivityService>();
   late TabController _tabController;
 
   bool _loading = true;
@@ -50,11 +54,74 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  bool get _isLocalStandalone => context.read<AuthCubit>().state.session.isLocalTrial;
+
+  List<Map<String, dynamic>> get _defaultOfflinePaymentMethods => const [
+        {'id': 1, 'name': 'Tunai', 'type': 'cash'},
+        {'id': 2, 'name': 'QRIS / E-Wallet', 'type': 'qris'},
+        {'id': 3, 'name': 'Transfer Bank', 'type': 'bank_transfer'},
+      ];
+
+  List<Map<String, dynamic>> get _defaultOfflineExpenseCategories => const [
+        {'id': 1, 'name': 'Operasional Toko'},
+        {'id': 2, 'name': 'Listrik & Air'},
+        {'id': 3, 'name': 'Gaji Harian Kasir'},
+        {'id': 4, 'name': 'Perlengkapan & Kemasan'},
+        {'id': 5, 'name': 'Transport & Pengiriman'},
+        {'id': 6, 'name': 'Perawatan Toko'},
+      ];
+
+  String _methodNameById(int? id) {
+    final found = _paymentMethods.firstWhere(
+      (m) => (m['id'] as num?)?.toInt() == id,
+      orElse: () => {'name': 'Tunai'},
+    );
+    return (found['name'] ?? 'Tunai').toString();
+  }
+
+  void _applyLocalDebtBookData() {
+    final localRec = _offlineDb.getLocalReceivables();
+    final localPay = _offlineDb
+        .getLocalPayables()
+        .where((p) => ((p['balance_due'] as num?)?.toDouble() ?? 0.0) > 0.5)
+        .toList();
+    final localExp = _offlineDb.getLocalExpenses();
+
+    final recTotal = localRec.fold<double>(
+      0.0,
+      (sum, item) => sum + ((item['balance_due'] as num?)?.toDouble() ?? 0.0),
+    );
+    final payTotal = localPay.fold<double>(
+      0.0,
+      (sum, item) => sum + ((item['balance_due'] as num?)?.toDouble() ?? 0.0),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _totalReceivables = recTotal;
+      _receivables = localRec;
+      _totalPayables = payTotal;
+      _payables = localPay;
+      _expenses = localExp;
+      _expenseCategories = List<Map<String, dynamic>>.from(_defaultOfflineExpenseCategories);
+      if (_paymentMethods.isEmpty) {
+        _paymentMethods = List<Map<String, dynamic>>.from(_defaultOfflinePaymentMethods);
+      }
+      _error = null;
+      _loading = false;
+    });
+  }
+
   Future<void> _loadData() async {
     setState(() {
       _loading = true;
       _error = null;
     });
+
+    if (_isLocalStandalone || !(await _connectivity.checkOnline())) {
+      _applyLocalDebtBookData();
+      return;
+    }
 
     try {
       final results = await Future.wait([
@@ -100,6 +167,13 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
         _loading = false;
       });
     } catch (e) {
+      if (_isLocalStandalone ||
+          _offlineDb.getLocalSalesHistory().isNotEmpty ||
+          _offlineDb.getLocalPayables().isNotEmpty ||
+          _offlineDb.getLocalExpenses().isNotEmpty) {
+        _applyLocalDebtBookData();
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _error = ApiClient.extractErrorMessage(e);
@@ -111,8 +185,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
   void _showPayInstallmentModal(int index) {
     final item = _receivables[index];
     final currentDue = (item['balance_due'] as num?)?.toDouble() ?? 0;
-    final customerName = (item['customer']?['name'] ?? 'Pelanggan').toString();
-    final saleId = (item['sale_id'] as num).toInt();
+    final customerName = (item['customer']?['name'] ?? item['customer_name'] ?? 'Pelanggan').toString();
+    final saleId = (item['sale_id'] as num?)?.toInt() ?? (item['id'] as num?)?.toInt() ?? 0;
+    final isLocalItem = _isLocalStandalone || item['is_local'] == true;
     final amountCtrl = TextEditingController(text: currentDue.toStringAsFixed(0));
     int? selectedMethodId = _paymentMethods.isNotEmpty ? (_paymentMethods.first['id'] as num?)?.toInt() : 1;
 
@@ -174,8 +249,22 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                   onPressed: () async {
                     final paid = IdrCurrencyFormatter.parse(amountCtrl.text);
                     if (paid <= 0 || selectedMethodId == null) return;
+                    final methodName = _methodNameById(selectedMethodId);
                     Navigator.pop(ctx);
                     try {
+                      if (isLocalItem || !(await _connectivity.checkOnline())) {
+                        await _offlineDb.payLocalReceivable(
+                          saleId: saleId,
+                          amount: paid,
+                          paymentMethod: methodName,
+                        );
+                        await _loadData();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Cicilan / pelunasan kasbon dicatat secara lokal!')),
+                        );
+                        return;
+                      }
                       await _api.dio.post(
                         ApiEndpoints.payReceivable(saleId),
                         data: {
@@ -212,7 +301,8 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     final bankName = (item['supplier']?['bank_name'] ?? '-').toString();
     final bankAcc = (item['supplier']?['bank_account_number'] ?? '-').toString();
     final bankHolder = (item['supplier']?['bank_account_holder'] ?? '-').toString();
-    final purchaseId = (item['purchase_id'] as num?)?.toInt() ?? 0;
+    final purchaseId = (item['purchase_id'] as num?)?.toInt() ?? (item['id'] as num?)?.toInt() ?? 0;
+    final isLocalItem = _isLocalStandalone || item['is_local'] == true;
 
     final amountCtrl = TextEditingController(text: currentDue.toInt().toString());
     final notesCtrl = TextEditingController();
@@ -317,8 +407,22 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                   onPressed: () async {
                     final paid = IdrCurrencyFormatter.parse(amountCtrl.text);
                     if (paid <= 0 || selectedMethodId == null) return;
+                    final methodName = _methodNameById(selectedMethodId);
                     Navigator.pop(ctx);
                     try {
+                      if (isLocalItem || !(await _connectivity.checkOnline())) {
+                        await _offlineDb.payLocalPayable(
+                          payableId: purchaseId,
+                          amount: paid,
+                          paymentMethod: methodName,
+                        );
+                        await _loadData();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Pembayaran hutang supplier berhasil dicatat secara lokal!')),
+                        );
+                        return;
+                      }
                       await _api.dio.post(
                         ApiEndpoints.payPayable(purchaseId),
                         data: {
@@ -445,8 +549,28 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                     onPressed: () async {
                       final amt = IdrCurrencyFormatter.parse(amtCtrl.text);
                       if (amt <= 0 || descCtrl.text.trim().isEmpty) return;
+                      final chosenCatName = _expenseCategories
+                          .firstWhere(
+                            (c) => (c['id'] as num?)?.toInt() == selectedCatId,
+                            orElse: () => {'name': 'Operasional Toko'},
+                          )['name']
+                          .toString();
                       Navigator.pop(ctx);
                       try {
+                        if (_isLocalStandalone || !(await _connectivity.checkOnline())) {
+                          await _offlineDb.addLocalExpense(
+                            category: chosenCatName,
+                            amount: amt,
+                            description: descCtrl.text.trim(),
+                            paymentMethod: 'Tunai',
+                          );
+                          await _loadData();
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Biaya operasional dicatat secara lokal!')),
+                          );
+                          return;
+                        }
                         await _api.dio.post(
                           ApiEndpoints.expenses,
                           data: {
