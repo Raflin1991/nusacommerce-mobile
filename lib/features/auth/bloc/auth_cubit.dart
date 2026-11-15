@@ -56,16 +56,25 @@ class AuthCubit extends Cubit<AuthState> {
     final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
 
     if (cachedSession != null && cachedSession.isLocalTrial) {
-      final vertical = cachedSession.activeStore.preferredVerticalRaw;
-      if (vertical != null && vertical.isNotEmpty && (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
-        await _offlineDb.setSavedBusinessVertical(vertical);
+      final vertical = cachedSession.activeStore.preferredVerticalRaw ??
+          _offlineDb.getSavedBusinessVertical() ??
+          'retail';
+      final normalizedVertical = vertical.trim().isEmpty ? 'retail' : vertical.trim().toLowerCase();
+      await _offlineDb.ensureTenantIsolation('local-trial:$normalizedVertical');
+      if ((_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
+        await _offlineDb.setSavedBusinessVertical(normalizedVertical);
       }
+      await _offlineDb.seedVerticalSampleProductsIfEmpty(normalizedVertical);
       emit(AuthState(
         isLoading: false,
         isAuthenticated: true,
         session: cachedSession,
       ));
       return;
+    }
+
+    if (cachedSession != null && cachedSession.tenantSubdomain.isNotEmpty) {
+      await _offlineDb.ensureTenantIsolation('cloud:${cachedSession.tenantSubdomain.toLowerCase()}');
     }
 
     final token = await _apiClient.getToken();
@@ -106,10 +115,11 @@ class AuthCubit extends Cubit<AuthState> {
       final data = response.data['data'] as Map<String, dynamic>?;
       if (data != null) {
         final session = AuthSessionModel.fromApiData(data);
-        await _apiClient.setActiveStoreId(session.activeStore.id);
         if (session.tenantSubdomain.isNotEmpty) {
+          await _offlineDb.ensureTenantIsolation('cloud:${session.tenantSubdomain.toLowerCase()}');
           await _apiClient.setTenantSlug(session.tenantSubdomain);
         }
+        await _apiClient.setActiveStoreId(session.activeStore.id);
         if (session.activeStore.preferredVerticalRaw != null &&
             (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
           await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
@@ -148,6 +158,7 @@ class AuthCubit extends Cubit<AuthState> {
     required String tenantDomain,
     required String email,
     required String password,
+    bool preserveLocalForMigration = false,
   }) async {
     emit(state.copyWith(isLoading: true, errorMessage: null));
     await _apiClient.setTenantSlug(tenantDomain);
@@ -172,6 +183,22 @@ class AuthCubit extends Cubit<AuthState> {
       await _apiClient.saveToken(token);
 
       final session = AuthSessionModel.fromApiData(data);
+      final targetSubdomain = session.tenantSubdomain.isNotEmpty
+          ? session.tenantSubdomain.toLowerCase()
+          : tenantDomain.trim().toLowerCase();
+      final targetIdentity = 'cloud:$targetSubdomain';
+      if (!preserveLocalForMigration) {
+        final switchingFromTrial = state.session.isLocalTrial;
+        final switchingCloudTenant = state.session.tenantSubdomain.isNotEmpty &&
+            state.session.tenantSubdomain.toLowerCase() != targetSubdomain;
+        await _offlineDb.ensureTenantIsolation(
+          targetIdentity,
+          forceClear: switchingFromTrial || switchingCloudTenant,
+        );
+      } else {
+        await _offlineDb.setActiveTenantIdentity(targetIdentity);
+      }
+
       if (session.tenantSubdomain.isNotEmpty) {
         await _apiClient.setTenantSlug(session.tenantSubdomain);
       }
@@ -218,12 +245,17 @@ class AuthCubit extends Cubit<AuthState> {
   }) async {
     emit(state.copyWith(isLoading: true, errorMessage: null));
 
-    // Purge any stale Cloud Bearer token so local trial never triggers Cloud auth errors
+    // Purge any stale Cloud Bearer token and isolate local cache completely
     await _apiClient.clearSession();
 
     final normalizedVertical = businessVertical.trim().isEmpty
         ? 'retail'
         : businessVertical.trim().toLowerCase();
+
+    await _offlineDb.ensureTenantIsolation(
+      'local-trial:$normalizedVertical',
+      forceClear: true,
+    );
 
     final session = AuthSessionModel.createLocalTrialSession(
       storeName: storeName,
@@ -317,6 +349,7 @@ class AuthCubit extends Cubit<AuthState> {
       await _apiClient.dio.post(ApiEndpoints.logout);
     } catch (_) {}
     await _apiClient.clearSession();
+    await _offlineDb.clearTenantCache();
     await _offlineDb.clearAuthSession();
     emit(AuthState(
       isLoading: false,

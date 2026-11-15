@@ -68,6 +68,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
       tenantDomain: subdomain,
       email: email,
       password: password,
+      preserveLocalForMigration: true,
     );
 
     if (!mounted) return;

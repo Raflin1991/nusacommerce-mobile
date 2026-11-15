@@ -320,6 +320,16 @@ class PosCubit extends Cubit<PosState> {
     return super.close();
   }
 
+  /// Clears all in-memory catalog, cart, customers, suppliers, and sales state on logout or tenant switch.
+  Future<void> resetForLogout() async {
+    _lastCompletedIdempotencyKey = null;
+    _lastCompletedReceipt = null;
+    _isCheckoutInProgress = false;
+    _isAutoSyncRunning = false;
+    await _connectivitySubscription?.cancel();
+    emit(const PosState());
+  }
+
   /// Initialize POS catalog, categories, sales history & background reactive connectivity listener
   Future<void> initializeCatalog({bool seedDefaultCart = false}) async {
     emit(state.copyWith(isLoading: true));
@@ -444,9 +454,16 @@ class PosCubit extends Cubit<PosState> {
     bool preserveActiveCart = false,
   }) async {
     if (_isLocalStandalone) {
+      final resolvedVertical = _resolveInitialVertical(_offlineDb);
+      final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
       emit(state.copyWith(
         isLoading: false,
         isSyncingOfflineQueue: false,
+        currentVertical: resolvedVertical,
+        posMode: resolvedVertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
+        orderType: resolvedCaps.hasDineInTakeawayOrderType
+            ? (state.orderType == 'retail' ? 'dine_in' : state.orderType)
+            : 'retail',
         allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
         categories: _offlineDb.getCachedCategories(),
         customers: _offlineDb.getCachedCustomers(),
@@ -470,7 +487,9 @@ class PosCubit extends Cubit<PosState> {
       final prodRes = await _apiClient.dio.get(ApiEndpoints.products, queryParameters: {'per_page': 200});
       final rawList = prodRes.data['data'] as List<dynamic>?;
       List<ProductModel> products = [];
+      bool productsFetchedFromServer = false;
       if (rawList != null) {
+        productsFetchedFromServer = true;
         final mapped = rawList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         await _offlineDb.cacheProducts(mapped);
         products = mapped.map(ProductModel.fromJson).toList();
@@ -512,7 +531,7 @@ class PosCubit extends Cubit<PosState> {
       await _offlineDb.cacheCategories(categories);
 
       // 3. Fetch real customers from server
-      List<Map<String, dynamic>> customers = state.customers;
+      List<Map<String, dynamic>> customers = _offlineDb.getCachedCustomers();
       try {
         final custRes = await _apiClient.dio.get(ApiEndpoints.customers, queryParameters: {'per_page': 200});
         final rawCust = custRes.data['data'] as List<dynamic>?;
@@ -523,7 +542,7 @@ class PosCubit extends Cubit<PosState> {
       } catch (_) {}
 
       // 4. Fetch real suppliers from server
-      List<Map<String, dynamic>> suppliers = state.suppliers;
+      List<Map<String, dynamic>> suppliers = _offlineDb.getCachedSuppliers();
       try {
         final supRes = await _apiClient.dio.get(ApiEndpoints.suppliers, queryParameters: {'per_page': 200});
         final rawSup = supRes.data['data'] as List<dynamic>?;
@@ -545,8 +564,10 @@ class PosCubit extends Cubit<PosState> {
       await _offlineDb.cacheSalesHistory(sales);
 
       // 6. Fetch cloud-held carts, payment methods, and return reasons
-      final catalogProducts = products.isNotEmpty ? products : state.allProducts;
-      List<Map<String, dynamic>> mergedHeldCarts = state.heldCarts;
+      final catalogProducts = productsFetchedFromServer
+          ? products
+          : _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
+      List<Map<String, dynamic>> mergedHeldCarts = force ? [] : state.heldCarts;
       try {
         final heldRes = await _apiClient.dio.get(ApiEndpoints.heldSales);
         final rawHeld = heldRes.data['data'] as List<dynamic>?;
@@ -597,11 +618,15 @@ class PosCubit extends Cubit<PosState> {
               'cart_items': cartItems,
             });
           }
-          final serverIds = serverHeld.map((e) => e['id']).toSet();
-          final localOnly = state.heldCarts
-              .where((l) => !serverIds.contains(l['id']))
-              .toList();
-          mergedHeldCarts = [...serverHeld, ...localOnly];
+          if (force) {
+            mergedHeldCarts = serverHeld;
+          } else {
+            final serverIds = serverHeld.map((e) => e['id']).toSet();
+            final localOnly = state.heldCarts
+                .where((l) => !serverIds.contains(l['id']))
+                .toList();
+            mergedHeldCarts = [...serverHeld, ...localOnly];
+          }
         }
       } catch (_) {}
 
@@ -623,10 +648,17 @@ class PosCubit extends Cubit<PosState> {
         }
       } catch (_) {}
 
+      final resolvedVertical = _resolveInitialVertical(_offlineDb);
+      final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
       emit(state.copyWith(
         isLoading: false,
         isOnline: _apiClient.isOnline,
         isSyncingOfflineQueue: false,
+        currentVertical: resolvedVertical,
+        posMode: resolvedVertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
+        orderType: resolvedCaps.hasDineInTakeawayOrderType
+            ? (state.orderType == 'retail' ? 'dine_in' : state.orderType)
+            : 'retail',
         allProducts: catalogProducts,
         categories: categories,
         customers: customers,
@@ -2303,6 +2335,12 @@ class PosCubit extends Cubit<PosState> {
     // 4. Remap IDs inside offline sales queue & push to Cloud
     await _offlineDb.remapOfflineSalesIds(productIdMap, customerIdMap);
     syncedSales = await _offlineDb.syncOfflineQueue(_apiClient);
+
+    final cachedAuth = _offlineDb.getCachedAuthSession();
+    final sub = (cachedAuth?['tenant_subdomain'] ?? '').toString().trim().toLowerCase();
+    if (sub.isNotEmpty) {
+      await _offlineDb.setActiveTenantIdentity('cloud:$sub');
+    }
 
     // 5. Refresh clean authoritative Cloud catalog
     await syncWithCloud(force: true, preserveActiveCart: true);

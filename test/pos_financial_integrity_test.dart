@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nusacommerce_mobile/core/config/business_vertical_config.dart';
@@ -5,6 +6,7 @@ import 'package:nusacommerce_mobile/core/database/offline_database.dart';
 import 'package:nusacommerce_mobile/core/hardware/barcode_service.dart';
 import 'package:nusacommerce_mobile/core/hardware/printer_service.dart';
 import 'package:nusacommerce_mobile/core/network/api_client.dart';
+import 'package:nusacommerce_mobile/core/widgets/nusa_widgets.dart';
 import 'package:nusacommerce_mobile/features/auth/bloc/auth_cubit.dart';
 import 'package:nusacommerce_mobile/features/auth/models/auth_session_model.dart';
 import 'package:nusacommerce_mobile/features/pos/bloc/pos_cubit.dart';
@@ -986,6 +988,115 @@ void main() {
       await posCubit.close();
       await authCubit.close();
       await authCubit2.close();
+    });
+
+    test('test_cross_tenant_isolation_purges_previous_tenant_products_on_logout_and_trial_start', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      apiClient.dio.options.baseUrl = 'http://127.0.0.1:59999/api/v1';
+      apiClient.dio.options.connectTimeout = const Duration(milliseconds: 50);
+      apiClient.dio.options.receiveTimeout = const Duration(milliseconds: 50);
+
+      final offlineDb = OfflineDatabase(prefs);
+      final authCubit = AuthCubit(apiClient: apiClient, offlineDb: offlineDb);
+      final posCubit = PosCubit(apiClient: apiClient, offlineDb: offlineDb);
+
+      // 1. Simulate cached data belonging to cloud tenant "manunggal"
+      await offlineDb.setActiveTenantIdentity('cloud:manunggal');
+      await offlineDb.cacheProducts([
+        {
+          'id': 101,
+          'name': 'Apple iPhone 16 128GB',
+          'sku': 'IP16-128',
+          'selling_price': 16800000.0,
+          'stock': 0.0,
+        },
+        {
+          'id': 102,
+          'name': 'Baseus GaN 65W Fast Charger',
+          'sku': 'GAN65-BLK',
+          'selling_price': 380000.0,
+          'stock': 0.0,
+        },
+      ]);
+      await offlineDb.cacheCustomers([
+        {'id': 55, 'name': 'Budi Manunggal VIP'},
+      ]);
+      await posCubit.initializeCatalog(seedDefaultCart: false);
+      expect(posCubit.state.allProducts.map((p) => p.name), contains('Apple iPhone 16 128GB'));
+
+      // 2. Logout must purge both OfflineDatabase tenant cache and PosCubit memory
+      await authCubit.logout();
+      await posCubit.resetForLogout();
+      expect(offlineDb.getCachedProducts(), isEmpty);
+      expect(offlineDb.getCachedCustomers(), isEmpty);
+      expect(posCubit.state.allProducts, isEmpty);
+
+      // 3. Even if leftover "manunggal" products sit in cache before starting Local Trial,
+      // startLocalTrialSession must isolate & wipe foreign products cleanly.
+      await offlineDb.setActiveTenantIdentity('cloud:manunggal');
+      await offlineDb.cacheProducts([
+        {
+          'id': 103,
+          'name': 'Samsung Galaxy Buds3 Pro',
+          'sku': 'TWS-PRO',
+          'selling_price': 2850000.0,
+          'stock': 0.0,
+        },
+      ]);
+
+      await authCubit.startLocalTrialSession(
+        storeName: 'Kopi Lokal Baru',
+        businessVertical: 'restaurant',
+        openingCash: 100000,
+      );
+      await posCubit.initializeCatalog(seedDefaultCart: false);
+
+      final namesAfterTrial = posCubit.state.allProducts.map((p) => p.name).toList();
+      expect(namesAfterTrial, isNot(contains('Samsung Galaxy Buds3 Pro')));
+      expect(namesAfterTrial, contains('Kopi Susu Gula Aren'));
+
+      // 4. Cold-start self-healing: contaminated local-trial storage auto-heals on checkExistingSession()
+      await offlineDb.cacheProducts([
+        {
+          'id': 999,
+          'name': 'Apple iPhone 16 128GB',
+          'sku': 'IP16-128',
+          'selling_price': 16800000.0,
+          'stock': 0.0,
+        },
+      ]);
+      final coldStartAuth = AuthCubit(apiClient: apiClient, offlineDb: offlineDb);
+      await coldStartAuth.checkExistingSession();
+      final healedProducts = offlineDb.getCachedProducts().map((e) => e['name']).toList();
+      expect(healedProducts, isNot(contains('Apple iPhone 16 128GB')));
+      expect(healedProducts, contains('Kopi Susu Gula Aren'));
+
+      // 5. Switching from local-trial to another Cloud tenant clears local-trial cache
+      await offlineDb.ensureTenantIsolation('cloud:warungbudi');
+      expect(offlineDb.getCachedProducts(), isEmpty);
+
+      await posCubit.close();
+      await authCubit.close();
+      await coldStartAuth.close();
+    });
+
+    testWidgets('test_nusa_brand_logo_renders_without_asset_dependencies', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: NusaBrandLogo(size: 64),
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(NusaBrandLogo), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 }

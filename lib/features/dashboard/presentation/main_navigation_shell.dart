@@ -31,6 +31,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<PosCubit>().initializeCatalog(seedDefaultCart: false);
+      }
+    });
   }
 
   void _switchTab(int index) {
@@ -349,7 +354,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                 child: OutlinedButton.icon(
                   onPressed: () async {
                     Navigator.pop(context);
+                    final posCubit = context.read<PosCubit>();
                     await context.read<AuthCubit>().logout();
+                    await posCubit.resetForLogout();
                     if (context.mounted) {
                       context.go('/login');
                     }

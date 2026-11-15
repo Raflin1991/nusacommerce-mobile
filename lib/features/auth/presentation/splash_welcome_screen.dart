@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/widgets/nusa_widgets.dart';
 import '../bloc/auth_cubit.dart';
 
 /// LAYAR 1 — PORTAL PENGANTAR RESMI NUSACOMMERCE MOBILE
@@ -175,26 +176,17 @@ class SplashWelcomeScreen extends StatelessWidget {
   }
 
   Widget _buildBrandEmblem() {
-    return Container(
-      width: 68,
-      height: 68,
+    return NusaBrandLogo(
+      size: 68,
+      borderRadius: 18,
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.navyDark.withOpacity(0.14),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Image.asset(
-        'assets/images/nusacommerce_icon.png',
-        fit: BoxFit.contain,
-      ),
+      boxShadow: [
+        BoxShadow(
+          color: AppColors.navyDark.withOpacity(0.14),
+          blurRadius: 14,
+          offset: const Offset(0, 6),
+        ),
+      ],
     );
   }
 }

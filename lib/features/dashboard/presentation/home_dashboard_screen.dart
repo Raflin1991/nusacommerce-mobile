@@ -402,7 +402,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                             const SizedBox(width: 8),
                             OutlinedButton(
                               onPressed: () async {
+                                final posCubit = context.read<PosCubit>();
                                 await context.read<AuthCubit>().logout();
+                                await posCubit.resetForLogout();
                                 if (context.mounted) {
                                   context.go('/login');
                                 }

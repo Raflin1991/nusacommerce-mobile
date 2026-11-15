@@ -31,6 +31,7 @@ class OfflineDatabase {
   static const String _keyLocalShifts = 'nusa_local_shifts_v4';
   static const String _keyLocalExpenses = 'nusa_local_expenses_v4';
   static const String _keyLocalPayables = 'nusa_local_payables_v4';
+  static const String _keyActiveTenantIdentity = 'nusa_active_tenant_identity_v4';
 
   List<Map<String, dynamic>>? _memProducts;
   List<Map<String, dynamic>>? _memCustomers;
@@ -124,20 +125,61 @@ class OfflineDatabase {
 
   bool get hasCloudSynced => _prefs.getBool(_keyHasCloudSynced) ?? false;
 
+  String? getActiveTenantIdentity() => _prefs.getString(_keyActiveTenantIdentity);
+
+  Future<void> setActiveTenantIdentity(String identity) async {
+    await _prefs.setString(_keyActiveTenantIdentity, identity.trim().toLowerCase());
+  }
+
+  /// Ensures strict tenant cache isolation whenever switching between Cloud tenants
+  /// or entering/resuming Mode Toko Mandiri (local-trial).
+  Future<void> ensureTenantIsolation(
+    String newTenantIdentity, {
+    bool forceClear = false,
+  }) async {
+    final normalized = newTenantIdentity.trim().toLowerCase();
+    final current = getActiveTenantIdentity();
+
+    final cachedProducts = getCachedProducts();
+    final bool hasForeignProducts;
+    if (normalized.startsWith('local-trial')) {
+      hasForeignProducts = cachedProducts.any(
+        (p) => p['is_local_only'] != true && ((p['id'] as num?)?.toInt() ?? 0) > 0,
+      );
+    } else if (normalized.startsWith('cloud:')) {
+      hasForeignProducts = cachedProducts.any(
+        (p) => p['is_local_only'] == true || ((p['id'] as num?)?.toInt() ?? 0) < 0,
+      );
+    } else {
+      hasForeignProducts = false;
+    }
+
+    if (forceClear || (current != null && current != normalized) || hasForeignProducts) {
+      await clearTenantCache();
+    }
+    await setActiveTenantIdentity(normalized);
+  }
+
   Future<void> clearTenantCache() async {
     _memProducts = [];
     _memCustomers = [];
     _memSuppliers = [];
+    _memOfflineSales = [];
     await _sqlite.clearAll();
+    await _prefs.remove(_keyActiveTenantIdentity);
+    await _prefs.remove(_keyBusinessVerticalMode);
     for (final v in ['', '_v2', '_v3', '_v4']) {
       await _prefs.remove('nusa_local_products$v');
       await _prefs.remove('nusa_local_categories$v');
       await _prefs.remove('nusa_local_customers$v');
       await _prefs.remove('nusa_local_suppliers$v');
+      await _prefs.remove('nusa_offline_sales_queue$v');
+      await _prefs.remove('nusa_offline_sync_conflicts$v');
       await _prefs.remove('nusa_local_sales_history$v');
       await _prefs.remove('nusa_local_shifts$v');
       await _prefs.remove('nusa_local_expenses$v');
       await _prefs.remove('nusa_local_payables$v');
+      await _prefs.remove('nusa_store_profile$v');
       await _prefs.remove('nusa_has_cloud_synced$v');
     }
   }
@@ -613,10 +655,31 @@ class OfflineDatabase {
   // 7. STANDALONE TRIAL SEEDING (6 VERTICAL TEMPLATES)
   // ===========================================================================
   Future<List<Map<String, dynamic>>> seedVerticalSampleProductsIfEmpty(
-    String verticalCode,
-  ) async {
+    String verticalCode, {
+    bool forceReseed = false,
+  }) async {
     final existing = getCachedProducts();
-    if (existing.isNotEmpty) return existing;
+    final hasLeakedCloudProducts = existing.any(
+      (p) => p['is_local_only'] != true && ((p['id'] as num?)?.toInt() ?? 0) > 0,
+    );
+    if (!forceReseed && existing.isNotEmpty && !hasLeakedCloudProducts) {
+      return existing;
+    }
+    if (hasLeakedCloudProducts || forceReseed) {
+      final prevIdentity = getActiveTenantIdentity();
+      final prevVertical = getSavedBusinessVertical();
+      final prevProfile = _prefs.getString(_keyStoreProfile);
+      await clearTenantCache();
+      if (prevIdentity != null && prevIdentity.startsWith('local-trial')) {
+        await setActiveTenantIdentity(prevIdentity);
+      }
+      if (prevVertical != null && prevVertical.isNotEmpty) {
+        await setSavedBusinessVertical(prevVertical);
+      }
+      if (prevProfile != null && prevProfile.isNotEmpty) {
+        await _prefs.setString(_keyStoreProfile, prevProfile);
+      }
+    }
 
     final code = verticalCode.trim().toLowerCase();
     final List<Map<String, dynamic>> samples;

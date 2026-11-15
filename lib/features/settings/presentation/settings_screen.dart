@@ -1028,7 +1028,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               variant: NusaButtonVariant.danger,
               minHeight: 50,
               onPressed: () async {
+                final posCubit = context.read<PosCubit>();
                 await context.read<AuthCubit>().logout();
+                await posCubit.resetForLogout();
                 if (context.mounted) {
                   context.go('/login');
                 }
