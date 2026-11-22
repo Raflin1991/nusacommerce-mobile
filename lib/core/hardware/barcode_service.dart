@@ -1,4 +1,4 @@
-/// Smart Barcode & Digital Scale Prefix 20/21 Parser for NusaCommerce POS
+/// Smart Barcode & Digital Scale Prefix 20/21 Parser for OXO.ID POS
 class ParsedBarcodeResult {
   final String rawBarcode;
   final bool isWeightScaleBarcode;
@@ -77,5 +77,58 @@ class BarcodeService {
     }
 
     return ParsedBarcodeResult(rawBarcode: cleaned);
+  }
+}
+
+/// Captures rapid HID keyboard-wedge keystrokes from physical USB/Bluetooth barcode
+/// scanners terminated by Enter without stealing focus from text fields.
+class HardwareBarcodeWedgeBuffer {
+  final StringBuffer _buffer = StringBuffer();
+  DateTime? _lastKeyAt;
+  final int maxInterKeyMs;
+  final int minLength;
+
+  HardwareBarcodeWedgeBuffer({
+    this.maxInterKeyMs = 120,
+    this.minLength = 4,
+  });
+
+  /// Feed a character or Enter trigger from a hardware key event.
+  /// Returns the completed barcode string when Enter terminates a valid wedge burst,
+  /// otherwise returns `null`.
+  String? onKeyCharacter({
+    String? character,
+    bool isEnter = false,
+    DateTime? now,
+  }) {
+    final ts = now ?? DateTime.now();
+    if (_lastKeyAt != null &&
+        ts.difference(_lastKeyAt!).inMilliseconds > maxInterKeyMs) {
+      _buffer.clear();
+    }
+
+    if (isEnter) {
+      final completed = _buffer.toString().trim();
+      _buffer.clear();
+      _lastKeyAt = null;
+      if (completed.length >= minLength) {
+        return completed;
+      }
+      return null;
+    }
+
+    if (character != null &&
+        character.length == 1 &&
+        character.codeUnitAt(0) >= 32 &&
+        character.codeUnitAt(0) <= 126) {
+      _buffer.write(character);
+      _lastKeyAt = ts;
+    }
+    return null;
+  }
+
+  void clear() {
+    _buffer.clear();
+    _lastKeyAt = null;
   }
 }

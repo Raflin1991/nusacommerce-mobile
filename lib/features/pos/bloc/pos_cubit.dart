@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -13,10 +14,35 @@ import '../../../core/utils/currency_formatter.dart';
 import '../models/pos_models.dart';
 import '../utils/pos_financial_calculator.dart';
 
+part 'pos_cubit_parity.dart';
+
+class CheckoutServerException implements Exception {
+  final String message;
+  final String? errorCode;
+  final int? statusCode;
+
+  const CheckoutServerException({
+    required this.message,
+    this.errorCode,
+    this.statusCode,
+  });
+
+  bool get isShiftRequired =>
+      errorCode == 'ShiftRequired' ||
+      message.toLowerCase().contains('shift kasir');
+
+  @override
+  String toString() => message;
+}
+
 class PosState extends Equatable {
   final bool isLoading;
   final bool isOnline;
   final bool isSyncingOfflineQueue;
+  final bool isInitialRestoring;
+  final double initialRestoreProgress;
+  final String? initialRestoreStep;
+  final String activeNodeCode;
   final BusinessVertical currentVertical;
   final String posMode; // 'retail' or 'restaurant'
   final String orderType; // 'retail', 'dine_in', 'takeaway', 'delivery'
@@ -25,6 +51,7 @@ class PosState extends Equatable {
   final List<Map<String, dynamic>> customers;
   final List<Map<String, dynamic>> suppliers;
   final int selectedCategoryId;
+  final int selectedBrandId;
   final String searchQuery;
   final List<CartItemModel> cart;
   final Map<String, dynamic>? selectedCustomer;
@@ -38,6 +65,10 @@ class PosState extends Equatable {
   final List<Map<String, dynamic>> salesHistory;
   final List<Map<String, dynamic>> paymentMethods;
   final List<Map<String, dynamic>> returnReasons;
+  final List<Map<String, dynamic>> brands;
+  final List<Map<String, dynamic>> units;
+  final List<Map<String, dynamic>> expenseCategories;
+  final List<Map<String, dynamic>> customerGroups;
   final List<Map<String, dynamic>> localSyncConflicts;
   final int? activeHeldSaleId;
   final Map<String, dynamic>? exchangeSourceSale;
@@ -48,6 +79,10 @@ class PosState extends Equatable {
     this.isLoading = false,
     this.isOnline = true,
     this.isSyncingOfflineQueue = false,
+    this.isInitialRestoring = false,
+    this.initialRestoreProgress = 0.0,
+    this.initialRestoreStep,
+    this.activeNodeCode = 'M01',
     this.currentVertical = BusinessVertical.retail,
     this.posMode = 'retail',
     this.orderType = 'retail',
@@ -56,6 +91,7 @@ class PosState extends Equatable {
     this.customers = const [],
     this.suppliers = const [],
     this.selectedCategoryId = 0,
+    this.selectedBrandId = 0,
     this.searchQuery = '',
     this.cart = const [],
     this.selectedCustomer,
@@ -69,6 +105,10 @@ class PosState extends Equatable {
     this.salesHistory = const [],
     this.paymentMethods = const [],
     this.returnReasons = const [],
+    this.brands = const [],
+    this.units = const [],
+    this.expenseCategories = const [],
+    this.customerGroups = const [],
     this.localSyncConflicts = const [],
     this.activeHeldSaleId,
     this.exchangeSourceSale,
@@ -78,15 +118,53 @@ class PosState extends Equatable {
 
   List<ProductModel> get filteredProducts {
     return allProducts.where((p) {
+      // Cloud POS & APK POS consistency: tracked physical products with 0 balance do NOT appear in POS catalog
+      if (!p.isSellableInPos) return false;
       final matchesCat = selectedCategoryId == 0 || p.categoryId == selectedCategoryId;
       if (!matchesCat) return false;
+      final matchesBrand = selectedBrandId == 0 || p.brandId == selectedBrandId;
+      if (!matchesBrand) return false;
       if (searchQuery.trim().isEmpty) return true;
       final q = searchQuery.toLowerCase();
       return p.name.toLowerCase().contains(q) ||
           p.sku.toLowerCase().contains(q) ||
           p.barcode.toLowerCase().contains(q) ||
+          p.categoryName.toLowerCase().contains(q) ||
+          (p.brandName != null && p.brandName!.toLowerCase().contains(q)) ||
           (p.scalePlu != null && p.scalePlu!.contains(q));
     }).toList();
+  }
+
+  /// Categories with at least one sellable POS item (always keeping 'Semua' at id=0)
+  List<Map<String, dynamic>> get posCategories {
+    final sellableCatIds = allProducts
+        .where((p) => p.isSellableInPos)
+        .map((p) => p.categoryId)
+        .toSet();
+    return categories.where((c) {
+      final id = (c['id'] as num?)?.toInt() ?? 0;
+      return id == 0 || sellableCatIds.contains(id);
+    }).toList();
+  }
+
+  /// Brands with at least one sellable POS item (always keeping 'Semua Merek' at id=0)
+  List<Map<String, dynamic>> get posBrands {
+    final sellableBrandNames = <int, String>{};
+    for (final p in allProducts) {
+      if (!p.isSellableInPos) continue;
+      final bid = p.brandId;
+      final bname = p.brandName?.trim();
+      if (bid != null && bid > 0 && bname != null && bname.isNotEmpty) {
+        sellableBrandNames[bid] = bname;
+      }
+    }
+    if (sellableBrandNames.isEmpty) return const [];
+    final entries = sellableBrandNames.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return [
+      {'id': 0, 'name': 'Semua Merek'},
+      for (final e in entries) {'id': e.key, 'name': e.value},
+    ];
   }
 
   bool get isExchangeMode =>
@@ -125,7 +203,38 @@ class PosState extends Equatable {
     return net < 0 ? net.abs() : 0.0;
   }
 
-  double get grandTotal => (subtotal - totalDiscount).clamp(0.0, double.infinity);
+  static double _round4dp(double value) => (value * 10000.0).roundToDouble() / 10000.0;
+
+  /// Exclusive tax total across positive cart lines (mirrors backend `PriceCart` / `TaxResolver`).
+  /// Products with `taxInclusive == true` already include tax in `unitPrice`, so 0 is added on top.
+  double get exclusiveTaxTotal {
+    if (isExchangeMode && (subtotal - totalDiscount) <= 0) return 0.0;
+    final positiveLines = cart.where((c) => !c.isExchangeReturn).toList();
+    if (positiveLines.isEmpty) return 0.0;
+    final posSub = positiveLines.fold<double>(0.0, (s, c) => s + c.lineTotal);
+    double remOrderDisc = totalDiscount.clamp(0.0, posSub);
+    double taxSum = 0.0;
+    for (int i = 0; i < positiveLines.length; i++) {
+      final c = positiveLines[i];
+      double orderDiscShare = 0.0;
+      if (remOrderDisc > 0 && posSub > 0) {
+        if (i == positiveLines.length - 1) {
+          orderDiscShare = remOrderDisc;
+        } else {
+          orderDiscShare = ((c.lineTotal / posSub) * totalDiscount).roundToDouble();
+          remOrderDisc = (remOrderDisc - orderDiscShare).clamp(0.0, posSub);
+        }
+      }
+      final taxableBase = (c.lineTotal - orderDiscShare).clamp(0.0, double.infinity);
+      if (!c.product.taxInclusive && c.product.taxRate > 0) {
+        taxSum += _round4dp(taxableBase * (c.product.taxRate / 100.0));
+      }
+    }
+    return _round4dp(taxSum);
+  }
+
+  double get grandTotal =>
+      _round4dp((subtotal - totalDiscount).clamp(0.0, double.infinity) + exclusiveTaxTotal);
 
   int get lowStockProductsCount => allProducts.where((p) => p.isLowStock).length;
 
@@ -149,6 +258,11 @@ class PosState extends Equatable {
     bool? isLoading,
     bool? isOnline,
     bool? isSyncingOfflineQueue,
+    bool? isInitialRestoring,
+    double? initialRestoreProgress,
+    String? initialRestoreStep,
+    bool clearInitialRestoreStep = false,
+    String? activeNodeCode,
     BusinessVertical? currentVertical,
     String? posMode,
     String? orderType,
@@ -157,6 +271,7 @@ class PosState extends Equatable {
     List<Map<String, dynamic>>? customers,
     List<Map<String, dynamic>>? suppliers,
     int? selectedCategoryId,
+    int? selectedBrandId,
     String? searchQuery,
     List<CartItemModel>? cart,
     Map<String, dynamic>? selectedCustomer,
@@ -174,6 +289,10 @@ class PosState extends Equatable {
     List<Map<String, dynamic>>? salesHistory,
     List<Map<String, dynamic>>? paymentMethods,
     List<Map<String, dynamic>>? returnReasons,
+    List<Map<String, dynamic>>? brands,
+    List<Map<String, dynamic>>? units,
+    List<Map<String, dynamic>>? expenseCategories,
+    List<Map<String, dynamic>>? customerGroups,
     List<Map<String, dynamic>>? localSyncConflicts,
     int? activeHeldSaleId,
     bool clearActiveHeldSaleId = false,
@@ -186,6 +305,10 @@ class PosState extends Equatable {
       isLoading: isLoading ?? this.isLoading,
       isOnline: isOnline ?? this.isOnline,
       isSyncingOfflineQueue: isSyncingOfflineQueue ?? this.isSyncingOfflineQueue,
+      isInitialRestoring: isInitialRestoring ?? this.isInitialRestoring,
+      initialRestoreProgress: initialRestoreProgress ?? this.initialRestoreProgress,
+      initialRestoreStep: clearInitialRestoreStep ? null : (initialRestoreStep ?? this.initialRestoreStep),
+      activeNodeCode: activeNodeCode ?? this.activeNodeCode,
       currentVertical: currentVertical ?? this.currentVertical,
       posMode: posMode ?? this.posMode,
       orderType: orderType ?? this.orderType,
@@ -194,6 +317,7 @@ class PosState extends Equatable {
       customers: customers ?? this.customers,
       suppliers: suppliers ?? this.suppliers,
       selectedCategoryId: selectedCategoryId ?? this.selectedCategoryId,
+      selectedBrandId: selectedBrandId ?? this.selectedBrandId,
       searchQuery: searchQuery ?? this.searchQuery,
       cart: cart ?? this.cart,
       selectedCustomer: clearCustomer ? null : (selectedCustomer ?? this.selectedCustomer),
@@ -207,6 +331,10 @@ class PosState extends Equatable {
       salesHistory: salesHistory ?? this.salesHistory,
       paymentMethods: paymentMethods ?? this.paymentMethods,
       returnReasons: returnReasons ?? this.returnReasons,
+      brands: brands ?? this.brands,
+      units: units ?? this.units,
+      expenseCategories: expenseCategories ?? this.expenseCategories,
+      customerGroups: customerGroups ?? this.customerGroups,
       localSyncConflicts: localSyncConflicts ?? this.localSyncConflicts,
       activeHeldSaleId: clearActiveHeldSaleId ? null : (activeHeldSaleId ?? this.activeHeldSaleId),
       exchangeSourceSale: clearExchangeSourceSale ? null : (exchangeSourceSale ?? this.exchangeSourceSale),
@@ -220,6 +348,10 @@ class PosState extends Equatable {
         isLoading,
         isOnline,
         isSyncingOfflineQueue,
+        isInitialRestoring,
+        initialRestoreProgress,
+        initialRestoreStep,
+        activeNodeCode,
         currentVertical,
         posMode,
         orderType,
@@ -228,6 +360,7 @@ class PosState extends Equatable {
         customers,
         suppliers,
         selectedCategoryId,
+        selectedBrandId,
         searchQuery,
         cart,
         selectedCustomer,
@@ -241,6 +374,10 @@ class PosState extends Equatable {
         salesHistory,
         paymentMethods,
         returnReasons,
+        brands,
+        units,
+        expenseCategories,
+        customerGroups,
         localSyncConflicts,
         activeHeldSaleId,
         exchangeSourceSale,
@@ -255,13 +392,18 @@ class PosCubit extends Cubit<PosState> {
   final NetworkConnectivityService _connectivityService;
   final _uuid = const Uuid();
   StreamSubscription<bool>? _connectivitySubscription;
+  Timer? _backoffRetryTimer;
+  int _backoffAttempt = 0;
   bool _wasOffline = false;
   bool _isAutoSyncRunning = false;
   bool _isCheckoutInProgress = false;
+  Future<void>? _activeCloudSyncFuture;
   String? _lastCompletedIdempotencyKey;
   Map<String, dynamic>? _lastCompletedReceipt;
 
   bool get isCheckoutInProgress => _isCheckoutInProgress;
+
+  void _emitState(PosState next) => emit(next);
 
   /// C.2: Explicit prescription validation helper returning warning text or null when valid.
   String? validatePrescriptionRequirements() {
@@ -316,30 +458,49 @@ class PosCubit extends Cubit<PosState> {
 
   @override
   Future<void> close() async {
+    _backoffRetryTimer?.cancel();
+    _backoffRetryTimer = null;
     await _connectivitySubscription?.cancel();
     return super.close();
   }
 
   /// Clears all in-memory catalog, cart, customers, suppliers, and sales state on logout or tenant switch.
   Future<void> resetForLogout() async {
+    _backoffRetryTimer?.cancel();
+    _backoffRetryTimer = null;
+    _backoffAttempt = 0;
     _lastCompletedIdempotencyKey = null;
     _lastCompletedReceipt = null;
     _isCheckoutInProgress = false;
     _isAutoSyncRunning = false;
+    _activeCloudSyncFuture = null;
     await _connectivitySubscription?.cancel();
-    emit(const PosState());
+    emit(PosState(activeNodeCode: _apiClient.edgeDiscovery.getMobileNodeCode()));
   }
 
-  /// Initialize POS catalog, categories, sales history & background reactive connectivity listener
-  Future<void> initializeCatalog({bool seedDefaultCart = false}) async {
+  /// Update this device's partitioned terminal/node code (e.g. `M01`, `M02`, `M7A3C`).
+  Future<void> updateTerminalNodeCode(String code) async {
+    await _apiClient.edgeDiscovery.setMobileNodeCode(code);
+    emit(state.copyWith(activeNodeCode: _apiClient.edgeDiscovery.getMobileNodeCode()));
+  }
+
+  /// Initialize POS catalog, categories, payment methods, sales history & reactive auto-sync listener.
+  /// When [awaitCloudSync] is `false`, renders SQLite cache immediately and runs Cloud sync
+  /// non-blockingly so offline cold starts never freeze.
+  Future<void> initializeCatalog({
+    bool seedDefaultCart = false,
+    bool awaitCloudSync = true,
+  }) async {
     emit(state.copyWith(isLoading: true));
 
-    // Load local cache (SQLite-backed) first for instant rendering
+    // Load local cache (SQLite-backed) first for instant <5ms rendering
     var localProducts = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
     var localCategories = _offlineDb.getCachedCategories();
     var localCustomers = _offlineDb.getCachedCustomers();
     var localSuppliers = _offlineDb.getCachedSuppliers();
+    var localPaymentMethods = _offlineDb.getCachedPaymentMethods();
     var localHistory = _offlineDb.getLocalSalesHistory();
+    final nodeCode = _apiClient.edgeDiscovery.getMobileNodeCode();
 
     List<CartItemModel> initialCart = state.cart;
     if (seedDefaultCart && initialCart.isEmpty && localProducts.length >= 2) {
@@ -366,6 +527,7 @@ class PosCubit extends Cubit<PosState> {
     }
 
     final currentlyOnline = await _connectivityService.checkOnline();
+    if (isClosed) return;
     _wasOffline = !currentlyOnline;
     final resolvedVertical = _resolveInitialVertical(_offlineDb);
     final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
@@ -373,6 +535,7 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(
       isLoading: false,
       isOnline: currentlyOnline,
+      activeNodeCode: nodeCode,
       currentVertical: resolvedVertical,
       posMode: resolvedVertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
       orderType: resolvedCaps.hasDineInTakeawayOrderType
@@ -382,6 +545,12 @@ class PosCubit extends Cubit<PosState> {
       categories: localCategories,
       customers: localCustomers,
       suppliers: localSuppliers,
+      paymentMethods: localPaymentMethods.isNotEmpty ? localPaymentMethods : state.paymentMethods,
+      brands: _offlineDb.getCachedBrands(),
+      units: _offlineDb.getCachedUnits(),
+      returnReasons: _offlineDb.getCachedReturnReasons(),
+      expenseCategories: _offlineDb.getCachedExpenseCategories(),
+      customerGroups: _offlineDb.getCachedCustomerGroups(),
       cart: initialCart,
       salesHistory: localHistory,
       localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
@@ -390,11 +559,16 @@ class PosCubit extends Cubit<PosState> {
 
     // Start reactive connectivity listener (Offline -> Online auto-drain & refresh)
     await _startConnectivityListener();
+    _scheduleBackoffSyncIfNeeded();
 
     // Sync with Cloud API only when NOT in Local Standalone mode and token is present
     final token = await _apiClient.getToken();
     if (!_isLocalStandalone && currentlyOnline && token != null && token.isNotEmpty) {
-      await syncWithCloud(force: false);
+      if (awaitCloudSync) {
+        await syncWithCloud(force: false);
+      } else {
+        unawaited(syncWithCloud(force: false));
+      }
     }
   }
 
@@ -410,14 +584,47 @@ class PosCubit extends Cubit<PosState> {
 
       final transitionedFromOffline = _wasOffline;
       _wasOffline = false;
+      _backoffAttempt = 0;
       emit(state.copyWith(isOnline: true));
 
-      if (transitionedFromOffline || state.offlinePendingCount > 0) {
+      if (transitionedFromOffline || _offlineDb.pendingNonConflictOfflineSalesCount > 0) {
         await _triggerReactiveAutoSync();
       }
     });
   }
 
+  /// Lightweight exponential-backoff retry timer (15s -> 30s -> 60s -> 120s) that runs ONLY
+  /// when unsynced non-conflict offline sales exist (cancels immediately when queue == 0).
+  /// Guarantees automatic recovery when branch Wi-Fi stays up while ISP WAN drops and recovers.
+  void _scheduleBackoffSyncIfNeeded() {
+    _backoffRetryTimer?.cancel();
+    _backoffRetryTimer = null;
+    if (_isLocalStandalone || isClosed) return;
+    if (_offlineDb.pendingNonConflictOfflineSalesCount <= 0) {
+      _backoffAttempt = 0;
+      return;
+    }
+
+    const backoffSeconds = [15, 30, 60, 120];
+    final idx = _backoffAttempt.clamp(0, backoffSeconds.length - 1);
+    final delay = Duration(seconds: backoffSeconds[idx]);
+    _backoffRetryTimer = Timer(delay, () async {
+      if (isClosed || _isLocalStandalone) return;
+      final online = await _connectivityService.checkOnline();
+      if (!online) {
+        _backoffAttempt = (_backoffAttempt + 1).clamp(0, backoffSeconds.length - 1);
+        _scheduleBackoffSyncIfNeeded();
+        return;
+      }
+      await _triggerReactiveAutoSync();
+    });
+  }
+
+  /// Non-blocking reactive background sync when internet returns:
+  /// 1) Probe best tier (LAN Edge -> Cloud Master) if Edge URL configured
+  /// 2) Push local offline products first (remap temp negative IDs)
+  /// 3) Drain idempotent offline sales queue
+  /// 4) Refresh catalog & balances silently without blocking active cashier cart/UI
   Future<void> _triggerReactiveAutoSync() async {
     if (_isAutoSyncRunning || isClosed || _isLocalStandalone) return;
     final token = await _apiClient.getToken();
@@ -426,20 +633,70 @@ class PosCubit extends Cubit<PosState> {
     _isAutoSyncRunning = true;
     emit(state.copyWith(isOnline: true, isSyncingOfflineQueue: true));
     try {
-      await _offlineDb.syncOfflineQueue(_apiClient);
-      await syncWithCloud(force: true, preserveActiveCart: true);
+      if (_apiClient.edgeDiscovery.getEdgeBaseUrl() != null) {
+        await _apiClient.switchToBestEndpoint();
+      }
+      await _syncPendingLocalProductsToCloud();
+      final synced = await _offlineDb.syncOfflineQueue(_apiClient);
+      if (synced > 0) {
+        _backoffAttempt = 0;
+      } else if (_offlineDb.pendingNonConflictOfflineSalesCount > 0) {
+        _backoffAttempt = (_backoffAttempt + 1).clamp(0, 3);
+      }
+      await syncWithCloud(force: false, preserveActiveCart: true, silent: true);
     } catch (_) {
-      // Errors handled gracefully inside syncWithCloud / syncOfflineQueue
+      _backoffAttempt = (_backoffAttempt + 1).clamp(0, 3);
     } finally {
       _isAutoSyncRunning = false;
       if (!isClosed) {
         emit(state.copyWith(
           isSyncingOfflineQueue: false,
+          salesHistory: _offlineDb.getLocalSalesHistory(),
           localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
           offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
         ));
+        _scheduleBackoffSyncIfNeeded();
       }
     }
+  }
+
+  /// Fetch all pages of a paginated Cloud API collection cleanly into SQLite
+  /// so first-time master data restore never truncates stores with > 200 items.
+  Future<List<Map<String, dynamic>>?> _fetchAllPaginated(
+    String endpoint, {
+    int perPage = 200,
+    int maxPages = 25,
+  }) async {
+    final collected = <Map<String, dynamic>>[];
+    int page = 1;
+    int lastPage = 1;
+
+    while (page <= lastPage && page <= maxPages) {
+      final res = await _apiClient.dio.get(
+        endpoint,
+        queryParameters: {'per_page': perPage, if (page > 1) 'page': page},
+      );
+      final body = res.data;
+      if (body is! Map) break;
+      final rawList = body['data'] as List<dynamic>?;
+      if (rawList == null) {
+        return page == 1 ? null : collected;
+      }
+      collected.addAll(rawList.map((e) => Map<String, dynamic>.from(e as Map)));
+
+      final meta = body['meta'];
+      if (meta is Map && meta['last_page'] is num) {
+        lastPage = (meta['last_page'] as num).toInt();
+      } else if (body['last_page'] is num) {
+        lastPage = (body['last_page'] as num).toInt();
+      } else {
+        break;
+      }
+      if (rawList.isEmpty) break;
+      page++;
+    }
+
+    return collected;
   }
 
   /// Fast < 5ms indexed SQLite search helper
@@ -448,16 +705,46 @@ class PosCubit extends Cubit<PosState> {
     return rows.map(ProductModel.fromJson).toList();
   }
 
-  /// Authoritative Cloud Sync: auto-drain offline queue, then fetch products, categories, customers, suppliers & sales
+  /// Authoritative Cloud Sync: deduplicates concurrent sync requests, drains offline queue,
+  /// then fetches full master data snapshot (with progress indicators on first-time restore).
   Future<void> syncWithCloud({
     bool force = false,
     bool preserveActiveCart = false,
+    bool silent = false,
+  }) async {
+    if (_activeCloudSyncFuture != null) {
+      await _activeCloudSyncFuture;
+      if (!force) return;
+    }
+
+    final syncFuture = _performSyncWithCloud(
+      force: force,
+      preserveActiveCart: preserveActiveCart,
+      silent: silent,
+    );
+    _activeCloudSyncFuture = syncFuture;
+    try {
+      await syncFuture;
+    } finally {
+      if (identical(_activeCloudSyncFuture, syncFuture)) {
+        _activeCloudSyncFuture = null;
+      }
+    }
+  }
+
+  Future<void> _performSyncWithCloud({
+    bool force = false,
+    bool preserveActiveCart = false,
+    bool silent = false,
   }) async {
     if (_isLocalStandalone) {
       final resolvedVertical = _resolveInitialVertical(_offlineDb);
       final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
       emit(state.copyWith(
         isLoading: false,
+        isInitialRestoring: false,
+        initialRestoreProgress: 0.0,
+        clearInitialRestoreStep: true,
         isSyncingOfflineQueue: false,
         currentVertical: resolvedVertical,
         posMode: resolvedVertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
@@ -468,6 +755,12 @@ class PosCubit extends Cubit<PosState> {
         categories: _offlineDb.getCachedCategories(),
         customers: _offlineDb.getCachedCustomers(),
         suppliers: _offlineDb.getCachedSuppliers(),
+        paymentMethods: _offlineDb.getCachedPaymentMethods(),
+        brands: _offlineDb.getCachedBrands(),
+        units: _offlineDb.getCachedUnits(),
+        returnReasons: _offlineDb.getCachedReturnReasons(),
+        expenseCategories: _offlineDb.getCachedExpenseCategories(),
+        customerGroups: _offlineDb.getCachedCustomerGroups(),
         salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
@@ -475,24 +768,70 @@ class PosCubit extends Cubit<PosState> {
       return;
     }
 
+    // Fast-path offline guard: never stall firing 12 sequential GETs when device has no network.
+    final hasConnectivity = await _connectivityService.checkOnline();
+    if (!hasConnectivity) {
+      _wasOffline = true;
+      emit(state.copyWith(
+        isLoading: false,
+        isOnline: false,
+        isInitialRestoring: false,
+        initialRestoreProgress: 0.0,
+        clearInitialRestoreStep: true,
+        isSyncingOfflineQueue: false,
+        localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      ));
+      _scheduleBackoffSyncIfNeeded();
+      return;
+    }
+
+    final isInitialRestore = !_offlineDb.hasMasterDataSnapshot;
     emit(state.copyWith(
-      isLoading: true,
+      isLoading: silent ? state.isLoading : true,
+      isInitialRestoring: isInitialRestore,
+      initialRestoreProgress: isInitialRestore ? 0.10 : 0.0,
+      initialRestoreStep:
+          isInitialRestore ? 'Menarik katalog produk & harga ke SQLite lokal...' : null,
       isSyncingOfflineQueue: state.offlinePendingCount > 0 || state.isSyncingOfflineQueue,
     ));
+
     try {
-      // 0. Drain pending offline transactions first
+      // 0a. Push any offline-queued local products to Cloud before syncing sales & fetching catalog
+      await _syncPendingLocalProductsToCloud();
+
+      // 0b. Drain pending offline transactions (mutex-guarded & idempotent)
       await _offlineDb.syncOfflineQueue(_apiClient);
 
-      // 1. Fetch real products from server
-      final prodRes = await _apiClient.dio.get(ApiEndpoints.products, queryParameters: {'per_page': 200});
-      final rawList = prodRes.data['data'] as List<dynamic>?;
+      // 1. Fetch ALL pages of real products from server into SQLite
+      final mapped = await _fetchAllPaginated(ApiEndpoints.products, perPage: 200);
       List<ProductModel> products = [];
       bool productsFetchedFromServer = false;
-      if (rawList != null) {
+      if (mapped != null) {
         productsFetchedFromServer = true;
-        final mapped = rawList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final stillPendingLocal = _offlineDb.getCachedProducts().where((p) {
+          final id = (p['id'] as num?)?.toInt() ?? 0;
+          if (id >= 0 && p['is_local_only'] != true) return false;
+          final localSku = (p['sku'] ?? '').toString().trim().toLowerCase();
+          if (localSku.isNotEmpty &&
+              mapped.any((srv) => (srv['sku'] ?? '').toString().trim().toLowerCase() == localSku)) {
+            return false;
+          }
+          return true;
+        }).toList();
+        if (stillPendingLocal.isNotEmpty) {
+          mapped.insertAll(0, stillPendingLocal);
+        }
         await _offlineDb.cacheProducts(mapped);
         products = mapped.map(ProductModel.fromJson).toList();
+      }
+
+      if (isInitialRestore && !isClosed) {
+        emit(state.copyWith(
+          allProducts: productsFetchedFromServer ? products : state.allProducts,
+          initialRestoreProgress: 0.38,
+          initialRestoreStep: 'Menarik kategori & metode pembayaran...',
+        ));
       }
 
       // 2. Fetch real categories from server or derive directly from loaded products
@@ -530,27 +869,42 @@ class PosCubit extends Cubit<PosState> {
       });
       await _offlineDb.cacheCategories(categories);
 
-      // 3. Fetch real customers from server
+      if (isInitialRestore && !isClosed) {
+        emit(state.copyWith(
+          categories: categories,
+          initialRestoreProgress: 0.56,
+          initialRestoreStep: 'Menarik data pelanggan & pemasok...',
+        ));
+      }
+
+      // 3. Fetch real customers from server (paginated)
       List<Map<String, dynamic>> customers = _offlineDb.getCachedCustomers();
       try {
-        final custRes = await _apiClient.dio.get(ApiEndpoints.customers, queryParameters: {'per_page': 200});
-        final rawCust = custRes.data['data'] as List<dynamic>?;
-        if (rawCust != null) {
-          customers = rawCust.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final allCust = await _fetchAllPaginated(ApiEndpoints.customers, perPage: 200);
+        if (allCust != null) {
+          customers = allCust;
           await _offlineDb.cacheCustomers(customers);
         }
       } catch (_) {}
 
-      // 4. Fetch real suppliers from server
+      // 4. Fetch real suppliers from server (paginated)
       List<Map<String, dynamic>> suppliers = _offlineDb.getCachedSuppliers();
       try {
-        final supRes = await _apiClient.dio.get(ApiEndpoints.suppliers, queryParameters: {'per_page': 200});
-        final rawSup = supRes.data['data'] as List<dynamic>?;
-        if (rawSup != null) {
-          suppliers = rawSup.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final allSup = await _fetchAllPaginated(ApiEndpoints.suppliers, perPage: 200);
+        if (allSup != null) {
+          suppliers = allSup;
           await _offlineDb.cacheSuppliers(suppliers);
         }
       } catch (_) {}
+
+      if (isInitialRestore && !isClosed) {
+        emit(state.copyWith(
+          customers: customers,
+          suppliers: suppliers,
+          initialRestoreProgress: 0.76,
+          initialRestoreStep: 'Menarik riwayat nota, metode bayar & profil toko...',
+        ));
+      }
 
       // 5. Fetch real sales history from server
       List<Map<String, dynamic>> sales = [];
@@ -630,23 +984,50 @@ class PosCubit extends Cubit<PosState> {
         }
       } catch (_) {}
 
-      List<Map<String, dynamic>> paymentMethods = state.paymentMethods;
+      List<Map<String, dynamic>> paymentMethods = _offlineDb.getCachedPaymentMethods();
+      if (paymentMethods.isEmpty) {
+        paymentMethods = state.paymentMethods;
+      }
       try {
         final pmRes = await _apiClient.dio.get(ApiEndpoints.paymentMethods);
         final rawPm = pmRes.data['data'] as List<dynamic>?;
         if (rawPm != null && rawPm.isNotEmpty) {
           paymentMethods = rawPm.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          await _offlineDb.cachePaymentMethods(paymentMethods);
         }
       } catch (_) {}
 
-      List<Map<String, dynamic>> returnReasons = state.returnReasons;
+      List<Map<String, dynamic>> returnReasons = _offlineDb.getCachedReturnReasons();
       try {
         final rrRes = await _apiClient.dio.get(ApiEndpoints.returnReasons);
         final rawRr = rrRes.data['data'] as List<dynamic>?;
         if (rawRr != null && rawRr.isNotEmpty) {
           returnReasons = rawRr.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          await _offlineDb.cacheReturnReasons(returnReasons);
         }
       } catch (_) {}
+
+      if (isInitialRestore && !isClosed) {
+        emit(state.copyWith(
+          paymentMethods: paymentMethods,
+          initialRestoreProgress: 0.92,
+          initialRestoreStep: 'Menyelesaikan sinkronisasi referensi cabang...',
+        ));
+      }
+
+      final taxonomies = await _syncExtendedTaxonomies();
+      if (force) {
+        try {
+          final meRes = await _apiClient.dio.get(ApiEndpoints.me);
+          final meData = meRes.data is Map ? meRes.data['data'] : null;
+          if (meData is Map && meData['numbering_formats'] is Map) {
+            await _offlineDb.cacheNumberingFormats(
+              Map<String, dynamic>.from(meData['numbering_formats'] as Map),
+            );
+          }
+        } catch (_) {}
+      }
+      if (isClosed) return;
 
       final resolvedVertical = _resolveInitialVertical(_offlineDb);
       final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
@@ -654,6 +1035,10 @@ class PosCubit extends Cubit<PosState> {
         isLoading: false,
         isOnline: _apiClient.isOnline,
         isSyncingOfflineQueue: false,
+        isInitialRestoring: false,
+        initialRestoreProgress: 1.0,
+        clearInitialRestoreStep: true,
+        activeNodeCode: _apiClient.edgeDiscovery.getMobileNodeCode(),
         currentVertical: resolvedVertical,
         posMode: resolvedVertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
         orderType: resolvedCaps.hasDineInTakeawayOrderType
@@ -663,6 +1048,10 @@ class PosCubit extends Cubit<PosState> {
         categories: categories,
         customers: customers,
         suppliers: suppliers,
+        brands: taxonomies['brands'],
+        units: taxonomies['units'],
+        expenseCategories: taxonomies['expense_categories'],
+        customerGroups: taxonomies['customer_groups'],
         salesHistory: sales,
         heldCarts: mergedHeldCarts,
         paymentMethods: paymentMethods,
@@ -671,16 +1060,22 @@ class PosCubit extends Cubit<PosState> {
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
         cart: (force && !preserveActiveCart) ? [] : state.cart,
       ));
+      _scheduleBackoffSyncIfNeeded();
     } catch (_) {
       final online = await _connectivityService.checkOnline();
+      if (isClosed) return;
       _wasOffline = !online;
       emit(state.copyWith(
         isLoading: false,
         isOnline: online && _apiClient.isOnline,
         isSyncingOfflineQueue: false,
+        isInitialRestoring: false,
+        initialRestoreProgress: 0.0,
+        clearInitialRestoreStep: true,
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
+      _scheduleBackoffSyncIfNeeded();
     }
   }
 
@@ -778,6 +1173,16 @@ class PosCubit extends Cubit<PosState> {
 
   void selectCategory(int categoryId) {
     emit(state.copyWith(selectedCategoryId: categoryId));
+  }
+
+  void selectBrand(int brandId) {
+    emit(state.copyWith(selectedBrandId: brandId));
+  }
+
+  void deleteHeldCart(int index) {
+    if (index < 0 || index >= state.heldCarts.length) return;
+    final remaining = List<Map<String, dynamic>>.from(state.heldCarts)..removeAt(index);
+    emit(state.copyWith(heldCarts: remaining));
   }
 
   void updateSearchQuery(String query) {
@@ -1214,9 +1619,18 @@ class PosCubit extends Cubit<PosState> {
             state.selectedTable?['name']?.toString() ??
             'Pelanggan Antre')
         : label.trim();
+    final storeProfile = _offlineDb.getStoreProfile();
+    final holdStoreCode = (storeProfile['code'] ?? storeProfile['branch'] ?? 'MAIN').toString();
+    final holdNodeCode = _apiClient.edgeDiscovery.getMobileNodeCode();
+    final holdNumber = await _offlineDb.generatePartitionedFallbackNumber(
+      storeCode: holdStoreCode,
+      docPrefix: 'HLD',
+      docType: 'hold',
+      nodeCode: holdNodeCode,
+    );
     final heldEntry = {
       'id': DateTime.now().millisecondsSinceEpoch,
-      'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second.toString().padLeft(2, '0')}',
+      'number': holdNumber,
       'held_label': resolvedLabel,
       'table_name': state.selectedTable?['name'],
       'selected_table': state.selectedTable,
@@ -1236,6 +1650,9 @@ class PosCubit extends Cubit<PosState> {
       'cart_items': itemsToHold,
     };
 
+    final heldCustomerId = state.selectedCustomer?['id'];
+    final heldTableId = state.selectedTable?['id'];
+
     final updatedHeld = [heldEntry, ...state.heldCarts];
     emit(state.copyWith(
       heldCarts: updatedHeld,
@@ -1251,22 +1668,26 @@ class PosCubit extends Cubit<PosState> {
       clearOrderNotes: true,
     ));
 
-    try {
-      await _apiClient.dio.post(ApiEndpoints.holdCart, data: {
-        'held_label': heldEntry['held_label'],
-        if (heldEntry['notes'] != null) 'notes': heldEntry['notes'],
-        if (state.selectedCustomer?['id'] != null) 'customer_id': state.selectedCustomer!['id'],
-        if (state.selectedTable?['id'] != null) 'table_id': state.selectedTable!['id'],
-        'items': itemsToHold
-            .map((c) => {
-                  'product_id': c.product.id,
-                  'variant_id': c.variant?.id,
-                  'quantity': c.quantity,
-                  'unit_price': c.unitPrice,
-                })
-            .toList(),
-      });
-    } catch (_) {}
+    if (!_isLocalStandalone && state.isOnline) {
+      unawaited(() async {
+        try {
+          await _apiClient.dio.post(ApiEndpoints.holdCart, data: {
+            'held_label': heldEntry['held_label'],
+            if (heldEntry['notes'] != null) 'notes': heldEntry['notes'],
+            if (heldCustomerId != null) 'customer_id': heldCustomerId,
+            if (heldTableId != null) 'table_id': heldTableId,
+            'items': itemsToHold
+                .map((c) => {
+                      'product_id': c.product.id,
+                      'variant_id': c.variant?.id,
+                      'quantity': c.quantity,
+                      'unit_price': c.unitPrice,
+                    })
+                .toList(),
+          });
+        } catch (_) {}
+      }());
+    }
   }
 
   /// B.1: Resume a held cart without destroying an active non-empty cart (auto-parks it instead)
@@ -1380,8 +1801,21 @@ class PosCubit extends Cubit<PosState> {
       }
 
       double updatedPrice = item.unitPrice;
+      ProductModel effectiveProduct = latestProduct;
       final serverEntry = serverItemsByKey['${item.product.id}:${item.variant?.id ?? 0}'];
       final serverUnitPrice = (serverEntry?['unit_price'] as num?)?.toDouble();
+      final serverTaxRate = (serverEntry?['tax_rate'] as num?)?.toDouble();
+      final serverTaxInclusive = serverEntry?['tax_is_inclusive'];
+      if (serverTaxRate != null &&
+          ((serverTaxRate - latestProduct.taxRate).abs() > 0.001 ||
+              (serverTaxInclusive is bool && serverTaxInclusive != latestProduct.taxInclusive))) {
+        effectiveProduct = ProductModel.fromJson({
+          ...latestProduct.toJson(),
+          'tax_rate': serverTaxRate,
+          'tax_inclusive': serverTaxInclusive is bool ? serverTaxInclusive : latestProduct.taxInclusive,
+        });
+        adjustedCount++;
+      }
       if (serverUnitPrice != null && (serverUnitPrice - item.unitPrice).abs() > 0.5) {
         updatedPrice = serverUnitPrice;
         adjustedCount++;
@@ -1395,10 +1829,10 @@ class PosCubit extends Cubit<PosState> {
       }
 
       double updatedQty = item.quantity;
-      if (!latestProduct.isServiceOrNonStockItem && latestProduct.stock > 0) {
-        final availableInUnit = latestProduct.stock / item.multiplier;
+      if (!effectiveProduct.isServiceOrNonStockItem && effectiveProduct.stock > 0) {
+        final availableInUnit = effectiveProduct.stock / item.multiplier;
         if (updatedQty > availableInUnit && availableInUnit > 0) {
-          updatedQty = latestProduct.soldByWeight
+          updatedQty = effectiveProduct.soldByWeight
               ? double.parse(availableInUnit.toStringAsFixed(2))
               : availableInUnit.floorToDouble();
           if (updatedQty > 0) {
@@ -1416,7 +1850,7 @@ class PosCubit extends Cubit<PosState> {
         reconciled.add(CartItemModel(
           saleItemId: item.saleItemId,
           isExchangeReturn: item.isExchangeReturn,
-          product: latestProduct,
+          product: effectiveProduct,
           variant: latestVariant,
           quantity: updatedQty,
           unitPrice: updatedPrice,
@@ -1424,7 +1858,7 @@ class PosCubit extends Cubit<PosState> {
           notes: item.notes,
           digitalTargetValue: item.digitalTargetValue,
           stylistName: item.stylistName,
-          batch: latestProduct.fefoBatch ?? item.batch,
+          batch: effectiveProduct.fefoBatch ?? item.batch,
           selectedUnitCode: item.selectedUnitCode,
           multiplier: item.multiplier,
         ));
@@ -1597,8 +2031,19 @@ class PosCubit extends Cubit<PosState> {
 
     final localUuid =
         (idempotencyKey != null && idempotencyKey.isNotEmpty) ? idempotencyKey : _uuid.v4();
-    final invoiceNo = '#INV-${(state.salesHistory.length + 1).toString().padLeft(4, '0')}';
-    final nowFormatted = DateFormat('dd MMM yyyy • HH:mm').format(DateTime.now());
+    final nowTs = DateTime.now();
+    final nowIso = nowTs.toIso8601String();
+    final storeProfile = _offlineDb.getStoreProfile();
+    final storeCode = (storeProfile['code'] ?? storeProfile['branch'] ?? 'MAIN').toString();
+    final nodeCode = _apiClient.edgeDiscovery.getMobileNodeCode();
+    final invoiceNo = await _offlineDb.generatePartitionedFallbackNumber(
+      storeCode: storeCode,
+      docPrefix: 'INV',
+      docType: 'sale',
+      nodeCode: nodeCode,
+      now: nowTs,
+    );
+    final nowFormatted = DateFormat('dd MMM yyyy • HH:mm').format(nowTs);
     final resolvedOrderType = orderTypeOverride ??
         (state.posMode == 'restaurant' && state.orderType == 'retail' ? 'dine_in' : state.orderType);
 
@@ -1612,8 +2057,29 @@ class PosCubit extends Cubit<PosState> {
         ? (positiveSubtotal - returnCreditSubtotal)
         : checkoutCart.fold<double>(0.0, (sum, c) => sum + c.lineTotal);
     final appliedOrderDiscount = isPartialSplit ? 0.0 : state.totalDiscount;
+    double checkoutTaxTotal = 0.0;
+    if (grandTotalOverride == null && (!isExchange || (checkoutSubtotal - appliedOrderDiscount) > 0)) {
+      double remTaxDisc = appliedOrderDiscount.clamp(0.0, positiveSubtotal);
+      for (int i = 0; i < positiveLines.length; i++) {
+        final c = positiveLines[i];
+        double share = 0.0;
+        if (remTaxDisc > 0 && positiveSubtotal > 0) {
+          if (i == positiveLines.length - 1) {
+            share = remTaxDisc;
+          } else {
+            share = ((c.lineTotal / positiveSubtotal) * appliedOrderDiscount).roundToDouble();
+            remTaxDisc = (remTaxDisc - share).clamp(0.0, positiveSubtotal);
+          }
+        }
+        final taxableBase = (c.lineTotal - share).clamp(0.0, double.infinity);
+        if (!c.product.taxInclusive && c.product.taxRate > 0) {
+          checkoutTaxTotal += PosState._round4dp(taxableBase * (c.product.taxRate / 100.0));
+        }
+      }
+      checkoutTaxTotal = PosState._round4dp(checkoutTaxTotal);
+    }
     final checkoutGrandTotal = grandTotalOverride ??
-        (checkoutSubtotal - appliedOrderDiscount).clamp(0.0, double.infinity);
+        PosState._round4dp((checkoutSubtotal - appliedOrderDiscount).clamp(0.0, double.infinity) + checkoutTaxTotal);
 
     // Fold order-level discount proportionally into positive sale line discounts
     double remainingOrderDisc = appliedOrderDiscount;
@@ -1677,14 +2143,16 @@ class PosCubit extends Cubit<PosState> {
     final effectiveHeldSaleId = overrideHeldSaleId ?? (isPartialSplit ? null : state.activeHeldSaleId);
 
     final receiptPayload = <String, dynamic>{
-      'id': DateTime.now().millisecondsSinceEpoch,
+      'id': nowTs.millisecondsSinceEpoch,
       'number': invoiceNo,
       'local_uuid': localUuid,
+      'origin_node_code': nodeCode,
       'sale_datetime': nowFormatted,
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': nowIso,
+      'client_completed_at': nowIso,
       'subtotal': checkoutSubtotal,
       'discount_total': appliedOrderDiscount,
-      'tax_total': 0.0,
+      'tax_total': checkoutTaxTotal,
       'grand_total': checkoutGrandTotal,
       'paid_total': paidTotal,
       'store_credit_amount': storeCreditAmount,
@@ -1708,28 +2176,6 @@ class PosCubit extends Cubit<PosState> {
       'payments': payments,
     };
 
-    // Adjust local stock immediately (C.1: skip non-stock/service items; subtract sold qty, add returned qty)
-    final updatedProducts = state.allProducts.map((p) {
-      if (p.isServiceOrNonStockItem) return p;
-      final soldBaseQty = positiveLines
-          .where((c) => c.product.id == p.id)
-          .fold<double>(0.0, (sum, c) => sum + (c.quantity * c.multiplier));
-      final returnedBaseQty = returnedLines
-          .where((c) => c.product.id == p.id)
-          .fold<double>(0.0, (sum, c) => sum + (c.quantity.abs() * c.multiplier));
-      final netDelta = returnedBaseQty - soldBaseQty;
-      if (netDelta.abs() > 0.0001) {
-        final newStock = (p.stock + netDelta).clamp(0.0, double.infinity);
-        _offlineDb.updateLocalProductStock(p.id, newStock);
-        return ProductModel.fromJson({
-          ...p.toJson(),
-          'stock': newStock,
-          'is_low_stock': newStock <= 5,
-        });
-      }
-      return p;
-    }).toList();
-
     bool checkoutSyncedOnline = true;
     double effectiveStoreCreditForApi = storeCreditAmount;
 
@@ -1740,10 +2186,18 @@ class PosCubit extends Cubit<PosState> {
       final shouldCreditDepositOnReturn =
           customerId > 0 && (positiveLines.isNotEmpty || refundSurplusToStoreCredit);
 
-      if (origSaleId > 0) {
+      final canCallExchangeOnline =
+          origSaleId > 0 && !_isLocalStandalone && state.isOnline && await _connectivityService.checkOnline();
+      if (canCallExchangeOnline) {
         try {
           await _apiClient.dio.post(
             ApiEndpoints.refundSale(origSaleId),
+            options: Options(
+              headers: {
+                'X-Idempotency-Key': 'ex-$localUuid',
+                'X-Edge-Node-Code': nodeCode,
+              },
+            ),
             data: {
               'restock': true,
               if (shouldCreditDepositOnReturn) 'refund_to_store_credit': true,
@@ -1764,9 +2218,19 @@ class PosCubit extends Cubit<PosState> {
                 returnCreditSubtotal.clamp(0.0, positiveSubtotal);
             effectiveStoreCreditForApi += usedFromExchangeCredit;
           }
-        } catch (_) {
+        } catch (e) {
+          if (!ApiClient.isNetworkOfflineError(e)) {
+            final data = e is DioException ? e.response?.data : null;
+            throw CheckoutServerException(
+              message: ApiClient.extractErrorMessage(e),
+              errorCode: (data is Map ? data['error_code'] : null)?.toString(),
+              statusCode: e is DioException ? e.response?.statusCode : null,
+            );
+          }
           checkoutSyncedOnline = false;
         }
+      } else if (origSaleId > 0) {
+        checkoutSyncedOnline = false;
       }
     }
 
@@ -1796,6 +2260,11 @@ class PosCubit extends Cubit<PosState> {
 
       final apiBody = <String, dynamic>{
         'local_uuid': localUuid,
+        'number': invoiceNo,
+        'offline_number': invoiceNo,
+        'origin_node_code': nodeCode,
+        'client_completed_at': nowIso,
+        'synced_from_offline': false,
         'customer_id': state.selectedCustomer?['id'],
         'order_type': resolvedOrderType,
         'table_id': state.selectedTable?['id'],
@@ -1813,23 +2282,99 @@ class PosCubit extends Cubit<PosState> {
         'payments': apiPayments,
       };
 
-      if (_isLocalStandalone) {
+      final hasLiveNetwork = !_isLocalStandalone && state.isOnline && await _connectivityService.checkOnline();
+
+      if (_isLocalStandalone || !hasLiveNetwork) {
         checkoutSyncedOnline = false;
+        apiBody['synced_from_offline'] = true;
         await _offlineDb.enqueueOfflineSale(apiBody);
+        _scheduleBackoffSyncIfNeeded();
       } else {
         try {
-          final res = await _apiClient.dio.post(ApiEndpoints.checkout, data: apiBody);
+          final res = await _apiClient.dio.post(
+            ApiEndpoints.checkout,
+            data: apiBody,
+            options: Options(
+              headers: {
+                'X-Idempotency-Key': localUuid,
+                'X-Edge-Node-Code': nodeCode,
+              },
+            ),
+          );
           final serverData = res.data['data'] as Map<String, dynamic>?;
           if (serverData != null) {
             if (serverData['number'] != null) receiptPayload['number'] = serverData['number'];
             if (serverData['id'] != null) receiptPayload['id'] = serverData['id'];
+            if (serverData['subtotal'] != null) {
+              receiptPayload['subtotal'] = (serverData['subtotal'] as num).toDouble();
+            }
+            if (serverData['tax_total'] != null) {
+              receiptPayload['tax_total'] = (serverData['tax_total'] as num).toDouble();
+            }
+            if (serverData['grand_total'] != null) {
+              receiptPayload['grand_total'] = (serverData['grand_total'] as num).toDouble();
+            }
           }
-        } catch (_) {
+        } catch (e) {
+          if (!ApiClient.isNetworkOfflineError(e)) {
+            final data = e is DioException ? e.response?.data : null;
+            throw CheckoutServerException(
+              message: ApiClient.extractErrorMessage(e),
+              errorCode: (data is Map ? data['error_code'] : null)?.toString(),
+              statusCode: e is DioException ? e.response?.statusCode : null,
+            );
+          }
           checkoutSyncedOnline = false;
+          apiBody['synced_from_offline'] = true;
           await _offlineDb.enqueueOfflineSale(apiBody);
+          _scheduleBackoffSyncIfNeeded();
         }
       }
     }
+
+    // Adjust local stock atomically ONLY after server accepted OR true offline fallback succeeded
+    final stockUpdates = <int, double>{};
+    final movementWrites = <Future<void>>[];
+    final updatedProducts = state.allProducts.map((p) {
+      if (p.isServiceOrNonStockItem) return p;
+      final soldBaseQty = positiveLines
+          .where((c) => c.product.id == p.id)
+          .fold<double>(0.0, (sum, c) => sum + (c.quantity * c.multiplier));
+      final returnedBaseQty = returnedLines
+          .where((c) => c.product.id == p.id)
+          .fold<double>(0.0, (sum, c) => sum + (c.quantity.abs() * c.multiplier));
+      final netDelta = returnedBaseQty - soldBaseQty;
+      if (netDelta.abs() > 0.0001) {
+        final newStock = (p.stock + netDelta).clamp(0.0, double.infinity);
+        stockUpdates[p.id] = newStock;
+        movementWrites.add(_offlineDb.recordLocalStockMovement(
+          productId: p.id,
+          productName: p.name,
+          sku: p.sku,
+          unitCode: p.unitCode,
+          type: netDelta < 0 ? 'sale' : 'return',
+          quantityDelta: netDelta,
+          quantityAfter: newStock,
+          unitCost: p.costPrice,
+          notes: 'Nota ${receiptPayload['number'] ?? invoiceNo}',
+        ));
+        return ProductModel.fromJson({
+          ...p.toJson(),
+          'stock': newStock,
+          'is_low_stock': newStock <= p.reorderLevel,
+        });
+      }
+      return p;
+    }).toList();
+
+    if (stockUpdates.isNotEmpty) {
+      await _offlineDb.batchUpdateLocalProductStocks(stockUpdates);
+    }
+    if (movementWrites.isNotEmpty) {
+      await Future.wait(movementWrites);
+    }
+
+    receiptPayload['is_offline_pending'] = !checkoutSyncedOnline;
 
     await _offlineDb.saveSaleToLocalHistory(receiptPayload);
     final updatedHistory = _offlineDb.getLocalSalesHistory();
@@ -1894,23 +2439,28 @@ class PosCubit extends Cubit<PosState> {
     int? customerId,
     int redeemPoints = 0,
   }) async {
-    if (state.cart.isEmpty) return null;
+    final positiveLines = state.cart.where((c) => !c.isExchangeReturn).toList();
+    if (positiveLines.isEmpty) return null;
     try {
       final res = await _apiClient.dio.post(
         ApiEndpoints.priceCart,
         data: {
           if (customerId != null) 'customer_id': customerId,
           if (redeemPoints > 0) 'redeem_points': redeemPoints,
-          if (state.cartDiscountAmount > 0)
-            'discount': {'type': 'fixed', 'value': state.cartDiscountAmount},
-          'items': state.cart
-              .map((c) => {
-                    'product_id': c.product.id,
-                    'variant_id': c.variant?.id,
-                    'quantity': c.quantity,
-                    'unit_price': c.unitPrice,
-                    if (c.discountAmount > 0) 'discount_amount': c.discountAmount,
-                  })
+          if (state.totalDiscount > 0)
+            'discount': {'type': 'fixed', 'value': state.totalDiscount},
+          'items': positiveLines
+              .map((c) {
+                final resolvedBatch = c.batch ?? c.product.fefoBatch;
+                return {
+                  'product_id': c.product.id,
+                  'variant_id': c.variant?.id,
+                  if (resolvedBatch != null) 'batch_id': resolvedBatch.id,
+                  'quantity': c.quantity,
+                  'unit_price': c.unitPrice,
+                  if (c.discountAmount > 0) 'discount_amount': c.discountAmount,
+                };
+              })
               .toList(),
         },
       );
@@ -1981,10 +2531,21 @@ class PosCubit extends Cubit<PosState> {
           if (restoreQty <= 0 || p.isServiceOrNonStockItem) return p;
           final restoredStock = (p.stock + restoreQty).clamp(0.0, double.infinity);
           _offlineDb.updateLocalProductStock(p.id, restoredStock);
+          _offlineDb.recordLocalStockMovement(
+            productId: p.id,
+            productName: p.name,
+            sku: p.sku,
+            unitCode: p.unitCode,
+            type: 'void_restore',
+            quantityDelta: restoreQty,
+            quantityAfter: restoredStock,
+            unitCost: p.costPrice,
+            notes: 'Void Nota #${targetSale?['number'] ?? saleId}: $reason',
+          );
           return ProductModel.fromJson({
             ...p.toJson(),
             'stock': restoredStock,
-            'is_low_stock': restoredStock <= 5,
+            'is_low_stock': restoredStock <= p.reorderLevel,
           });
         }).toList();
       }
@@ -2038,7 +2599,7 @@ class PosCubit extends Cubit<PosState> {
         data: {
           if (reasonCodeId != null) 'reason_code_id': reasonCodeId,
           'restock': true,
-          'notes': notes ?? 'Retur Pelanggan via NusaPOS Mobile',
+          'notes': notes ?? 'Retur Pelanggan via OXO.ID Mobile POS',
         },
       );
     } catch (_) {}
@@ -2049,33 +2610,142 @@ class PosCubit extends Cubit<PosState> {
       _offlineDb.getCachedAuthSession()?['is_local_trial'] == true;
 
   /// Add or update product in Inventory & Stock Opname
+  Map<String, dynamic> _buildProductCreatePayload({
+    required String name,
+    required String sku,
+    required String barcode,
+    required double sellingPrice,
+    required double costPrice,
+    required double initialStock,
+    int? categoryId,
+    int? brandId,
+    int? unitId,
+    double reorderLevel = 5.0,
+    bool trackStock = true,
+    String? shelfLocation,
+    String? type,
+    bool soldByWeight = false,
+  }) {
+    final rawType = (type ?? 'simple').trim().toLowerCase();
+    final normalizedType = (rawType.isEmpty || rawType == 'physical') ? 'simple' : rawType;
+    final hasCategory = categoryId != null &&
+        categoryId > 0 &&
+        (state.categories.isEmpty ||
+            state.categories.any((c) => (c['id'] as num?)?.toInt() == categoryId));
+    return {
+      'name': name,
+      'sku': sku,
+      'barcode': barcode,
+      'selling_price': sellingPrice,
+      'cost_price': costPrice,
+      'initial_stock': initialStock,
+      'category_id': hasCategory ? categoryId : null,
+      if (brandId != null && brandId > 0) 'brand_id': brandId,
+      if (unitId != null && unitId > 0) 'unit_id': unitId,
+      'reorder_level': reorderLevel,
+      'track_stock': trackStock,
+      'shelf_location': shelfLocation,
+      'type': normalizedType,
+      'sold_by_weight': soldByWeight,
+    };
+  }
+
+  Future<int> _syncPendingLocalProductsToCloud({Map<int, int>? externalIdMap}) async {
+    if (_isLocalStandalone) return 0;
+    final cached = _offlineDb.getCachedProducts();
+    final pending = cached
+        .where((p) => ((p['id'] as num?)?.toInt() ?? 0) < 0 || p['is_local_only'] == true)
+        .toList();
+    if (pending.isEmpty) return 0;
+
+    final productIdMap = <int, int>{};
+    int uploaded = 0;
+    for (final p in pending) {
+      final localId = (p['id'] as num?)?.toInt() ?? 0;
+      try {
+        final res = await _apiClient.dio.post(
+          ApiEndpoints.products,
+          data: _buildProductCreatePayload(
+            name: (p['name'] ?? 'Produk').toString(),
+            sku: (p['sku'] ?? '').toString(),
+            barcode: (p['barcode'] ?? '').toString(),
+            sellingPrice: (p['selling_price'] as num?)?.toDouble() ?? 0.0,
+            costPrice: (p['cost_price'] as num?)?.toDouble() ?? 0.0,
+            initialStock: (p['stock'] as num?)?.toDouble() ?? 0.0,
+            categoryId: (p['category_id'] as num?)?.toInt(),
+            brandId: (p['brand_id'] as num?)?.toInt(),
+            unitId: (p['unit_id'] as num?)?.toInt(),
+            reorderLevel: (p['reorder_level'] as num?)?.toDouble() ?? 5.0,
+            trackStock: p['track_stock'] != false,
+            shelfLocation: p['shelf_location']?.toString(),
+            type: p['type']?.toString(),
+            soldByWeight: p['sold_by_weight'] == true,
+          ),
+        );
+        final serverId = ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
+        if (serverId != null && localId != 0) {
+          productIdMap[localId] = serverId;
+          externalIdMap?[localId] = serverId;
+        }
+        uploaded++;
+      } catch (_) {}
+    }
+
+    if (productIdMap.isNotEmpty) {
+      await _offlineDb.remapOfflineSalesIds(productIdMap, const <int, int>{});
+      final remaining = _offlineDb.getCachedProducts().where((p) {
+        final id = (p['id'] as num?)?.toInt() ?? 0;
+        return !productIdMap.containsKey(id);
+      }).toList();
+      await _offlineDb.cacheProducts(remaining);
+    }
+    return uploaded;
+  }
+
   /// Supports POST /api/v1/products (new) and POST /api/v1/products/{id}/adjust-stock (existing)
-  Future<void> saveProductInventory(
+  Future<({bool ok, bool syncedToCloud, String? errorMessage})> saveProductInventory(
     ProductModel product, {
     bool isNew = false,
-    String notes = 'Stock Opname via NusaPOS Mobile',
+    String notes = 'Stock Opname via OXO.ID Mobile POS',
   }) async {
     final bool isBrandNew = isNew || product.id <= 0 || product.id > 1000000000;
 
     if (!_isLocalStandalone) {
       try {
         if (isBrandNew) {
-          await _apiClient.dio.post(
+          final res = await _apiClient.dio.post(
             ApiEndpoints.products,
-            data: {
-              'name': product.name,
-              'sku': product.sku,
-              'barcode': product.barcode,
-              'selling_price': product.sellingPrice,
-              'cost_price': product.costPrice,
-              'initial_stock': product.stock,
-              'category_id': product.categoryId > 0 ? product.categoryId : null,
-              'shelf_location': product.shelfLocation,
-              'type': product.type,
-              'sold_by_weight': product.soldByWeight,
-            },
+            data: _buildProductCreatePayload(
+              name: product.name,
+              sku: product.sku,
+              barcode: product.barcode,
+              sellingPrice: product.sellingPrice,
+              costPrice: product.costPrice,
+              initialStock: product.stock,
+              categoryId: product.categoryId,
+              brandId: product.brandId,
+              unitId: product.unitId,
+              reorderLevel: product.reorderLevel,
+              trackStock: product.trackStock,
+              shelfLocation: product.shelfLocation,
+              type: product.type,
+              soldByWeight: product.soldByWeight,
+            ),
           );
+          final serverId = ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
+          if (product.id < 0) {
+            if (serverId != null) {
+              await _offlineDb.remapOfflineSalesIds({product.id: serverId}, const <int, int>{});
+            }
+            final remaining = _offlineDb.getCachedProducts().where((p) {
+              return ((p['id'] as num?)?.toInt() ?? 0) != product.id;
+            }).toList();
+            await _offlineDb.cacheProducts(remaining);
+          }
         } else {
+          final normalizedType = (product.type.trim().toLowerCase() == 'physical')
+              ? 'simple'
+              : product.type.trim().toLowerCase();
           await _apiClient.dio.post(
             ApiEndpoints.adjustProductStock(product.id),
             data: {
@@ -2085,17 +2755,35 @@ class PosCubit extends Cubit<PosState> {
               'selling_price': product.sellingPrice,
               'unit_cost': product.costPrice,
               'category_id': product.categoryId > 0 ? product.categoryId : null,
+              if (product.brandId != null && product.brandId! > 0) 'brand_id': product.brandId,
+              if (product.unitId != null && product.unitId! > 0) 'unit_id': product.unitId,
+              'reorder_level': product.reorderLevel,
+              'track_stock': product.trackStock,
+              if (normalizedType.isNotEmpty) 'type': normalizedType,
               'shelf_location': product.shelfLocation,
               'notes': notes,
             },
           );
         }
         await syncWithCloud(force: false);
-        return;
-      } catch (_) {}
+        return (ok: true, syncedToCloud: true, errorMessage: null);
+      } catch (e) {
+        if (!ApiClient.isNetworkOfflineError(e)) {
+          return (
+            ok: false,
+            syncedToCloud: false,
+            errorMessage: ApiClient.extractErrorMessage(e),
+          );
+        }
+      }
     }
 
-    // Local fallback for offline / standalone mode
+    // Local fallback strictly for offline / standalone mode
+    final prevStock = state.allProducts
+            .where((p) => p.id == product.id)
+            .firstOrNull
+            ?.stock ??
+        0.0;
     final int localId = (isBrandNew && product.id >= 0)
         ? -DateTime.now().millisecondsSinceEpoch
         : product.id;
@@ -2105,8 +2793,25 @@ class PosCubit extends Cubit<PosState> {
       if (isBrandNew || localId < 0) 'is_local_only': true,
     };
     await _offlineDb.addOrUpdateLocalProduct(map);
+    if (product.trackStock) {
+      final delta = isBrandNew ? product.stock : (product.stock - prevStock);
+      if (delta.abs() > 0.0001 || isBrandNew) {
+        await _offlineDb.recordLocalStockMovement(
+          productId: localId,
+          productName: product.name,
+          sku: product.sku,
+          unitCode: product.unitCode,
+          type: isBrandNew ? 'initial_stock' : 'stock_opname',
+          quantityDelta: delta,
+          quantityAfter: product.stock,
+          unitCost: product.costPrice,
+          notes: notes,
+        );
+      }
+    }
     final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
     emit(state.copyWith(allProducts: updated));
+    return (ok: true, syncedToCloud: false, errorMessage: null);
   }
 
   /// Create or update Customer & Member (POST/PUT /api/v1/customers)
@@ -2249,7 +2954,7 @@ class PosCubit extends Cubit<PosState> {
     return {'success': true, 'offline': true};
   }
 
-  /// One-Click Local-to-Cloud Data Migration when upgrading Standalone Mode to NusaCommerce Cloud
+  /// One-Click Local-to-Cloud Data Migration when upgrading Standalone Mode to OXO Cloud
   Future<Map<String, int>> migrateLocalStandaloneDataToCloud() async {
     int uploadedProducts = 0;
     int uploadedCustomers = 0;
@@ -2304,33 +3009,7 @@ class PosCubit extends Cubit<PosState> {
     }
 
     // 3. Migrate local-only products & map old negative IDs -> new server IDs
-    final products = _offlineDb.getCachedProducts();
-    for (final p in products) {
-      final id = (p['id'] as num?)?.toInt() ?? 0;
-      if (id < 0 || p['is_local_only'] == true) {
-        try {
-          final res = await _apiClient.dio.post(
-            ApiEndpoints.products,
-            data: {
-              'name': p['name'] ?? 'Produk',
-              'sku': p['sku'] ?? 'SKU-${id.abs()}',
-              'barcode': p['barcode'] ?? '',
-              'selling_price': (p['selling_price'] as num?)?.toDouble() ?? 0.0,
-              'cost_price': (p['cost_price'] as num?)?.toDouble() ?? 0.0,
-              'initial_stock': (p['stock'] as num?)?.toDouble() ?? 0.0,
-              'type': p['type'] ?? 'standard',
-              'sold_by_weight': p['sold_by_weight'] == true,
-              'shelf_location': p['shelf_location'],
-            },
-          );
-          final serverId = ((res.data['data'] as Map?)?['id'] as num?)?.toInt();
-          if (serverId != null && id != 0) {
-            productIdMap[id] = serverId;
-          }
-          uploadedProducts++;
-        } catch (_) {}
-      }
-    }
+    uploadedProducts = await _syncPendingLocalProductsToCloud(externalIdMap: productIdMap);
 
     // 4. Remap IDs inside offline sales queue & push to Cloud
     await _offlineDb.remapOfflineSalesIds(productIdMap, customerIdMap);
@@ -2351,6 +3030,20 @@ class PosCubit extends Cubit<PosState> {
       'suppliers': uploadedSuppliers,
       'sales': syncedSales,
     };
+  }
+
+  /// Retry syncing a non-stock offline conflict (e.g., ShiftRequired after opening a cashier shift).
+  Future<bool> retryOfflineSyncConflict(String localUuid) async {
+    final ok = await _offlineDb.retryOfflineSaleConflict(localUuid, _apiClient);
+    if (ok) {
+      await syncWithCloud(force: false, preserveActiveCart: true);
+    }
+    emit(state.copyWith(
+      salesHistory: _offlineDb.getLocalSalesHistory(),
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+    ));
+    return ok;
   }
 
   /// Resolve an offline `InsufficientStock` conflict either by approving oversell
@@ -2377,7 +3070,33 @@ class PosCubit extends Cubit<PosState> {
     return ok;
   }
 
-  /// Sync pending offline transactions manually
+  /// Resolve a Cloud-side OfflineSyncConflict record (POST /api/v1/pos/offline-conflicts/{id}/resolve).
+  Future<({bool success, String message})> resolveCloudOfflineConflict(
+    int conflictId, {
+    required String resolution,
+    String? notes,
+  }) async {
+    if (_isLocalStandalone) {
+      return (success: false, message: 'Mode Toko Mandiri tidak terhubung ke Cloud.');
+    }
+    try {
+      final res = await _apiClient.dio.post(
+        ApiEndpoints.resolveOfflineConflict(conflictId),
+        data: {
+          'resolution': resolution,
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        },
+      );
+      final body = res.data;
+      final msg = (body is Map ? body['message'] : null)?.toString() ??
+          'Konflik sinkronisasi offline telah diselesaikan.';
+      return (success: true, message: msg);
+    } catch (e) {
+      return (success: false, message: ApiClient.extractErrorMessage(e));
+    }
+  }
+
+  /// Sync pending offline transactions manually (FIFO: local products -> offline sales -> refresh)
   Future<int> syncOfflineTransactions() async {
     if (_isLocalStandalone) {
       emit(state.copyWith(
@@ -2389,25 +3108,126 @@ class PosCubit extends Cubit<PosState> {
     }
     emit(state.copyWith(isSyncingOfflineQueue: true));
     try {
+      await _syncPendingLocalProductsToCloud();
       final synced = await _offlineDb.syncOfflineQueue(_apiClient);
       final online = await _connectivityService.checkOnline();
       if (online) {
-        await syncWithCloud(force: false, preserveActiveCart: true);
+        await syncWithCloud(force: false, preserveActiveCart: true, silent: true);
       }
       emit(state.copyWith(
         isOnline: online,
         isSyncingOfflineQueue: false,
+        salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
+      _scheduleBackoffSyncIfNeeded();
       return synced;
     } catch (_) {
       emit(state.copyWith(
         isSyncingOfflineQueue: false,
+        salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
         offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
       ));
+      _scheduleBackoffSyncIfNeeded();
       return 0;
     }
+  }
+
+  /// Fetch Multi-Warehouse & Cross-Store stock breakdown (GET /api/v1/pos/warehouse-stock)
+  /// with seamless fallback to cached per-product multi-warehouse stocks when offline.
+  Future<({bool fromCloud, List<Map<String, dynamic>> results, String? error})> fetchWarehouseStock({
+    int? productId,
+    String query = '',
+  }) async {
+    if (!_isLocalStandalone) {
+      try {
+        final params = <String, dynamic>{};
+        if (productId != null) {
+          params['product_id'] = productId;
+        } else if (query.trim().isNotEmpty) {
+          params['q'] = query.trim();
+        }
+        final res = await _apiClient.dio.get(
+          ApiEndpoints.posWarehouseStock,
+          queryParameters: params,
+        );
+        final data = res.data is Map ? res.data['data'] : null;
+        if (data is Map) {
+          if (productId != null && data['product'] is Map) {
+            final p = Map<String, dynamic>.from(data['product'] as Map);
+            return (
+              fromCloud: true,
+              results: [
+                {
+                  ...p,
+                  'warehouses': (data['warehouses'] as List<dynamic>? ?? [])
+                      .whereType<Map>()
+                      .map((e) => Map<String, dynamic>.from(e))
+                      .toList(),
+                  'total_other_stock': (data['total_other_stock'] as num?)?.toDouble() ?? 0.0,
+                  'total_network_stock': (data['total_network_stock'] as num?)?.toDouble() ?? 0.0,
+                }
+              ],
+              error: null,
+            );
+          }
+          final rawResults = data['results'] as List<dynamic>? ?? const [];
+          return (
+            fromCloud: true,
+            results: rawResults
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList(),
+            error: null,
+          );
+        }
+      } catch (e) {
+        if (!state.isOnline) {
+          // Graceful fallback below
+        } else {
+          return (
+            fromCloud: false,
+            results: _offlineWarehouseResults(productId: productId, query: query),
+            error: 'Gagal mengambil stok gudang terbaru dari server.',
+          );
+        }
+      }
+    }
+
+    return (
+      fromCloud: false,
+      results: _offlineWarehouseResults(productId: productId, query: query),
+      error: null,
+    );
+  }
+
+  List<Map<String, dynamic>> _offlineWarehouseResults({
+    int? productId,
+    String query = '',
+  }) {
+    final q = query.trim().toLowerCase();
+    return state.allProducts.where((p) {
+      if (productId != null) return p.id == productId;
+      if (q.isEmpty) return true;
+      return p.name.toLowerCase().contains(q) ||
+          p.sku.toLowerCase().contains(q) ||
+          p.barcode.toLowerCase().contains(q);
+    }).take(30).map((p) {
+      return {
+        'id': p.id,
+        'name': p.name,
+        'sku': p.sku,
+        'barcode': p.barcode,
+        'unit': p.unitCode,
+        'selling_price': p.sellingPrice,
+        'track_stock': p.trackStock,
+        'current_store_available': p.stock,
+        'total_other_stock': p.otherWarehousesStock,
+        'total_network_stock': p.warehouseStocks.isNotEmpty ? p.multiWarehouseStock : p.stock,
+        'warehouses': p.warehouseStocks.map((w) => w.toJson()).toList(),
+      };
+    }).toList();
   }
 }

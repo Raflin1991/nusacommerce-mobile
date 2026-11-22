@@ -3,9 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../auth/bloc/auth_cubit.dart';
 
-/// LAYAR 10 — PROFIL TOKO & HEADER STRUK NUSACOMMERCE
+/// LAYAR 10 — PROFIL TOKO & HEADER STRUK OXO.ID
 class StoreProfileScreen extends StatefulWidget {
   final OfflineDatabase offlineDb;
 
@@ -34,7 +35,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
 
     final fallbackName = session.tenantName.trim().isNotEmpty
         ? session.tenantName.trim()
-        : (session.activeStore.name.trim().isNotEmpty ? session.activeStore.name.trim() : 'NusaCommerce POS');
+        : (session.activeStore.name.trim().isNotEmpty ? session.activeStore.name.trim() : 'OXO.ID POS');
     final fallbackAddress = (session.activeStore.address ?? '').trim().isNotEmpty
         ? session.activeStore.address!.trim()
         : '-';
@@ -43,7 +44,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
         : '-';
 
     _nameController = TextEditingController(
-      text: (storedName.isEmpty || storedName == 'NusaCommerce POS') ? fallbackName : storedName,
+      text: (storedName.isEmpty || storedName == 'NusaCommerce POS' || storedName == 'OXO.ID POS') ? fallbackName : storedName,
     );
     _addressController = TextEditingController(
       text: (storedAddress.isEmpty || storedAddress == '-') ? fallbackAddress : storedAddress,
@@ -95,7 +96,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
     final session = context.watch<AuthCubit>().state.session;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: NusaThemeTokens.of(context).bgPage,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),

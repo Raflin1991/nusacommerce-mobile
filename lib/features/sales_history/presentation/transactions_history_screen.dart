@@ -4,12 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
 /// LAYAR 6 — RIWAYAT TRANSAKSI (TAB 2 NAVIGASI)
-/// NusaCommerce Mobile Enterprise Sales History Screen
+/// OXO.ID Mobile Enterprise Sales History Screen
 class TransactionsHistoryScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
 
@@ -154,7 +155,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -193,6 +194,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
               .toString();
           final returnReasons = posCubit.state.returnReasons;
 
+          final tokens = NusaThemeTokens.of(ctx);
           return Padding(
             padding: EdgeInsets.only(
               left: 20,
@@ -211,9 +213,12 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                       Expanded(
                         child: Text(
                           'Nota ${activeSale['number']}',
-                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: tokens.textPrimary),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       NusaBadge(
                         label: status == 'voided'
                             ? 'VOID / BATAL'
@@ -226,7 +231,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                   Text(
                     '${activeSale['sale_datetime']} • $customerName'
                     '${methods.isNotEmpty ? ' • ${methods.join(', ')}' : ''}',
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w500),
+                    style: TextStyle(fontSize: 12.5, color: tokens.textSecondary, fontWeight: FontWeight.w500),
                   ),
                   if (loadingDetail)
                     const Padding(
@@ -242,14 +247,14 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                   else if (items.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     NusaCard(
-                      backgroundColor: AppColors.background,
+                      backgroundColor: tokens.bgElevated,
                       padding: const EdgeInsets.all(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Daftar Item (${items.length})',
-                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.slate500),
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: tokens.textSecondary),
                           ),
                           const SizedBox(height: 8),
                           ...items.take(6).map((raw) {
@@ -267,7 +272,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                       '${IdrCurrencyFormatter.formatQty(qty)}× $name',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: tokens.textPrimary),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -279,14 +284,14 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                           if (items.length > 6)
                             Text(
                               '+${items.length - 6} item lainnya (lihat di struk)',
-                              style: const TextStyle(fontSize: 11.5, color: AppColors.primary, fontWeight: FontWeight.w700),
+                              style: TextStyle(fontSize: 11.5, color: tokens.accent, fontWeight: FontWeight.w700),
                             ),
-                          const Divider(height: 14, color: AppColors.border),
+                          Divider(height: 14, color: tokens.borderSubtle),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Total Nota', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-                              NusaPriceTag(amount: activeSale['grand_total'], fontSize: 15, color: AppColors.primary),
+                              Text('Total Nota', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: tokens.textPrimary)),
+                              NusaPriceTag(amount: activeSale['grand_total'], fontSize: 15, color: tokens.accent),
                             ],
                           ),
                         ],
@@ -453,12 +458,13 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
     showModalBottomSheet(
       context: rootContext,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(rootContext).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
+          final tokens = NusaThemeTokens.of(ctx);
           double totalCredit = 0.0;
           int selectedCount = 0;
           for (int i = 0; i < rawItems.length; i++) {
@@ -481,27 +487,29 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.swap_horiz_rounded, color: AppColors.primary),
+                      Icon(Icons.swap_horiz_rounded, color: tokens.accent),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Tukar Barang • ${activeSale['number'] ?? '-'}',
-                          style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: tokens.textPrimary),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'Pilih item & jumlah yang dikembalikan pelanggan, lalu tambahkan barang pengganti di layar Kasir POS.',
-                    style: TextStyle(fontSize: 12, color: AppColors.slate600),
+                    style: TextStyle(fontSize: 12, color: tokens.textSecondary),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
                     child: ListView.separated(
                       controller: scrollCtrl,
                       itemCount: rawItems.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+                      separatorBuilder: (_, __) => Divider(height: 1, color: tokens.borderSubtle),
                       itemBuilder: (_, idx) {
                         final item = rawItems[idx];
                         final maxQty = ((item['quantity'] as num?)?.toDouble() ?? 1.0).abs();
@@ -527,27 +535,29 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                   children: [
                                     Text(
                                       (item['product_name'] ?? 'Produk').toString(),
-                                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: tokens.textPrimary),
                                     ),
                                     Text(
                                       'Maks ${IdrCurrencyFormatter.formatQty(maxQty)} × ${IdrCurrencyFormatter.format(unitPrice)}',
-                                      style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                      style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
                                     ),
                                   ],
                                 ),
                               ),
                               Container(
                                 decoration: BoxDecoration(
-                                  color: AppColors.slate100,
+                                  color: tokens.bgElevated,
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: AppColors.border),
+                                  border: Border.all(color: tokens.borderSubtle),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(Icons.remove_rounded, size: 16),
+                                      icon: Icon(Icons.remove_rounded, size: 16, color: tokens.textPrimary),
                                       onPressed: currentQty <= 0
                                           ? null
                                           : () {
@@ -559,11 +569,11 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                     ),
                                     Text(
                                       IdrCurrencyFormatter.formatQty(currentQty),
-                                      style: AppTheme.moneyStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                      style: AppTheme.moneyStyle(fontSize: 13, fontWeight: FontWeight.w800, color: tokens.textPrimary),
                                     ),
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                      icon: Icon(Icons.add_rounded, size: 16, color: tokens.accent),
                                       onPressed: currentQty >= maxQty
                                           ? null
                                           : () {
@@ -586,21 +596,26 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
+                      color: tokens.accentSoft,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Kredit Retur ($selectedCount item)',
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                        Expanded(
+                          child: Text(
+                            'Kredit Retur ($selectedCount item)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: tokens.textPrimary),
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         NusaPriceTag(
                           amount: totalCredit,
                           fontSize: 15,
                           fontWeight: FontWeight.w900,
-                          color: AppColors.primary,
+                          color: tokens.accent,
                         ),
                       ],
                     ),
@@ -652,6 +667,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final salesHistory = context.watch<PosCubit>().state.salesHistory;
 
     final filtered = salesHistory.where((sale) {
@@ -676,9 +692,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
         .fold<double>(0.0, (sum, s) => sum + ((s['grand_total'] as num?)?.toDouble() ?? 0.0));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: tokens.bgPage,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: tokens.bgSurface,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.menu_rounded),
@@ -687,8 +703,18 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
         title: const Text('Riwayat Transaksi'),
         actions: [
           IconButton(
+            tooltip: 'Surat Penawaran Harga',
+            icon: Icon(Icons.request_quote_outlined, color: tokens.accent),
+            onPressed: () => context.push('/quotations'),
+          ),
+          IconButton(
+            tooltip: 'Kelola Alasan Retur',
+            icon: Icon(Icons.rule_folder_outlined, color: tokens.accent),
+            onPressed: () => _showReturnReasonsManager(context),
+          ),
+          IconButton(
             tooltip: 'Sinkronkan Riwayat Transaksi',
-            icon: const Icon(Icons.sync_rounded, color: AppColors.primary),
+            icon: Icon(Icons.sync_rounded, color: tokens.accent),
             onPressed: () async {
               await context.read<PosCubit>().syncWithCloud(force: false);
               if (context.mounted) {
@@ -704,9 +730,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
         children: [
           // 1. Sticky Filter & Search Header
           Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+            decoration: BoxDecoration(
+              color: tokens.bgSurface,
+              border: Border(bottom: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
             ),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Column(
@@ -717,7 +743,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
                     hintText: 'Cari nomor nota, pelanggan, atau kasir...',
-                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.slate400),
+                    prefixIcon: Icon(Icons.search_rounded, color: tokens.textTertiary),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear_rounded, size: 18),
@@ -742,7 +768,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                           child: NusaPillFilter(
                             label: period,
                             selected: _periodFilter == period,
-                            selectedColor: AppColors.navyDark,
+                            selectedColor: tokens.isDark ? tokens.accent : tokens.textPrimary,
                             onTap: () => setState(() => _periodFilter = period),
                           ),
                         ),
@@ -768,6 +794,8 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 8),
+                _buildTransactionShortcutsStrip(context, tokens),
               ],
             ),
           ),
@@ -777,22 +805,34 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: AppColors.slate100,
+              color: tokens.bgElevated,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${filtered.length} Transaksi',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.slate600),
+                  Flexible(
+                    child: Text(
+                      '${filtered.length} Transaksi',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.textSecondary),
+                    ),
                   ),
-                  Row(
-                    children: [
-                      const Text(
-                        'Total Valid: ',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.slate500),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Total Valid: ',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: tokens.textSecondary),
+                          ),
+                          NusaPriceTag(amount: validSalesTotal, fontSize: 12.5, color: tokens.accent),
+                        ],
                       ),
-                      NusaPriceTag(amount: validSalesTotal, fontSize: 12.5, color: AppColors.primary),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -851,8 +891,8 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                 height: 42,
                                 decoration: BoxDecoration(
                                   color: (isVoid || isRefunded)
-                                      ? AppColors.dangerSoft
-                                      : (hasDebt ? AppColors.warningSoft : AppColors.primarySoft),
+                                      ? tokens.dangerSoft
+                                      : (hasDebt ? tokens.warningSoft : tokens.accentSoft),
                                   borderRadius: BorderRadius.circular(11),
                                 ),
                                 child: Icon(
@@ -860,8 +900,8 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                       ? Icons.cancel_outlined
                                       : (hasDebt ? Icons.menu_book_rounded : Icons.receipt_outlined),
                                   color: (isVoid || isRefunded)
-                                      ? AppColors.danger
-                                      : (hasDebt ? AppColors.warningDark : AppColors.primary),
+                                      ? tokens.danger
+                                      : (hasDebt ? tokens.warning : tokens.accent),
                                   size: 21,
                                 ),
                               ),
@@ -872,10 +912,10 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                   children: [
                                     Text(
                                       sale['number'].toString(),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w800,
-                                        color: AppColors.navyDark,
+                                        color: tokens.textPrimary,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -884,9 +924,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                       '${cashierName.isNotEmpty ? ' • Kasir: $cashierName' : ''}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 11.5,
-                                        color: AppColors.slate500,
+                                        color: tokens.textSecondary,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -906,7 +946,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                                     amount: sale['grand_total'],
                                     fontSize: 14.5,
                                     strikethrough: isVoid || isRefunded,
-                                    color: (isVoid || isRefunded) ? AppColors.slate400 : AppColors.navyDark,
+                                    color: (isVoid || isRefunded) ? tokens.textTertiary : tokens.textPrimary,
                                   ),
                                   const SizedBox(height: 5),
                                   NusaBadge(
@@ -930,6 +970,133 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showReturnReasonsManager(BuildContext context) {
+    final posCubit = context.read<PosCubit>();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => BlocBuilder<PosCubit, PosState>(
+        builder: (ctx, state) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Kelola Alasan Retur / Void',
+                      style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800)),
+                  FilledButton.icon(
+                    onPressed: () {
+                      final ctrl = TextEditingController();
+                      showDialog(
+                        context: ctx,
+                        builder: (dCtx) => AlertDialog(
+                          title: const Text('Alasan Retur Baru'),
+                          content: TextField(
+                            controller: ctrl,
+                            autofocus: true,
+                            decoration: const InputDecoration(labelText: 'Nama Alasan (cth: Barang Cacat)'),
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+                            FilledButton(
+                              onPressed: () async {
+                                final nm = ctrl.text.trim();
+                                if (nm.isEmpty) return;
+                                await posCubit.saveReturnReason({'name': nm});
+                                if (dCtx.mounted) Navigator.pop(dCtx);
+                              },
+                              child: const Text('Simpan'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.add, size: 17),
+                    label: const Text('Tambah'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (state.returnReasons.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Text('Belum ada alasan retur terdaftar.', style: TextStyle(color: AppColors.slate500)),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: state.returnReasons.length,
+                    itemBuilder: (_, idx) {
+                      final r = state.returnReasons[idx];
+                      final id = (r['id'] as num?)?.toInt() ?? 0;
+                      return ListTile(
+                        title: Text((r['name'] ?? r['code'] ?? '-').toString()),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                          onPressed: () => posCubit.deleteReturnReason(id),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransactionShortcutsStrip(BuildContext context, NusaThemeTokens tokens) {
+    final shortcuts = [
+      (label: '💳 Buku Bon & Pelunasan', route: '/debts'),
+      (label: '📝 Surat Penawaran', route: '/quotations'),
+      (label: '📒 Buku Kas Toko', route: '/cash-ledger'),
+    ];
+
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: shortcuts.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) {
+          final item = shortcuts[i];
+          return InkWell(
+            onTap: () => context.push(item.route),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+              decoration: BoxDecoration(
+                color: tokens.accentSoft,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.3),
+                  width: tokens.borderWidth,
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: tokens.accentDark,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

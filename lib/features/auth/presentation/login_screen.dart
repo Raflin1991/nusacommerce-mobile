@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
-import '../../../core/widgets/nusa_widgets.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../bloc/auth_cubit.dart';
 
@@ -97,20 +97,16 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final authCubit = context.read<AuthCubit>();
-    final posCubit = context.read<PosCubit>();
 
     final success = await authCubit.login(
       tenantDomain: normalizedTenant,
       email: email,
       password: password,
     );
+    // MainNavigationShell reactively detects AuthState.sessionRevision changes and triggers
+    // clean local reset + full paginated SQLite master data restore with a live progress banner.
     if (success && mounted) {
-      await posCubit.resetForLogout();
-      await posCubit.initializeCatalog(seedDefaultCart: false);
-      await posCubit.syncWithCloud(force: true);
-      if (mounted) {
-        context.go('/home');
-      }
+      context.go('/home');
     }
   }
 
@@ -149,10 +145,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showServerUrlModal() {
     final urlCtrl = TextEditingController(text: widget.apiClient.baseUrl);
+    final tokens = NusaThemeTokens.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: tokens.bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -173,19 +170,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 14),
                 decoration: BoxDecoration(
-                  color: AppColors.border,
+                  color: tokens.borderDefault,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            const Text(
+            Text(
               'Konfigurasi Server API Cloud',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: tokens.textPrimary),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Gunakan URL domain Laragon/Cloud Anda atau http://10.0.2.2:8000/api/v1 untuk Android Emulator.',
-              style: TextStyle(fontSize: 12.5, color: AppColors.slate600),
+              style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -193,7 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'Endpoint REST API v1',
-                hintText: 'https://nusacommerce.test/api/v1',
+                hintText: 'https://oxo.test/api/v1',
                 prefixIcon: Icon(Icons.cloud_outlined),
               ),
             ),
@@ -258,56 +255,74 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  String _formatServerChipLabel(String rawHost) {
+    final cleaned = rawHost.trim().toLowerCase();
+    if (cleaned.isEmpty ||
+        cleaned.contains('nusacommerce') ||
+        cleaned == '43.159.49.77' ||
+        cleaned == 'localhost' ||
+        cleaned == '127.0.0.1') {
+      return 'oxo.id';
+    }
+    return rawHost.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
+    final isDark = tokens.isDark;
     final apiHost = Uri.tryParse(widget.apiClient.baseUrl)?.host ??
         widget.apiClient.baseUrl;
+    final serverChipLabel = _formatServerChipLabel(apiHost);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: isDark ? tokens.bgPage : Colors.white,
+      extendBodyBehindAppBar: false,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? tokens.bgSurface : Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          tooltip: 'Info NusaCommerce',
-          icon: const Icon(Icons.info_outline_rounded, color: AppColors.navyDark),
+          tooltip: 'Info OXO.ID',
+          icon: Icon(Icons.info_outline_rounded, color: tokens.textSecondary),
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
-        ),
-        title: const Text(
-          'Masuk NusaCommerce',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w800,
-            color: AppColors.navyDark,
-          ),
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.only(right: 14),
             child: InkWell(
               onTap: _showServerUrlModal,
               borderRadius: BorderRadius.circular(999),
               child: Container(
+                constraints: const BoxConstraints(maxWidth: 140),
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
+                  color: isDark ? tokens.bgElevated : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: AppColors.primaryLight),
+                  border: Border.all(
+                    color: isDark ? tokens.borderSubtle : const Color(0xFFE2E8F0),
+                    width: tokens.borderWidth,
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.dns_rounded,
-                        size: 14, color: AppColors.primary),
+                    const Icon(Icons.language_rounded,
+                        size: 14, color: Color(0xFF0052FF)),
                     const SizedBox(width: 5),
-                    Text(
-                      apiHost.isEmpty ? 'Server API' : apiHost,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primaryDark,
+                    Flexible(
+                      child: Text(
+                        serverChipLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? tokens.textPrimary
+                              : const Color(0xFF0F172A),
+                        ),
                       ),
                     ),
                   ],
@@ -317,83 +332,84 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ],
       ),
-      body: BlocBuilder<AuthCubit, AuthState>(
-        builder: (context, state) {
-          return SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildBrandHeader(),
-                      const SizedBox(height: 12),
-                      _buildModeSwitcher(),
-                      const SizedBox(height: 12),
-                      if (state.errorMessage != null &&
-                          _entryMode == _LoginEntryMode.cloud) ...[
-                        _buildErrorBanner(state.errorMessage!),
-                        const SizedBox(height: 12),
-                      ],
-                      if (_entryMode == _LoginEntryMode.cloud)
-                        _buildCloudLoginSection(state)
-                      else
-                        _buildStandaloneSetupSection(),
-                    ],
-                  ),
-                ),
+      body: Stack(
+        children: [
+          // Soft bottom ambient blue & orange wave ribbon matching Mobil POS Login.jpg
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 150,
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _OxoLoginBottomWavesPainter(isDark: isDark),
               ),
             ),
-          );
-        },
+          ),
+          BlocBuilder<AuthCubit, AuthState>(
+            builder: (context, state) {
+              return SafeArea(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 36),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildBrandHeader(),
+                          const SizedBox(height: 18),
+                          _buildModeSwitcher(),
+                          const SizedBox(height: 16),
+                          if (state.errorMessage != null &&
+                              _entryMode == _LoginEntryMode.cloud) ...[
+                            _buildErrorBanner(state.errorMessage!),
+                            const SizedBox(height: 12),
+                          ],
+                          if (_entryMode == _LoginEntryMode.cloud)
+                            _buildCloudLoginSection(state)
+                          else
+                            _buildStandaloneSetupSection(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildBrandHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        gradient: AppColors.executiveNavyGradient,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: AppColors.cardShadow,
-      ),
-      child: Row(
+    final tokens = NusaThemeTokens.of(context);
+    final isDark = tokens.isDark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          NusaBrandLogo(
-            size: 50,
-            borderRadius: 14,
-            padding: const EdgeInsets.all(7),
-            borderColor: Colors.white.withOpacity(0.28),
+          Image.asset(
+            isDark
+                ? 'assets/images/oxo_wordmark_dark.png'
+                : 'assets/images/oxo_wordmark_light.png',
+            height: 44,
+            fit: BoxFit.contain,
+            semanticLabel: 'OXO.ID',
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'NusaCommerce POS',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  _entryMode == _LoginEntryMode.cloud
-                      ? 'Masuk ke server toko Anda untuk sinkronisasi multi-cabang real-time.'
-                      : 'Siap jualan 100% di HP/Tablet tanpa perlu internet, login, atau server.',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          Text(
+            _entryMode == _LoginEntryMode.cloud
+                ? 'Masuk ke server toko Anda untuk\nsinkronisasi multi-cabang real-time'
+                : 'Siap jualan 100% di HP/Tablet tanpa perlu\ninternet, login, atau server.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isDark ? tokens.textSecondary : const Color(0xFF1E293B),
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
             ),
           ),
         ],
@@ -402,31 +418,35 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildModeSwitcher() {
+    final tokens = NusaThemeTokens.of(context);
+    final isDark = tokens.isDark;
     final isCloud = _entryMode == _LoginEntryMode.cloud;
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: AppColors.slate100,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        color: isDark ? tokens.bgElevated : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark ? tokens.borderSubtle : const Color(0xFFE2E8F0),
+          width: tokens.borderWidth,
+        ),
       ),
       child: Row(
         children: [
           Expanded(
             child: _ModeTabButton(
-              icon: Icons.cloud_done_outlined,
+              icon: Icons.storefront_rounded,
               label: 'Akun Cloud Toko',
               selected: isCloud,
-              accentColor: AppColors.primary,
+              accentColor: const Color(0xFF0052FF),
               onTap: () => setState(() => _entryMode = _LoginEntryMode.cloud),
             ),
           ),
           const SizedBox(width: 4),
           Expanded(
             child: _ModeTabButton(
-              icon: Icons.storefront_rounded,
-              label: 'Toko Mandiri (Gratis)',
-              badge: 'Offline',
+              icon: Icons.store_mall_directory_rounded,
+              label: 'Toko Mandiri (Offline)',
               selected: !isCloud,
               accentColor: AppColors.successDark,
               onTap: () =>
@@ -467,6 +487,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildCloudLoginSection(AuthState state) {
+    final tokens = NusaThemeTokens.of(context);
     final previewSlug = _normalizeTenantInput(_tenantController.text);
 
     return Column(
@@ -475,10 +496,10 @@ class _LoginScreenState extends State<LoginScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: tokens.bgSurface,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.border),
-            boxShadow: AppColors.cardShadow,
+            border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
+            boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.cardShadow,
           ),
           child: AutofillGroup(
             child: Column(
@@ -487,31 +508,37 @@ class _LoginScreenState extends State<LoginScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Subdomain / Kode Toko',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: AppColors.navyDark,
+                    Expanded(
+                      child: Text(
+                        'Subdomain / Kode Toko',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: tokens.textPrimary,
+                        ),
                       ),
                     ),
-                    if (previewSlug.isNotEmpty)
+                    if (previewSlug.isNotEmpty) ...[
+                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: AppColors.primarySoft,
+                          color: tokens.accentSoft,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          '$previewSlug.nusco.id',
-                          style: const TextStyle(
+                          '$previewSlug.oxo.id',
+                          style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.primaryDark,
+                            color: tokens.accentDark,
                           ),
                         ),
                       ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 7),
@@ -524,8 +551,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: InputDecoration(
                     hintText: 'Contoh: warungmaju',
                     prefixIcon:
-                        const Icon(Icons.domain_rounded, color: AppColors.primary),
-                    suffixText: '.nusco.id',
+                        const Icon(Icons.storefront_rounded, color: AppColors.primary),
+                    suffixText: '.oxo.id',
                     suffixIcon: _tenantController.text.isNotEmpty
                         ? IconButton(
                             tooltip: 'Bersihkan',
@@ -689,23 +716,27 @@ class _LoginScreenState extends State<LoginScreen> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: tokens.bgSurface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.bolt_rounded, size: 16, color: AppColors.primary),
-                  SizedBox(width: 5),
-                  Text(
-                    'Coba Akun Demo Server (1-Ketuk Masuk)',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.navyDark,
+                  Icon(Icons.bolt_rounded, size: 16, color: tokens.accent),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      'Coba Akun Demo Server (1-Ketuk Masuk)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: tokens.textPrimary,
+                      ),
                     ),
                   ),
                 ],
@@ -1047,7 +1078,6 @@ class _LoginScreenState extends State<LoginScreen> {
 class _ModeTabButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String? badge;
   final bool selected;
   final Color accentColor;
   final VoidCallback onTap;
@@ -1055,7 +1085,6 @@ class _ModeTabButton extends StatelessWidget {
   const _ModeTabButton({
     required this.icon,
     required this.label,
-    this.badge,
     required this.selected,
     required this.accentColor,
     required this.onTap,
@@ -1063,19 +1092,25 @@ class _ModeTabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(999),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: selected ? AppColors.cardShadow : null,
-          border: selected
-              ? Border.all(color: accentColor.withOpacity(0.28))
+          color: selected ? accentColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: selected && !tokens.isDark && !tokens.isHighContrast
+              ? [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.24),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
               : null,
         ),
         child: Row(
@@ -1084,7 +1119,7 @@ class _ModeTabButton extends StatelessWidget {
             Icon(
               icon,
               size: 16,
-              color: selected ? accentColor : AppColors.slate500,
+              color: selected ? Colors.white : tokens.textSecondary,
             ),
             const SizedBox(width: 6),
             Flexible(
@@ -1095,32 +1130,76 @@ class _ModeTabButton extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  color: selected ? AppColors.navyDark : AppColors.slate600,
+                  color: selected ? Colors.white : tokens.textSecondary,
                 ),
               ),
             ),
-            if (badge != null) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: AppColors.successSoft,
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Text(
-                  badge!,
-                  style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.successDark,
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
+}
+
+class _OxoLoginBottomWavesPainter extends CustomPainter {
+  final bool isDark;
+
+  const _OxoLoginBottomWavesPainter({required this.isDark});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final opacityScale = isDark ? 0.16 : 1.0;
+
+    // Flowing blue wave bottom-left
+    final bluePath = Path()
+      ..moveTo(0, size.height * 0.22)
+      ..quadraticBezierTo(
+        size.width * 0.32,
+        size.height * 0.42,
+        size.width * 0.68,
+        size.height,
+      )
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(
+      bluePath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomLeft,
+          end: Alignment.topRight,
+          colors: [
+            const Color(0xFF0052FF).withOpacity(0.42 * opacityScale),
+            const Color(0xFF60A5FA).withOpacity(0.10 * opacityScale),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, size.width * 0.70, size.height)),
+    );
+
+    // Flowing orange wave bottom-right
+    final orangePath = Path()
+      ..moveTo(size.width * 0.44, size.height)
+      ..quadraticBezierTo(
+        size.width * 0.72,
+        size.height * 0.46,
+        size.width,
+        size.height * 0.28,
+      )
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(
+      orangePath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomRight,
+          end: Alignment.topLeft,
+          colors: [
+            const Color(0xFFFF6B00).withOpacity(0.55 * opacityScale),
+            const Color(0xFFFFA94D).withOpacity(0.16 * opacityScale),
+          ],
+        ).createShader(Rect.fromLTWH(size.width * 0.42, 0, size.width * 0.58, size.height)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _OxoLoginBottomWavesPainter oldDelegate) =>
+      oldDelegate.isDark != isDark;
 }

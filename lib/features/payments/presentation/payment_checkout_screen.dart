@@ -10,6 +10,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
@@ -42,7 +43,7 @@ class _MultiTenderLine {
 }
 
 /// LAYAR 4 — PEMBAYARAN / CHECKOUT SCREEN
-/// NusaCommerce Mobile Enterprise Payment Checkout Screen
+/// OXO.ID Mobile Enterprise Payment Checkout Screen
 class PaymentCheckoutScreen extends StatefulWidget {
   final OfflineDatabase offlineDb;
 
@@ -68,6 +69,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   Map<String, dynamic>? _selectedCustomer;
   bool _isSubmitting = false;
   String? _pendingIdempotencyKey;
+  String? _checkoutError;
+  String? _checkoutErrorCode;
 
   // Additional payment sub-options
   String _qrisType = 'Dinamis'; // 'Dinamis' | 'Statis'
@@ -95,12 +98,24 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted && state.isOnline && state.cart.isNotEmpty) {
         final cubit = context.read<PosCubit>();
+        final initialGrand = _activeCheckoutTotal(cubit.state);
         final serverData = await cubit.verifyServerCartPrice(
           customerId: (state.selectedCustomer?['id'] as num?)?.toInt(),
           redeemPoints: state.redeemedLoyaltyPoints,
         );
         if (mounted && serverData != null) {
           cubit.reconcileCartWithLatestCatalog(serverPriceData: serverData);
+          final nextGrand = _activeCheckoutTotal(cubit.state);
+          if ((nextGrand - initialGrand).abs() > 0.005) {
+            setState(() {
+              _syncAmountToTotal(nextGrand);
+              if (_selectedMethodCode == 'cash' && !_isSplitPayment && !_useStoreCredit) {
+                _amountPaidController.text = IdrCurrencyFormatter.format(
+                  _netTotalAfterStoreCredit(nextGrand),
+                );
+              }
+            });
+          }
         }
       }
     });
@@ -143,10 +158,20 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       double total = 0.0;
       for (final idx in _splitItemIndices!) {
         if (idx >= 0 && idx < posState.cart.length) {
-          total += posState.cart[idx].lineTotal;
+          final item = posState.cart[idx];
+          total += item.lineTotal;
+          if (!item.isExchangeReturn &&
+              !item.product.taxInclusive &&
+              item.product.taxRate > 0) {
+            final lineTax =
+                ((item.lineTotal * (item.product.taxRate / 100.0)) * 10000.0)
+                        .roundToDouble() /
+                    10000.0;
+            total += lineTax;
+          }
         }
       }
-      return total;
+      return (total * 10000.0).roundToDouble() / 10000.0;
     }
     return posState.grandTotal;
   }
@@ -353,7 +378,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -482,7 +507,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -557,12 +582,16 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: [
-                                  for (final n in [2, 3, 4, 5])
+                                  for (final n in [2, 3, 4, 5, 6])
                                     NusaPillFilter(
                                       label: '$n Orang',
                                       selected: equalPeople == n,
                                       onTap: () => setModalState(() => equalPeople = n),
                                     ),
+                                  ActionChip(
+                                    label: const Text('+1 Orang', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                    onPressed: () => setModalState(() => equalPeople = (equalPeople + 1).clamp(2, 20)),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 16),
@@ -700,7 +729,11 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   Future<void> _submitPayment(double grandTotal) async {
     final posCubit = context.read<PosCubit>();
     if (_isSubmitting || posCubit.isCheckoutInProgress) return;
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _checkoutError = null;
+      _checkoutErrorCode = null;
+    });
 
     try {
       final rxWarning = posCubit.validatePrescriptionRequirements();
@@ -909,15 +942,21 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       if (mounted) {
         context.pushReplacement('/pos/receipt', extra: enrichedReceipt);
       }
+    } on CheckoutServerException catch (e) {
+      if (mounted) {
+        PosFeedback.onGuardBlocked();
+        setState(() {
+          _checkoutError = e.message;
+          _checkoutErrorCode = e.errorCode;
+        });
+      }
     } catch (e) {
       if (mounted) {
         PosFeedback.onGuardBlocked();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.danger,
-            content: Text('Gagal memproses transaksi: $e'),
-          ),
-        );
+        setState(() {
+          _checkoutError = 'Gagal memproses transaksi: $e';
+          _checkoutErrorCode = null;
+        });
       }
     } finally {
       if (mounted) {
@@ -943,12 +982,13 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       context: rootContext,
       isScrollControlled: true,
       isDismissible: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(rootContext).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (modalCtx) => StatefulBuilder(
         builder: (modalCtx, setModalState) {
+          final tokens = NusaThemeTokens.of(modalCtx);
           if (!timersStarted) {
             timersStarted = true;
             countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -986,10 +1026,15 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'QRIS Dinamis Nusantara',
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                      Expanded(
+                        child: Text(
+                          'QRIS Dinamis OXO.ID',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: tokens.textPrimary),
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       NusaBadge(
                         label: 'Sisa Waktu $mm:$ss',
                         variant: remainingSeconds > 60
@@ -999,22 +1044,24 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  NusaPriceTag(amount: netDue, fontSize: 22, color: AppColors.primary),
+                  NusaPriceTag(amount: netDue, fontSize: 22, color: tokens.accent),
                   const SizedBox(height: 12),
+                  // QR Code itself stays on crisp white scan canvas for camera readability
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: AppColors.background,
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: AppColors.border, width: 1.5),
+                      border: Border.all(color: tokens.borderDefault, width: 1.5),
                     ),
                     child: const Column(
                       children: [
-                        Icon(Icons.qr_code_2_rounded, size: 148, color: AppColors.navyDark),
+                        Icon(Icons.qr_code_2_rounded, size: 148, color: Color(0xFF1C1917)),
                         SizedBox(height: 6),
                         Text(
                           'QRIS STANDAR PEMBAYARAN NASIONAL (GPN / BI)',
-                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.slate600),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFF475569)),
                         ),
                       ],
                     ),
@@ -1024,7 +1071,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
+                      color: tokens.accentSoft,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
@@ -1089,6 +1136,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final posState = context.watch<PosCubit>().state;
     final grandTotal = _activeCheckoutTotal(posState);
     final availStoreCredit = _availableStoreCredit(_selectedCustomer);
@@ -1103,9 +1151,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         !_isKasbonMode && !_isSplitPayment && netDue > 0.5 && _paidAmount < netDue - 0.5;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: tokens.bgPage,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: tokens.bgSurface,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -1118,12 +1166,19 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
               padding: const EdgeInsets.only(right: 8),
               child: TextButton.icon(
                 onPressed: () => _showSplitBillModal(posState),
-                icon: const Icon(Icons.receipt_long_rounded, size: 18, color: AppColors.primary),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: const Size(44, 40),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(Icons.receipt_long_rounded, size: 17, color: tokens.accent),
                 label: Text(
                   _splitItemIndices != null
                       ? 'Split (${_splitItemIndices!.length})'
                       : (_splitEqualPeople > 1 ? '÷$_splitEqualPeople' : 'Split Bill'),
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w800, color: tokens.accent),
                 ),
               ),
             ),
@@ -1138,15 +1193,19 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
               // 1. Executive Total Tagihan + Collapsible Rincian Item Card
               NusaCard(
                 padding: EdgeInsets.zero,
-                borderColor: AppColors.navyDark.withOpacity(0.15),
+                borderColor: tokens.borderSubtle,
                 child: Column(
                   children: [
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-                      decoration: const BoxDecoration(
-                        gradient: AppColors.heroNavyGradient,
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: tokens.heroGradientColors,
+                        ),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
                       ),
                       child: Column(
                         children: [
@@ -1177,6 +1236,17 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                             fontWeight: FontWeight.w900,
                             color: Colors.white,
                           ),
+                          if (posState.exclusiveTaxTotal > 0 && _splitOverrideGrandTotal == null) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Subtotal ${IdrCurrencyFormatter.format((posState.subtotal - posState.totalDiscount).clamp(0, double.infinity))} + Pajak ${IdrCurrencyFormatter.format(posState.exclusiveTaxTotal)}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFCBD5E1),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1189,24 +1259,24 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         child: Row(
                           children: [
-                            const Icon(Icons.shopping_bag_outlined, size: 17, color: AppColors.primary),
+                            Icon(Icons.shopping_bag_outlined, size: 17, color: tokens.accent),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'Rincian Belanja (${IdrCurrencyFormatter.formatQty(posState.totalItemsCount)} item)',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
-                                  color: AppColors.navyDark,
+                                  color: tokens.textPrimary,
                                 ),
                               ),
                             ),
                             Text(
                               _isCartSummaryExpanded ? 'Tutup' : 'Edit / Lihat',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.primary,
+                                color: tokens.accent,
                               ),
                             ),
                             const SizedBox(width: 4),
@@ -1215,7 +1285,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                                   ? Icons.keyboard_arrow_up_rounded
                                   : Icons.keyboard_arrow_down_rounded,
                               size: 20,
-                              color: AppColors.primary,
+                              color: tokens.accent,
                             ),
                           ],
                         ),
@@ -1495,12 +1565,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
               const SizedBox(height: 18),
 
               // 2. Explicit 6 Payment Methods Grid
-              const Text(
+              Text(
                 'Pilih Metode Pembayaran',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.navyDark,
+                  color: tokens.textPrimary,
                 ),
               ),
               const SizedBox(height: 10),
@@ -1607,7 +1677,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'QRIS $_qrisType NusaCommerce',
+                                  'QRIS $_qrisType OXO.ID',
                                   style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
                                 ),
                                 Text(
@@ -1649,7 +1719,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
-                        children: ['BCA', 'Mandiri', 'BRI', 'BNI'].map((bank) {
+                        children: ['BCA', 'Mandiri', 'BRI', 'BNI', 'BSI', 'CIMB Niaga'].map((bank) {
                           return NusaPillFilter(
                             label: bank,
                             selected: _selectedBank == bank,
@@ -1824,9 +1894,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                           icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
                           label: const Text('+ Tambah Metode Pembayaran'),
                           style: OutlinedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: AppColors.primary,
-                            side: BorderSide(color: AppColors.primary.withOpacity(0.4)),
+                            backgroundColor: tokens.bgSurface,
+                            foregroundColor: tokens.accent,
+                            side: BorderSide(color: tokens.accent.withOpacity(0.5)),
                           ),
                         ),
                       ),
@@ -2076,12 +2146,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Nominal Diterima (Rp)',
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.navyDark,
+                          color: tokens.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -2089,12 +2159,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                         controller: _amountPaidController,
                         keyboardType: TextInputType.number,
                         onChanged: (_) => setState(() {}),
-                        style: AppTheme.moneyStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                        style: AppTheme.moneyStyle(fontSize: 22, fontWeight: FontWeight.w800, color: tokens.textPrimary),
                         decoration: InputDecoration(
                           filled: true,
-                          fillColor: AppColors.background,
+                          fillColor: tokens.bgElevated,
                           suffixIcon: IconButton(
-                            icon: const Icon(Icons.cancel_rounded, color: AppColors.slate400),
+                            icon: Icon(Icons.cancel_rounded, color: tokens.textTertiary),
                             onPressed: () {
                               setState(() {
                                 _amountPaidController.text = 'Rp 0';
@@ -2113,26 +2183,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                             selected: (_paidAmount - netDue).abs() < 0.5,
                             onTap: () => _setQuickCashAmount(netDue),
                           ),
-                          NusaPillFilter(
-                            label: 'Rp 20.000',
-                            selected: _paidAmount == 20000,
-                            onTap: () => _setQuickCashAmount(20000),
-                          ),
-                          NusaPillFilter(
-                            label: 'Rp 50.000',
-                            selected: _paidAmount == 50000,
-                            onTap: () => _setQuickCashAmount(50000),
-                          ),
-                          NusaPillFilter(
-                            label: 'Rp 100.000',
-                            selected: _paidAmount == 100000,
-                            onTap: () => _setQuickCashAmount(100000),
-                          ),
-                          NusaPillFilter(
-                            label: 'Rp 200.000',
-                            selected: _paidAmount == 200000,
-                            onTap: () => _setQuickCashAmount(200000),
-                          ),
+                          for (final denom in _smartCashDenominations(netDue))
+                            NusaPillFilter(
+                              label: IdrCurrencyFormatter.format(denom),
+                              selected: (_paidAmount - denom).abs() < 0.5,
+                              onTap: () => _setQuickCashAmount(denom),
+                            ),
                         ],
                       ),
                     ],
@@ -2146,9 +2202,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: const Border(top: BorderSide(color: AppColors.border)),
-          boxShadow: AppColors.floatingCartShadow,
+          color: tokens.bgSurface,
+          border: Border(top: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
+          boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.floatingCartShadow,
         ),
         child: SafeArea(
           top: false,
@@ -2263,6 +2319,75 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                       ],
                     ),
                   ),
+                  if (_checkoutError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.danger.withOpacity(0.45)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.error_outline_rounded, size: 18, color: AppColors.danger),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _checkoutError!,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.dangerDark,
+                                  ),
+                                ),
+                              ),
+                              InkWell(
+                                onTap: () => setState(() {
+                                  _checkoutError = null;
+                                  _checkoutErrorCode = null;
+                                }),
+                                child: const Icon(Icons.close_rounded, size: 17, color: AppColors.dangerDark),
+                              ),
+                            ],
+                          ),
+                          if (_checkoutErrorCode == 'ShiftRequired' ||
+                              _checkoutError!.toLowerCase().contains('shift')) ...[
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () async {
+                                  await context.push('/shifts');
+                                  if (mounted) {
+                                    setState(() {
+                                      _checkoutError = null;
+                                      _checkoutErrorCode = null;
+                                    });
+                                  }
+                                },
+                                icon: const Icon(Icons.lock_open_rounded, size: 16),
+                                label: const Text(
+                                  'Buka Shift Kasir Sekarang',
+                                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.primaryDark,
+                                  backgroundColor: Colors.white,
+                                  side: const BorderSide(color: AppColors.primary),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   NusaButton(
                     label: _isSubmitting ? 'Memproses...' : 'Selesaikan Pembayaran',
@@ -2288,7 +2413,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     final subOptions = line.methodCode == 'qris'
         ? const ['Dinamis', 'Statis']
         : (line.methodCode == 'transfer'
-            ? const ['BCA', 'Mandiri', 'BRI', 'BNI']
+            ? const ['BCA', 'Mandiri', 'BRI', 'BNI', 'BSI', 'CIMB Niaga']
             : (line.methodCode == 'card' ? const ['Debit', 'Kredit'] : const <String>[]));
 
     return Container(
@@ -2392,6 +2517,22 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     );
   }
 
+  List<double> _smartCashDenominations(double netDue) {
+    final set = <double>{50000, 100000, 200000};
+    if (netDue > 0) {
+      final rounded10k = ((netDue / 10000).ceil() * 10000).toDouble();
+      final rounded50k = ((netDue / 50000).ceil() * 50000).toDouble();
+      final rounded100k = ((netDue / 100000).ceil() * 100000).toDouble();
+      if (rounded10k > netDue) set.add(rounded10k);
+      if (rounded50k > netDue) set.add(rounded50k);
+      if (rounded100k > netDue) set.add(rounded100k);
+    } else {
+      set.add(20000);
+    }
+    final sorted = set.toList()..sort();
+    return sorted.take(5).toList();
+  }
+
   Widget _buildPaymentMethodCard({
     required String code,
     required String label,
@@ -2399,8 +2540,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     required double grandTotal,
     Color? accentColor,
   }) {
+    final tokens = NusaThemeTokens.of(context);
     final isSelected = _selectedMethodCode == code;
-    final activeColor = accentColor ?? AppColors.primary;
+    final activeColor = accentColor ?? tokens.accent;
 
     return InkWell(
       onTap: () => _selectPaymentMethod(code, label, grandTotal),
@@ -2408,11 +2550,11 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? activeColor.withOpacity(0.1) : Colors.white,
+          color: isSelected ? activeColor.withOpacity(tokens.isDark ? 0.2 : 0.1) : tokens.bgSurface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? activeColor : AppColors.border,
-            width: isSelected ? 1.8 : 1.0,
+            color: isSelected ? activeColor : tokens.borderSubtle,
+            width: isSelected ? (tokens.isHighContrast ? 2.2 : 1.8) : tokens.borderWidth,
           ),
         ),
         child: Row(
@@ -2421,7 +2563,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
             Icon(
               icon,
               size: 22,
-              color: isSelected ? activeColor : AppColors.navyMid,
+              color: isSelected ? activeColor : tokens.textPrimary,
             ),
             const SizedBox(width: 8),
             Flexible(
@@ -2432,7 +2574,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
-                  color: isSelected ? activeColor : AppColors.navyDark,
+                  color: isSelected ? activeColor : tokens.textPrimary,
                 ),
               ),
             ),

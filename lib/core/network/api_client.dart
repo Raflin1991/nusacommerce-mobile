@@ -2,12 +2,16 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../constants/api_endpoints.dart';
+import 'edge_discovery_service.dart';
 
 class ApiClient {
+  static const Uuid _uuid = Uuid();
   late final Dio dio;
   final FlutterSecureStorage _secureStorage;
   final SharedPreferences _prefs;
+  late final EdgeDiscoveryService edgeDiscovery;
 
   static const String _keyToken = 'nusa_mobile_bearer_token';
   static const String _keyTenantSlug = 'nusa_mobile_tenant_slug';
@@ -16,13 +20,16 @@ class ApiClient {
 
   bool isOnline = true;
   String? _cachedToken;
+  String? lastLeaseState;
   VoidCallback? onUnauthorized;
 
   ApiClient({
     required FlutterSecureStorage secureStorage,
     required SharedPreferences prefs,
+    EdgeDiscoveryService? edgeDiscovery,
   })  : _secureStorage = secureStorage,
         _prefs = prefs {
+    this.edgeDiscovery = edgeDiscovery ?? EdgeDiscoveryService(prefs);
     final storedToken = _prefs.getString(_keyToken);
     if (_isValidTokenFormat(storedToken)) {
       _cachedToken = storedToken;
@@ -68,16 +75,35 @@ class ApiClient {
           if (storeId != null) {
             options.headers['X-Store-Id'] = storeId.toString();
           }
+          options.headers['X-Edge-Node-Code'] = this.edgeDiscovery.getMobileNodeCode();
+          final method = options.method.toUpperCase();
+          if ((method == 'POST' ||
+                  method == 'PUT' ||
+                  method == 'PATCH' ||
+                  method == 'DELETE') &&
+              !options.headers.containsKey('X-Idempotency-Key') &&
+              !options.headers.containsKey('x-idempotency-key')) {
+            options.headers['X-Idempotency-Key'] = _uuid.v4();
+          }
           handler.next(options);
         },
         onResponse: (response, handler) {
           isOnline = true;
+          final leaseHeader = response.headers.value('x-edge-lease-state');
+          if (leaseHeader != null && leaseHeader.isNotEmpty) {
+            lastLeaseState = leaseHeader;
+          }
           handler.next(response);
         },
         onError: (DioException e, handler) {
-          if (e.type == DioExceptionType.connectionError ||
-              e.type == DioExceptionType.connectionTimeout) {
+          final leaseHeader = e.response?.headers.value('x-edge-lease-state');
+          if (leaseHeader != null && leaseHeader.isNotEmpty) {
+            lastLeaseState = leaseHeader;
+          }
+          if (isNetworkOfflineError(e)) {
             isOnline = false;
+          } else if (e.response != null) {
+            isOnline = true;
           }
           // Jangan pernah melakukan auto-logout / memicu "Sesi login telah berakhir"
           // pada background request atau saat mode lokal mandiri aktif.
@@ -101,6 +127,24 @@ class ApiClient {
     final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');
     dio.options.baseUrl = cleaned;
     await _prefs.setString(_keyBaseUrl, cleaned);
+    await edgeDiscovery.setCloudBaseUrl(cleaned);
+  }
+
+  Future<void> setEdgeBaseUrl(String? url) async {
+    await edgeDiscovery.setEdgeBaseUrl(url);
+  }
+
+  String? getEdgeBaseUrl() => edgeDiscovery.getEdgeBaseUrl();
+
+  Future<EdgeConnectionTier> switchToBestEndpoint({Dio? probeDio}) async {
+    final tier = await edgeDiscovery.probeBestTier(probeDio: probeDio);
+    if (tier == EdgeConnectionTier.deviceSqlite) {
+      isOnline = false;
+    } else {
+      isOnline = true;
+      dio.options.baseUrl = edgeDiscovery.activeBaseUrlForTier(tier);
+    }
+    return tier;
   }
 
   /// Normalizes product/catalog image URLs so they work on BOTH:
@@ -215,12 +259,33 @@ class ApiClient {
 
   int? getActiveStoreId() => _prefs.getInt(_keyStoreId);
 
+  /// Distinguish true offline/network errors from HTTP 4xx/5xx validation/permission rejections.
+  static bool isNetworkOfflineError(Object error) {
+    if (error is DioException) {
+      final resp = error.response;
+      if (resp == null ||
+          error.type == DioExceptionType.connectionError ||
+          error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.receiveTimeout) {
+        return true;
+      }
+      if (resp.statusCode == 400 &&
+          (resp.data == null || resp.data.toString().trim().isEmpty) &&
+          resp.headers.map.isEmpty) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Extract user-friendly Indonesian error message from DioException
   static String extractErrorMessage(Object error) {
     if (error is DioException) {
+      final statusCode = error.response?.statusCode;
       final data = error.response?.data;
       if (data is Map<String, dynamic>) {
-        if (data['message'] != null) {
+        if (data['message'] != null && data['message'].toString().trim().isNotEmpty) {
           return data['message'].toString();
         }
         if (data['errors'] is Map) {
@@ -230,11 +295,17 @@ class ApiClient {
           }
         }
       }
+      if (statusCode == 402) {
+        return 'Lisensi node cabang masuk mode Baca-Saja. Lunasi tagihan atau pindai QR Perpanjangan Offline.';
+      }
+      if (statusCode == 423) {
+        return 'Node cabang terkunci karena perubahan hardware atau jam sistem dimundurkan.';
+      }
       if (error.type == DioExceptionType.connectionError ||
           error.type == DioExceptionType.connectionTimeout) {
-        return 'Tidak dapat terhubung ke server Cloud. Mode Offline-First aktif.';
+        return 'Tidak dapat terhubung ke server Edge/Cloud. Mode Offline-First aktif.';
       }
-      return 'Terjadi kesalahan jaringan (${error.response?.statusCode ?? 'Timeout'}).';
+      return 'Terjadi kesalahan jaringan (${statusCode ?? 'Timeout'}).';
     }
     return error.toString();
   }

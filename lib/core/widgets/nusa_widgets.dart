@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/nusa_theme_tokens.dart';
 import '../utils/currency_formatter.dart';
 
 /// NusaCommerce Enterprise Design System — Atomic Reusable Widgets
@@ -32,15 +33,19 @@ class NusaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final radius = BorderRadius.circular(borderRadius);
+    final effectiveBorderWidth = tokens.isHighContrast && borderWidth < tokens.borderWidth
+        ? tokens.borderWidth
+        : borderWidth;
     final decoration = BoxDecoration(
-      color: backgroundColor ?? AppColors.surface,
+      color: backgroundColor ?? tokens.bgSurface,
       borderRadius: radius,
       border: Border.all(
-        color: borderColor ?? AppColors.border,
-        width: borderWidth,
+        color: borderColor ?? tokens.borderSubtle,
+        width: effectiveBorderWidth,
       ),
-      boxShadow: elevated ? AppColors.cardShadow : null,
+      boxShadow: elevated && !tokens.isHighContrast ? AppColors.cardShadow : null,
     );
 
     final content = Container(
@@ -94,6 +99,7 @@ class NusaButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final disabled = onPressed == null || isLoading;
     Color bg;
     Color fg;
@@ -101,29 +107,32 @@ class NusaButton extends StatelessWidget {
 
     switch (variant) {
       case NusaButtonVariant.primary:
-        bg = AppColors.primary;
+        bg = tokens.accent;
         fg = Colors.white;
         break;
       case NusaButtonVariant.success:
-        bg = AppColors.successDark;
+        bg = tokens.positive;
         fg = Colors.white;
         break;
       case NusaButtonVariant.warning:
-        bg = AppColors.warningDark;
+        bg = tokens.warning;
         fg = Colors.white;
         break;
       case NusaButtonVariant.danger:
-        bg = AppColors.dangerDark;
+        bg = tokens.danger;
         fg = Colors.white;
         break;
       case NusaButtonVariant.outline:
-        bg = Colors.white;
-        fg = AppColors.navyDark;
-        border = const BorderSide(color: AppColors.border, width: 1.2);
+        bg = tokens.bgSurface;
+        fg = tokens.textPrimary;
+        border = BorderSide(
+          color: tokens.isHighContrast ? tokens.borderDefault : tokens.borderSubtle,
+          width: tokens.isHighContrast ? tokens.borderWidth : 1.2,
+        );
         break;
       case NusaButtonVariant.ghost:
-        bg = AppColors.primarySoft;
-        fg = AppColors.primary;
+        bg = tokens.accentSoft;
+        fg = tokens.accent;
         break;
     }
 
@@ -210,33 +219,34 @@ class NusaBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     late Color bg;
     late Color fg;
 
     switch (variant) {
       case NusaBadgeVariant.primary:
-        bg = AppColors.primarySoft;
-        fg = AppColors.primary;
+        bg = tokens.accentSoft;
+        fg = tokens.accent;
         break;
       case NusaBadgeVariant.success:
-        bg = AppColors.successSoft;
-        fg = AppColors.successDark;
+        bg = tokens.positiveSoft;
+        fg = tokens.positive;
         break;
       case NusaBadgeVariant.warning:
-        bg = AppColors.warningSoft;
-        fg = AppColors.warningDark;
+        bg = tokens.warningSoft;
+        fg = tokens.warning;
         break;
       case NusaBadgeVariant.danger:
-        bg = AppColors.dangerSoft;
-        fg = AppColors.dangerDark;
+        bg = tokens.dangerSoft;
+        fg = tokens.danger;
         break;
       case NusaBadgeVariant.navy:
-        bg = AppColors.navyDark;
+        bg = tokens.isDark ? tokens.bgElevated : tokens.textPrimary;
         fg = Colors.white;
         break;
       case NusaBadgeVariant.neutral:
-        bg = const Color(0xFFF1F5F9);
-        fg = AppColors.slate700;
+        bg = tokens.bgElevated;
+        fg = tokens.textSecondary;
         break;
     }
 
@@ -253,15 +263,17 @@ class NusaBadge extends StatelessWidget {
             Icon(icon, size: fontSize + 1.5, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: fontSize,
-              fontWeight: FontWeight.w700,
-              color: fg,
-              height: 1.15,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w700,
+                color: fg,
+                height: 1.15,
+              ),
             ),
           ),
         ],
@@ -288,9 +300,10 @@ class NusaEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -298,29 +311,29 @@ class NusaEmptyState extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+                color: tokens.bgElevated,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
               ),
-              child: Icon(icon, size: 30, color: AppColors.slate500),
+              child: Icon(icon, size: 30, color: tokens.textSecondary),
             ),
             const SizedBox(height: 14),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: AppColors.navyDark,
+                color: tokens.textPrimary,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
-                color: AppColors.slate500,
+                color: tokens.textSecondary,
                 height: 1.4,
               ),
             ),
@@ -344,41 +357,55 @@ class NusaPriceTag extends StatelessWidget {
   final dynamic amount;
   final double fontSize;
   final FontWeight fontWeight;
-  final Color color;
+  final Color? color;
   final bool compact;
   final bool strikethrough;
   final String? prefix;
+  final bool fitWidth;
 
   const NusaPriceTag({
     super.key,
     required this.amount,
     this.fontSize = 14,
     this.fontWeight = FontWeight.w800,
-    this.color = AppColors.navyDark,
+    this.color,
     this.compact = false,
     this.strikethrough = false,
     this.prefix,
+    this.fitWidth = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final effectiveColor = color ?? NusaThemeTokens.of(context).textPrimary;
     final formatted = compact
         ? IdrCurrencyFormatter.formatCompact(amount)
         : IdrCurrencyFormatter.format(amount);
     final text = prefix != null ? '$prefix$formatted' : formatted;
 
-    return Text(
+    final widget = Text(
       text,
       maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+      overflow: fitWidth ? TextOverflow.visible : TextOverflow.ellipsis,
+      softWrap: false,
       style: AppTheme.moneyStyle(
         fontSize: fontSize,
         fontWeight: fontWeight,
-        color: color,
+        color: effectiveColor,
       ).copyWith(
         decoration: strikethrough ? TextDecoration.lineThrough : null,
       ),
     );
+
+    if (fitWidth) {
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: widget,
+      );
+    }
+
+    return widget;
   }
 }
 
@@ -401,7 +428,8 @@ class NusaPillFilter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeBg = selectedColor ?? AppColors.primary;
+    final tokens = NusaThemeTokens.of(context);
+    final activeBg = selectedColor ?? tokens.accent;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -412,10 +440,11 @@ class NusaPillFilter extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 36),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: selected ? activeBg : const Color(0xFFF1F5F9),
+            color: selected ? activeBg : tokens.bgElevated,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? activeBg : AppColors.border,
+              color: selected ? activeBg : tokens.borderSubtle,
+              width: tokens.borderWidth,
             ),
           ),
           child: Row(
@@ -425,16 +454,20 @@ class NusaPillFilter extends StatelessWidget {
                 Icon(
                   icon,
                   size: 14,
-                  color: selected ? Colors.white : AppColors.slate600,
+                  color: selected ? Colors.white : tokens.textSecondary,
                 ),
                 const SizedBox(width: 6),
               ],
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? Colors.white : AppColors.slate700,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : tokens.textPrimary,
+                  ),
                 ),
               ),
             ],
@@ -464,27 +497,33 @@ class NusaSyncStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final Color bg;
     final Color border;
     final Color fg;
     final String label;
 
     if (isSyncing) {
-      bg = AppColors.primarySoft;
-      border = AppColors.primary.withOpacity(0.35);
-      fg = AppColors.primaryDark;
+      bg = tokens.accentSoft;
+      border = tokens.accent.withOpacity(tokens.isHighContrast ? 0.9 : 0.35);
+      fg = tokens.accentDark;
       label = 'Menyinkronkan Nota ke Cloud...';
-    } else if (!isOnline || offlinePendingCount > 0) {
-      bg = AppColors.warningSoft;
-      border = AppColors.warning.withOpacity(0.45);
-      fg = AppColors.warningDark;
-      label = !isOnline
+    } else if (!isOnline) {
+      bg = tokens.warningSoft;
+      border = tokens.warning.withOpacity(tokens.isHighContrast ? 0.9 : 0.45);
+      fg = tokens.warning;
+      label = offlinePendingCount > 0
           ? 'Offline • $offlinePendingCount Nota Tersimpan di HP'
-          : 'Offline • $offlinePendingCount Nota Tersimpan di HP';
+          : 'Offline • Mode Lokal Aktif';
+    } else if (offlinePendingCount > 0) {
+      bg = tokens.warningSoft;
+      border = tokens.warning.withOpacity(tokens.isHighContrast ? 0.9 : 0.45);
+      fg = tokens.warning;
+      label = 'Online • $offlinePendingCount Nota Menunggu Sinkron';
     } else {
-      bg = AppColors.successSoft;
-      border = AppColors.success.withOpacity(0.35);
-      fg = AppColors.successDark;
+      bg = tokens.positiveSoft;
+      border = tokens.positive.withOpacity(tokens.isHighContrast ? 0.9 : 0.35);
+      fg = tokens.positive;
       label = 'Online • Tersinkron';
     }
 
@@ -537,8 +576,9 @@ class NusaSyncStatusPill extends StatelessWidget {
   }
 }
 
-/// Self-contained official NusaCommerce 3D ribbon "N" logo widget rendered directly
-/// via CustomPainter so Web hot-restart and Android APK never suffer asset 404 errors.
+/// Self-contained official OXO.ID transparent Infinity logo widget.
+/// Renders the official high-resolution transparent OXO Infinity emblem with
+/// a crisp vector fallback painter — zero dark/black box on Light Theme.
 class NusaBrandLogo extends StatelessWidget {
   final double size;
   final double borderRadius;
@@ -551,172 +591,96 @@ class NusaBrandLogo extends StatelessWidget {
     super.key,
     this.size = 52,
     this.borderRadius = 14,
-    this.padding = const EdgeInsets.all(7),
-    this.backgroundColor = Colors.white,
-    this.borderColor = AppColors.border,
+    this.padding = EdgeInsets.zero,
+    this.backgroundColor = Colors.transparent,
+    this.borderColor = Colors.transparent,
     this.boxShadow,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasBox = backgroundColor != Colors.transparent ||
+        borderColor != Colors.transparent ||
+        (boxShadow != null && boxShadow!.isNotEmpty);
+
     return Container(
       width: size,
       height: size,
       padding: padding,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: borderColor),
-        boxShadow: boxShadow,
-      ),
-      child: const CustomPaint(
-        painter: _NusaRibbonLogoPainter(),
+      decoration: hasBox
+          ? BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(borderRadius),
+              border: borderColor != Colors.transparent
+                  ? Border.all(color: borderColor)
+                  : null,
+              boxShadow: boxShadow,
+            )
+          : null,
+      child: Image.asset(
+        'assets/images/oxo_icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Padding(
+          padding: EdgeInsets.all(4),
+          child: CustomPaint(
+            painter: _OxoInfinityLogoPainter(),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _NusaRibbonLogoPainter extends CustomPainter {
-  const _NusaRibbonLogoPainter();
+class _OxoInfinityLogoPainter extends CustomPainter {
+  const _OxoInfinityLogoPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    final strokeW = w * 0.16;
 
-    Offset pt(double x, double y) => Offset(x * w, y * h);
+    final leftLoop = Path()
+      ..moveTo(w * 0.50, h * 0.50)
+      ..cubicTo(w * 0.34, h * 0.18, w * 0.08, h * 0.20, w * 0.08, h * 0.50)
+      ..cubicTo(w * 0.08, h * 0.80, w * 0.34, h * 0.82, w * 0.50, h * 0.50);
 
-    // 1. Left vertical pillar (behind the top-left arch)
-    final leftPillar = Path()
-      ..moveTo(0.03 * w, 0.21 * h)
-      ..lineTo(0.03 * w, 0.955 * h)
-      ..quadraticBezierTo(0.03 * w, 0.978 * h, 0.058 * w, 0.962 * h)
-      ..lineTo(0.225 * w, 0.858 * h)
-      ..quadraticBezierTo(0.252 * w, 0.838 * h, 0.252 * w, 0.785 * h)
-      ..lineTo(0.252 * w, 0.16 * h)
-      ..close();
+    final rightLoop = Path()
+      ..moveTo(w * 0.50, h * 0.50)
+      ..cubicTo(w * 0.66, h * 0.18, w * 0.92, h * 0.20, w * 0.92, h * 0.50)
+      ..cubicTo(w * 0.92, h * 0.80, w * 0.66, h * 0.82, w * 0.50, h * 0.50);
 
-    final leftPaint = Paint()
+    final infinityPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeW
+      ..strokeCap = StrokeCap.round
       ..shader = const LinearGradient(
-        begin: Alignment.bottomLeft,
-        end: Alignment.topRight,
-        colors: [
-          Color(0xFF00E1FF),
-          Color(0xFF0297E6),
-          Color(0xFF0C348F),
-        ],
-        stops: [0.0, 0.58, 1.0],
+        colors: [Color(0xFF00E5FF), Color(0xFF0055FF), Color(0xFF00C2FF)],
       ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(leftPillar, leftPaint);
 
-    // Subtle sheen near bottom-left bevel of left pillar
-    final leftLowerSheen = Path()
-      ..moveTo(0.03 * w, 0.76 * h)
-      ..lineTo(0.252 * w, 0.56 * h)
-      ..lineTo(0.252 * w, 0.785 * h)
-      ..quadraticBezierTo(0.252 * w, 0.838 * h, 0.225 * w, 0.858 * h)
-      ..lineTo(0.058 * w, 0.962 * h)
-      ..quadraticBezierTo(0.03 * w, 0.978 * h, 0.03 * w, 0.955 * h)
-      ..close();
-    canvas.drawPath(
-      leftLowerSheen,
-      Paint()..color = const Color(0xFF38BDF8).withOpacity(0.18),
-    );
+    canvas.drawPath(leftLoop, infinityPaint);
+    canvas.drawPath(rightLoop, infinityPaint);
 
-    // 2. Right vertical pillar (mirrored top-right bevel tip)
-    final rightPillar = Path()
-      ..moveTo(0.97 * w, 0.79 * h)
-      ..lineTo(0.97 * w, 0.045 * h)
-      ..quadraticBezierTo(0.97 * w, 0.022 * h, 0.942 * w, 0.038 * h)
-      ..lineTo(0.775 * w, 0.142 * h)
-      ..quadraticBezierTo(0.748 * w, 0.162 * h, 0.748 * w, 0.215 * h)
-      ..lineTo(0.748 * w, 0.84 * h)
+    // Warm Amber/Orange center diamond
+    final diamond = Path()
+      ..moveTo(w * 0.50, h * 0.34)
+      ..lineTo(w * 0.63, h * 0.50)
+      ..lineTo(w * 0.50, h * 0.66)
+      ..lineTo(w * 0.37, h * 0.50)
       ..close();
 
-    final rightPaint = Paint()
+    final diamondPaint = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
-        end: Alignment.bottomRight,
-        colors: [
-          Color(0xFF1D4ED8),
-          Color(0xFF0F258C),
-          Color(0xFF0A4DA2),
-        ],
-        stops: [0.0, 0.65, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(rightPillar, rightPaint);
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFFFFD000), Color(0xFFFF6D00)],
+      ).createShader(Rect.fromLTWH(w * 0.35, h * 0.34, w * 0.30, h * 0.32));
 
-    // 3. Lower / inner folded S-band creating 3D ribbon depth
-    final underBand = Path()
-      ..moveTo(0.19 * w, 0.17 * h)
-      ..cubicTo(0.25 * w, 0.25 * h, 0.32 * w, 0.35 * h, 0.33 * w, 0.56 * h)
-      ..quadraticBezierTo(0.335 * w, 0.635 * h, 0.39 * w, 0.695 * h)
-      ..lineTo(0.61 * w, 0.915 * h)
-      ..cubicTo(0.73 * w, 1.01 * h, 0.94 * w, 0.97 * h, 0.97 * w, 0.76 * h)
-      ..cubicTo(0.93 * w, 0.86 * h, 0.78 * w, 0.86 * h, 0.66 * w, 0.74 * h)
-      ..lineTo(0.35 * w, 0.38 * h)
-      ..close();
-
-    final underPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Color(0xFF0E47B5),
-          Color(0xFF0284C7),
-          Color(0xFF0F1F7A),
-        ],
-        stops: [0.0, 0.55, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(underBand, underPaint);
-
-    // 4. Primary luminous top-left to bottom-right ribbon crest
-    final frontRibbon = Path()
-      ..moveTo(0.03 * w, 0.21 * h)
-      ..cubicTo(0.025 * w, 0.04 * h, 0.22 * w, -0.02 * h, 0.37 * w, 0.14 * h)
-      ..lineTo(0.74 * w, 0.56 * h)
-      ..cubicTo(0.84 * w, 0.68 * h, 0.93 * w, 0.73 * h, 0.97 * w, 0.62 * h)
-      ..lineTo(0.97 * w, 0.79 * h)
-      ..cubicTo(0.90 * w, 0.92 * h, 0.74 * w, 0.89 * h, 0.61 * w, 0.75 * h)
-      ..lineTo(0.27 * w, 0.34 * h)
-      ..cubicTo(0.18 * w, 0.23 * h, 0.08 * w, 0.14 * h, 0.03 * w, 0.21 * h)
-      ..close();
-
-    final frontPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: const [
-          Color(0xFF33F3FF),
-          Color(0xFF00C2FF),
-          Color(0xFF0284C7),
-          Color(0xFF1D4ED8),
-        ],
-        stops: const [0.0, 0.30, 0.68, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(frontRibbon, frontPaint);
-
-    // 5. Crisp diagonal specular ridge glow
-    final ridgePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = (w * 0.026).clamp(1.0, 3.0)
-      ..strokeCap = StrokeCap.round
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withOpacity(0.55),
-          const Color(0xFF7DD3FC).withOpacity(0.65),
-          Colors.white.withOpacity(0.0),
-        ],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-
-    final ridgePath = Path()
-      ..moveTo(pt(0.24, 0.22).dx, pt(0.24, 0.22).dy)
-      ..quadraticBezierTo(pt(0.52, 0.52).dx, pt(0.52, 0.52).dy, pt(0.78, 0.78).dx, pt(0.78, 0.78).dy);
-    canvas.drawPath(ridgePath, ridgePaint);
+    canvas.drawPath(diamond, diamondPaint);
   }
 
   @override
-  bool shouldRepaint(covariant _NusaRibbonLogoPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _OxoInfinityLogoPainter oldDelegate) => false;
 }

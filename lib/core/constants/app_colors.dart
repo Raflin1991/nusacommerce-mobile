@@ -1,61 +1,61 @@
 import 'package:flutter/material.dart';
 
-/// NusaCommerce Official Enterprise Color Palette & Design Tokens
-/// Matched 1:1 with NusaCommerce Mobile UI Blueprint & PRD v2.0.0
+/// OXO.ID Official Enterprise Color Palette & CDO Warm Linen Design Tokens
+/// Synchronized 1:1 with `resources/css/tokens.css` (Gelombang 5 Mobile Parity).
 class AppColors {
   AppColors._();
 
-  // Primary Brand Colors (Royal Blue)
-  static const Color primary = Color(0xFF2563EB);
-  static const Color primaryDark = Color(0xFF1D4ED8);
-  static const Color primaryLight = Color(0xFFDBEAFE);
-  static const Color primarySoft = Color(0xFFEFF6FF);
+  // Primary Brand Colors (Artisanal Terracotta Accent — `--accent`)
+  static const Color primary = Color(0xFFEA580C);
+  static const Color primaryDark = Color(0xFFC2410C);
+  static const Color primaryLight = Color(0xFFFED7AA);
+  static const Color primarySoft = Color(0xFFFFF1E6);
 
-  // Executive Navy (Hero Cards & Owner Mode)
-  static const Color navyDark = Color(0xFF0F172A);
-  static const Color navyMid = Color(0xFF1E3A8A);
-  static const Color slate800 = Color(0xFF1E293B);
-  static const Color slate700 = Color(0xFF334155);
-  static const Color slate600 = Color(0xFF475569);
-  static const Color slate500 = Color(0xFF64748B);
-  static const Color slate400 = Color(0xFF94A3B8);
-  static const Color slate200 = Color(0xFFE2E8F0);
-  static const Color slate100 = Color(0xFFF1F5F9);
+  // Editorial Stone Obsidian & Warm Stone Ink (`--text-primary` / `--text-secondary`)
+  static const Color navyDark = Color(0xFF1C1917);
+  static const Color navyMid = Color(0xFF292524);
+  static const Color slate800 = Color(0xFF292524);
+  static const Color slate700 = Color(0xFF44403C);
+  static const Color slate600 = Color(0xFF57534E);
+  static const Color slate500 = Color(0xFF78716C);
+  static const Color slate400 = Color(0xFFA8A29E);
+  static const Color slate200 = Color(0xFFE7E5E4);
+  static const Color slate100 = Color(0xFFF5F3EF);
 
-  // Surface & Canvas
-  static const Color background = Color(0xFFF8FAFC);
+  // Surface & Canvas (`--bg-page` / `--bg-surface` / `--border-subtle`)
+  static const Color background = Color(0xFFFAF8F5);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color border = Color(0xFFE2E8F0);
-  static const Color divider = Color(0xFFF1F5F9);
+  static const Color border = Color(0xFFE7E5E4);
+  static const Color divider = Color(0xFFF5F3EF);
 
-  // Semantic Status — Emerald Success & WhatsApp
+  // Semantic Status — Refined Emerald Success & WhatsApp (`--positive`)
   static const Color success = Color(0xFF10B981);
   static const Color successDark = Color(0xFF059669);
-  static const Color successSoft = Color(0xFFD1FAE5);
+  static const Color successSoft = Color(0xFFECFDF5);
   static const Color whatsapp = Color(0xFF25D366);
 
-  // Semantic Status — Amber Warning & Buku Bon (Receivables)
+  // Semantic Status — Refined Amber Warning & Buku Bon (`--warning`)
   static const Color warning = Color(0xFFF59E0B);
   static const Color warningDark = Color(0xFFD97706);
   static const Color warningSoft = Color(0xFFFEF3C7);
 
-  // Semantic Status — Danger Red (Void, Low Stock, Expired FEFO)
+  // Semantic Status — Crimson Danger (Void, Low Stock, Expired FEFO — `--danger`)
   static const Color danger = Color(0xFFEF4444);
   static const Color dangerDark = Color(0xFFDC2626);
   static const Color dangerSoft = Color(0xFFFEE2E2);
 
-  // Accent Purple (Low Stock / Inventory Badge on Home Mockup)
+  // Accent Violet (Inventory / Taxonomy highlights)
   static const Color purple = Color(0xFF7C3AED);
   static const Color purpleSoft = Color(0xFFEDE9FE);
 
-  // Gradients
+  // Gradients (Warm Terracotta & Deep Stone Obsidian)
   static const LinearGradient heroBlueGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [
-      Color(0xFF2563EB),
-      Color(0xFF1D4ED8),
-      Color(0xFF1E40AF),
+      Color(0xFFEA580C),
+      Color(0xFFC2410C),
+      Color(0xFF9A3412),
     ],
   );
 
@@ -63,8 +63,8 @@ class AppColors {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [
-      Color(0xFF1E3A8A),
-      Color(0xFF0F172A),
+      Color(0xFF292524),
+      Color(0xFF1C1917),
     ],
   );
 
@@ -81,7 +81,7 @@ class AppColors {
 
   static List<BoxShadow> get cardShadow => [
         const BoxShadow(
-          color: Color(0x060F172A),
+          color: Color(0x081C1917),
           blurRadius: 8,
           offset: Offset(0, 2),
         ),
@@ -89,7 +89,7 @@ class AppColors {
 
   static List<BoxShadow> get floatingCartShadow => [
         const BoxShadow(
-          color: Color(0x140F172A),
+          color: Color(0x141C1917),
           blurRadius: 16,
           offset: Offset(0, -4),
         ),

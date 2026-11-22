@@ -4,12 +4,16 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../pos/bloc/pos_cubit.dart';
+
+part 'customer_parity_modals.dart';
 
 /// PILAR 2 — LAYAR MANAJEMEN PELANGGAN & MEMBER LENGKAP
 class CustomerListScreen extends StatefulWidget {
@@ -23,11 +27,12 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
   late final TabController _tabController;
   final TextEditingController _searchCtrl = TextEditingController();
   final ApiClient _api = GetIt.instance<ApiClient>();
+  final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() => setState(() {}));
     context.read<PosCubit>().syncWithCloud(force: false);
   }
@@ -52,12 +57,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
       text: ((existing?['default_discount_percent'] as num?)?.toInt() ?? 0).toString(),
     );
     final notesCtrl = TextEditingController(text: existing?['notes']?.toString() ?? '');
+    final groups = context.read<PosCubit>().state.customerGroups;
+    int? selectedGroupId = (existing?['customer_group_id'] as num?)?.toInt() ??
+        (existing?['group_id'] as num?)?.toInt();
     bool saving = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -100,6 +108,23 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   controller: bizCtrl,
                   decoration: const InputDecoration(labelText: 'Nama Toko / Bisnis (Opsional)'),
                 ),
+                if (groups.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<int?>(
+                    value: groups.any((g) => (g['id'] as num?)?.toInt() == selectedGroupId)
+                        ? selectedGroupId
+                        : null,
+                    decoration: const InputDecoration(labelText: 'Grup / Tier Member'),
+                    items: [
+                      const DropdownMenuItem<int?>(value: null, child: Text('Reguler (Tanpa Grup)')),
+                      ...groups.map((g) => DropdownMenuItem<int?>(
+                            value: (g['id'] as num).toInt(),
+                            child: Text(g['name'].toString()),
+                          )),
+                    ],
+                    onChanged: (v) => setModalState(() => selectedGroupId = v),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -153,6 +178,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                                 'credit_limit': IdrCurrencyFormatter.parse(limitCtrl.text),
                                 'default_discount_percent':
                                     (double.tryParse(discCtrl.text.trim()) ?? 0).clamp(0, 100),
+                                if (selectedGroupId != null) 'customer_group_id': selectedGroupId,
                                 if (notesCtrl.text.trim().isNotEmpty) 'notes': notesCtrl.text.trim(),
                               },
                               id: (existing?['id'] as num?)?.toInt(),
@@ -201,7 +227,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -339,6 +365,32 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   ),
                 ),
               ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showCustomerStatementModal(customer, history);
+                      },
+                      icon: const Icon(Icons.account_balance_outlined, size: 18),
+                      label: const Text('Kartu Piutang'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showTopupDepositModal(customer);
+                      },
+                      icon: const Icon(Icons.savings_outlined, size: 18, color: AppColors.successDark),
+                      label: const Text('Top-up Deposit'),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 18),
               Text(
                 'Riwayat Belanja Pelanggan (${history.length})',
@@ -482,7 +534,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
         }).toList();
 
         return Scaffold(
-          backgroundColor: AppColors.background,
+          backgroundColor: NusaThemeTokens.of(context).bgPage,
           appBar: AppBar(
             title: const Text('Pelanggan & Member'),
             actions: [
@@ -503,16 +555,27 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
               tabs: [
                 Tab(text: 'Semua (${state.customers.length})'),
                 Tab(text: 'Punya Piutang ($debtorsCount)'),
+                Tab(text: 'Grup (${state.customerGroups.length})'),
               ],
             ),
           ),
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _showAddOrEditCustomerModal(),
+            onPressed: _tabController.index == 2
+                ? () => _showAddOrEditGroupModal()
+                : () => _showAddOrEditCustomerModal(),
             backgroundColor: AppColors.primary,
-            icon: const Icon(Icons.person_add_rounded, color: Colors.white),
-            label: const Text('Pelanggan Baru', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+            icon: Icon(
+              _tabController.index == 2 ? Icons.group_add_rounded : Icons.person_add_rounded,
+              color: Colors.white,
+            ),
+            label: Text(
+              _tabController.index == 2 ? 'Tambah Grup' : 'Pelanggan Baru',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            ),
           ),
-          body: Column(
+          body: _tabController.index == 2
+              ? _buildCustomerGroupsTab(state.customerGroups)
+              : Column(
             children: [
               Container(
                 color: Colors.white,

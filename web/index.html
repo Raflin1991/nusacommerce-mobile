@@ -18,21 +18,29 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="OXO.ID — THE AI-POWERED BUSINESS OPERATING SYSTEM">
 
-  <!-- iOS meta tags & icons -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="nusacommerce_mobile">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <!-- PWA / Mobile web app meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="OXO.ID POS">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png?v=oxo5">
 
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="icon" type="image/png" href="favicon.png?v=oxo5"/>
 
-  <title>nusacommerce_mobile</title>
+  <title>OXO.ID POS</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    // Prevent Flutter 3.24 CanvasKit BrowserImageDecoder from leaking unclosed WebCodecs VideoFrames in Chromium.
+    if (typeof window !== 'undefined' && 'ImageDecoder' in window) {
+      try {
+        window.ImageDecoder = undefined;
+      } catch (_) {}
+    }
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

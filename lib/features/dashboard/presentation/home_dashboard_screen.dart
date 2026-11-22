@@ -1,32 +1,48 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
+import '../../../core/config/mobile_workspace_config.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/network_connectivity_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
+import '../../../core/theme/theme_cubit.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/cascade_entitlement_teaser.dart';
+import '../../../core/widgets/nusa_skeleton.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/models/auth_session_model.dart';
 import '../../auth/presentation/cloud_upgrade_sheet.dart';
+import '../../copilot/presentation/nusa_copilot_sheet.dart';
 import '../../notifications/presentation/alert_notifications_modal.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
-/// LAYAR 2 — PUSAT KENDALI OPERASIONAL NUSACOMMERCE (Task-First Enterprise Home)
+/// LAYAR 2 — PUSAT KENDALI OPERASIONAL ROLE-ADAPTIVE OXO.ID (Gelombang 5)
+/// - Role-Adaptive Workspaces: Owner Pulse, Manager Desk, POS Fast-Lane, Warehouse Workbench, ESS & HR
+/// - Parallel API Fetch (`Future.wait`) eliminating 5-call serial waterfall
+/// - Shimmer Skeleton Loading + CDO Warm Linen (Light / Dark / High-Contrast Outdoor POS)
+/// - OXO Copilot Mobile AI trigger + Inline Modal Error Guard
 class HomeDashboardScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
   final ValueChanged<int> onSwitchTab;
+  final MobileWorkspaceRole? activeWorkspace;
+  final ValueChanged<MobileWorkspaceRole>? onSelectWorkspace;
+  final VoidCallback? onOpenCopilot;
 
   const HomeDashboardScreen({
     super.key,
     required this.onOpenDrawer,
     required this.onSwitchTab,
+    this.activeWorkspace,
+    this.onSelectWorkspace,
+    this.onOpenCopilot,
   });
 
   @override
@@ -37,6 +53,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final ApiClient _api = GetIt.instance<ApiClient>();
   final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
   final NetworkConnectivityService _connectivity = GetIt.instance<NetworkConnectivityService>();
+
+  Future<void>? _activeLoadFuture;
 
   bool _loading = true;
   String? _error;
@@ -53,6 +71,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _pendingOnlineOrdersCount = 0;
   int _voidCount = 0;
   int _varianceShiftsCount = 0;
+
+  // Shift fast-lane summary (Blind Drop compliant: never stores expected_cash for cashiers)
+  bool _hasOpenShift = false;
+  bool _shiftBlindDropEnforced = true;
+  String _shiftTerminalLabel = '';
+
   List<Map<String, dynamic>> _approvalsList = [];
   List<Map<String, dynamic>> _tasksList = [];
   List<Map<String, dynamic>> _offlineConflictsList = [];
@@ -70,6 +94,29 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     });
   }
 
+  MobileWorkspaceRole _effectiveWorkspace(AuthSessionModel session) {
+    return MobileWorkspaceResolver.sanitizeActiveWorkspace(
+      session,
+      widget.activeWorkspace,
+    );
+  }
+
+  void _openCopilot(AuthSessionModel session) {
+    if (widget.onOpenCopilot != null) {
+      widget.onOpenCopilot!();
+    } else {
+      showNusaCopilotSheet(context, workspace: _effectiveWorkspace(session));
+    }
+  }
+
+  ThemeCubit? _maybeThemeCubit(BuildContext context) {
+    try {
+      return context.watch<ThemeCubit>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _applyLocalDashboardMetrics({int? storeId}) {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
@@ -79,6 +126,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
     final fraud = Map<String, dynamic>.from((report['fraud_indicators'] as Map?) ?? {});
     final receivables = _offlineDb.getLocalReceivables();
+    final localShift = _offlineDb.getCurrentLocalShift();
     final expiring = context
         .read<PosCubit>()
         .state
@@ -99,6 +147,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _pendingOnlineOrdersCount = 0;
       _voidCount = (fraud['void_count'] as num?)?.toInt() ?? 0;
       _varianceShiftsCount = (fraud['variance_shifts_count'] as num?)?.toInt() ?? 0;
+      _hasOpenShift = localShift != null;
+      _shiftBlindDropEnforced = true;
+      _shiftTerminalLabel = localShift != null ? 'Kasir Mandiri Lokal' : '';
       _overdueReceivables = receivables;
       _tasksList = const [];
       _approvalsList = const [];
@@ -111,11 +162,42 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     });
   }
 
-  Future<void> _loadDashboard({int? storeId}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
+  Future<Response<dynamic>?> _safeGet(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    void Function(Object err)? onFatalError,
+  }) async {
+    try {
+      return await _api.dio.get(path, queryParameters: queryParameters);
+    } catch (e) {
+      if (onFatalError != null) {
+        onFatalError(e);
+      }
+      return null;
+    }
+  }
+
+  Future<void> _loadDashboard({int? storeId}) {
+    if (_activeLoadFuture != null) {
+      return _activeLoadFuture!;
+    }
+    final future = _executeDashboardLoad(storeId: storeId);
+    _activeLoadFuture = future;
+    future.whenComplete(() {
+      if (identical(_activeLoadFuture, future)) {
+        _activeLoadFuture = null;
+      }
     });
+    return future;
+  }
+
+  Future<void> _executeDashboardLoad({int? storeId}) async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
 
     final session = context.read<AuthCubit>().state.session;
     if (session.isLocalTrial || !(await _connectivity.checkOnline())) {
@@ -123,137 +205,200 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       return;
     }
 
-    try {
-      final activeStoreId = storeId ?? context.read<AuthCubit>().state.session.activeStore.id;
-      final params = <String, dynamic>{'period': 'today'};
-      if (activeStoreId > 0) {
-        params['store_id'] = activeStoreId;
-      }
+    final workspace = _effectiveWorkspace(session);
+    final activeStoreId = storeId ?? session.activeStore.id;
+    final params = <String, dynamic>{'period': 'today'};
+    if (activeStoreId > 0) {
+      params['store_id'] = activeStoreId;
+    }
 
-      final res = await _api.dio.get(ApiEndpoints.ownerDashboard, queryParameters: params);
-      final data = Map<String, dynamic>.from((res.data['data'] as Map?) ?? {});
-      final kpi = Map<String, dynamic>.from((data['kpi'] as Map?) ?? {});
-      final alerts = Map<String, dynamic>.from((data['operational_alerts'] as Map?) ?? {});
-      final auditWatch = Map<String, dynamic>.from(
-        (data['anti_fraud_summary'] as Map?) ?? (data['audit_watch'] as Map?) ?? {},
-      );
+    final shouldFetchOwner = MobileWorkspaceResolver.canViewOwnerDashboard(session);
+    final shouldFetchApprovals = MobileWorkspaceResolver.canViewApprovals(session);
+    final shouldFetchConflicts = MobileWorkspaceResolver.canUsePos(session);
+    final shouldFetchReceivables = MobileWorkspaceResolver.canViewReceivables(session) &&
+        workspace != MobileWorkspaceRole.warehouseWorkbench &&
+        workspace != MobileWorkspaceRole.employeeEss;
+    final shouldFetchShift = MobileWorkspaceResolver.canUsePos(session);
 
-      final List<Map<String, dynamic>> tasksList = [];
-      final List<Map<String, dynamic>> approvalsList = [];
-      final List<Map<String, dynamic>> conflictsList = [];
-      final List<Map<String, dynamic>> overdueList = [];
-      try {
-        final tRes = await _api.dio.get(ApiEndpoints.tasks);
-        final tList = (tRes.data['data'] as List<dynamic>?) ?? [];
-        for (final raw in tList) {
-          if (raw is Map) tasksList.add(Map<String, dynamic>.from(raw));
-        }
-      } catch (_) {}
+    Object? primaryError;
 
-      try {
-        final aRes = await _api.dio.get(ApiEndpoints.approvals);
-        final aList = (aRes.data['data'] as List<dynamic>?) ?? [];
-        for (final raw in aList) {
-          if (raw is Map) approvalsList.add(Map<String, dynamic>.from(raw));
-        }
-      } catch (_) {}
+    // PARALLELIZED BATCH (`Future.wait`) — Eliminates serial API round-trips
+    final futures = <Future<Response<dynamic>?>>[
+      shouldFetchOwner
+          ? _safeGet(
+              ApiEndpoints.ownerDashboard,
+              queryParameters: params,
+              onFatalError: (e) => primaryError = e,
+            )
+          : Future.value(null),
+      _safeGet(ApiEndpoints.tasks),
+      shouldFetchApprovals ? _safeGet(ApiEndpoints.approvals) : Future.value(null),
+      shouldFetchConflicts ? _safeGet(ApiEndpoints.offlineConflicts) : Future.value(null),
+      shouldFetchReceivables
+          ? _safeGet(ApiEndpoints.receivables, queryParameters: params)
+          : Future.value(null),
+      shouldFetchShift ? _safeGet(ApiEndpoints.currentShift) : Future.value(null),
+    ];
 
-      try {
-        final cRes = await _api.dio.get(ApiEndpoints.offlineConflicts);
-        final cList = (cRes.data['data'] as List<dynamic>?) ?? [];
-        for (final raw in cList) {
-          if (raw is Map) conflictsList.add(Map<String, dynamic>.from(raw));
-        }
-      } catch (_) {}
+    final responses = await Future.wait(futures);
+    if (!mounted) return;
 
-      try {
-        final rRes = await _api.dio.get(ApiEndpoints.receivables, queryParameters: params);
-        final rawData = rRes.data is Map ? rRes.data['data'] : null;
-        final rawList = rawData is List
-            ? rawData
-            : (rawData is Map && rawData['items'] is List
-                ? rawData['items'] as List
-                : const <dynamic>[]);
-        for (final raw in rawList) {
-          if (raw is Map) {
-            final map = Map<String, dynamic>.from(raw);
-            final dueAmt = ((map['balance_due'] ??
-                    map['remaining_amount'] ??
-                    map['amount'] ??
-                    0) as num)
-                .toDouble();
-            if (dueAmt > 0) {
-              overdueList.add(map);
-            }
-          }
-        }
-      } catch (_) {}
+    final ownerRes = responses[0];
+    final tasksRes = responses[1];
+    final approvalsRes = responses[2];
+    final conflictsRes = responses[3];
+    final receivablesRes = responses[4];
+    final shiftRes = responses[5];
 
-      if (!mounted) return;
-      setState(() {
-        _todaySales = (kpi['net_sales'] as num?)?.toDouble() ?? 0;
-        _todayTxCount = (kpi['transactions_count'] as num?)?.toInt() ?? 0;
-        _grossProfit = (kpi['gross_profit'] as num?)?.toDouble() ?? 0;
-        _growthPercent = (kpi['growth_vs_yesterday_percent'] as num?)?.toDouble() ?? 0;
-        _totalReceivables = (alerts['receivables_total'] as num?)?.toDouble() ?? 0;
-        _totalPayables = (alerts['payables_total'] as num?)?.toDouble() ?? 0;
-        _lowStockCount = (alerts['low_stock_count'] as num?)?.toInt() ?? 0;
-        _expiringCount = (alerts['expiring_batches_count'] as num?)?.toInt() ?? 0;
-        _pendingOnlineOrdersCount = (alerts['pending_online_orders_count'] as num?)?.toInt() ?? 0;
-        _voidCount = ((auditWatch['voided_sales_count'] ?? auditWatch['void_count']) as num?)?.toInt() ?? 0;
-        _varianceShiftsCount = ((auditWatch['shift_variance_alerts_count'] ?? auditWatch['variance_shifts_count']) as num?)?.toInt() ?? 0;
-        _overdueReceivables = overdueList;
-        _tasksList = tasksList;
-        _approvalsList = approvalsList;
-        _offlineConflictsList = conflictsList;
-        _openTasksCount = tasksList.length;
-        _pendingApprovalsCount = approvalsList.length;
-        _lastStoreId = activeStoreId;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      final isLocalTrial = context.read<AuthCubit>().state.session.isLocalTrial;
-      if (isLocalTrial ||
-          _offlineDb.getCachedProducts().isNotEmpty ||
+    // If owner dashboard failed catastrophically AND no other endpoint succeeded, handle gracefully
+    if (shouldFetchOwner && ownerRes == null && primaryError != null && tasksRes == null) {
+      if (_offlineDb.getCachedProducts().isNotEmpty ||
           _offlineDb.getLocalSalesHistory().isNotEmpty) {
         _applyLocalDashboardMetrics(storeId: storeId);
         return;
       }
       setState(() {
-        _error = ApiClient.extractErrorMessage(e);
+        _error = ApiClient.extractErrorMessage(primaryError!);
         _loading = false;
       });
+      return;
     }
+
+    final rawOwnerData = ownerRes?.data is Map ? ownerRes!.data['data'] : null;
+    final ownerData = rawOwnerData is Map
+        ? Map<String, dynamic>.from(rawOwnerData)
+        : <String, dynamic>{};
+    final kpi = ownerData['kpi'] is Map
+        ? Map<String, dynamic>.from(ownerData['kpi'] as Map)
+        : <String, dynamic>{};
+    final alerts = ownerData['operational_alerts'] is Map
+        ? Map<String, dynamic>.from(ownerData['operational_alerts'] as Map)
+        : <String, dynamic>{};
+    final rawAudit = ownerData['anti_fraud_summary'] ?? ownerData['audit_watch'];
+    final auditWatch = rawAudit is Map
+        ? Map<String, dynamic>.from(rawAudit)
+        : <String, dynamic>{};
+
+    final tasksList = <Map<String, dynamic>>[];
+    if (tasksRes?.data is Map && tasksRes!.data['data'] is List) {
+      final raw = tasksRes.data['data'] as List<dynamic>;
+      for (final item in raw) {
+        if (item is Map) tasksList.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    final approvalsList = <Map<String, dynamic>>[];
+    if (approvalsRes?.data is Map && approvalsRes!.data['data'] is List) {
+      final raw = approvalsRes.data['data'] as List<dynamic>;
+      for (final item in raw) {
+        if (item is Map) approvalsList.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    final conflictsList = <Map<String, dynamic>>[];
+    if (conflictsRes?.data is Map && conflictsRes!.data['data'] is List) {
+      final raw = conflictsRes.data['data'] as List<dynamic>;
+      for (final item in raw) {
+        if (item is Map) conflictsList.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    final overdueList = <Map<String, dynamic>>[];
+    if (receivablesRes?.data is Map) {
+      final rawData = receivablesRes!.data['data'];
+      final rawList = rawData is List
+          ? rawData
+          : (rawData is Map && rawData['items'] is List
+              ? rawData['items'] as List
+              : const <dynamic>[]);
+      for (final raw in rawList) {
+        if (raw is Map) {
+          final map = Map<String, dynamic>.from(raw);
+          final dueAmt = ((map['balance_due'] ??
+                  map['remaining_amount'] ??
+                  map['amount'] ??
+                  0) as num)
+              .toDouble();
+          if (dueAmt > 0) overdueList.add(map);
+        }
+      }
+    }
+
+    bool hasOpenShift = false;
+    bool blindDropEnforced = true;
+    String shiftTerminal = '';
+    final rawShiftData = shiftRes?.data is Map ? shiftRes!.data['data'] : null;
+    if (rawShiftData is Map) {
+      final sData = Map<String, dynamic>.from(rawShiftData);
+      hasOpenShift = sData['has_open_shift'] == true && sData['shift'] is Map;
+      blindDropEnforced = sData['blind_drop_enforced'] == true;
+      if (hasOpenShift) {
+        final sMap = Map<String, dynamic>.from(sData['shift'] as Map);
+        final term = sMap['terminal'] as Map?;
+        shiftTerminal = (term?['name'] ?? 'POS Utama').toString();
+      }
+    }
+
+    setState(() {
+      _todaySales = (kpi['net_sales'] as num?)?.toDouble() ?? 0;
+      _todayTxCount = (kpi['transactions_count'] as num?)?.toInt() ?? 0;
+      _grossProfit = (kpi['gross_profit'] as num?)?.toDouble() ?? 0;
+      _growthPercent = (kpi['growth_vs_yesterday_percent'] as num?)?.toDouble() ?? 0;
+      _totalReceivables = (alerts['receivables_total'] as num?)?.toDouble() ?? 0;
+      _totalPayables = (alerts['payables_total'] as num?)?.toDouble() ?? 0;
+      _lowStockCount = (alerts['low_stock_count'] as num?)?.toInt() ?? 0;
+      _expiringCount = (alerts['expiring_batches_count'] as num?)?.toInt() ?? 0;
+      _pendingOnlineOrdersCount =
+          (alerts['pending_online_orders_count'] as num?)?.toInt() ?? 0;
+      _voidCount = ((auditWatch['voided_sales_count'] ?? auditWatch['void_count']) as num?)
+              ?.toInt() ??
+          0;
+      _varianceShiftsCount =
+          ((auditWatch['shift_variance_alerts_count'] ?? auditWatch['variance_shifts_count'])
+                      as num?)
+                  ?.toInt() ??
+              0;
+      _hasOpenShift = hasOpenShift;
+      _shiftBlindDropEnforced = blindDropEnforced;
+      _shiftTerminalLabel = shiftTerminal;
+      _overdueReceivables = overdueList;
+      _tasksList = tasksList;
+      _approvalsList = approvalsList;
+      _offlineConflictsList = conflictsList;
+      _openTasksCount = tasksList.length;
+      _pendingApprovalsCount = approvalsList.length;
+      _lastStoreId = activeStoreId;
+      _error = null;
+      _loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final authState = context.watch<AuthCubit>().state;
     final posState = context.watch<PosCubit>().state;
-    final activeStoreId = authState.session.activeStore.id;
+    final session = authState.session;
+    final workspace = _effectiveWorkspace(session);
+    final activeStoreId = session.activeStore.id;
+
     if (_lastStoreId != null && activeStoreId != _lastStoreId && !_loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadDashboard(storeId: activeStoreId);
       });
     }
 
-    final displayName = authState.session.userName.trim().isEmpty
-        ? 'Operator Toko'
-        : authState.session.userName.trim();
+    final displayName =
+        session.userName.trim().isEmpty ? 'Operator Toko' : session.userName.trim();
     final localLowStock = posState.allProducts.where((p) => p.isLowStock).length;
     final localExpiring = posState.allProducts.where((p) => p.hasExpiringSoonBatch).length;
-    final localVoidAndDiscount = posState.salesHistory
-        .where((s) =>
-            (s['status'] ?? '').toString().toUpperCase() == 'VOID' ||
-            ((s['discount_total'] ?? s['discount_amount'] ?? 0) as num).toDouble() > 50000)
-        .length;
+    final effectiveLowStock = _lowStockCount > 0 ? _lowStockCount : localLowStock;
+    final effectiveExpiring = _expiringCount > 0 ? _expiringCount : localExpiring;
     final mergedConflicts = _mergedOfflineConflicts(posState.localSyncConflicts);
 
-    final badgeCount = (_lowStockCount > 0 ? _lowStockCount : localLowStock) +
-        (_expiringCount > 0 ? _expiringCount : localExpiring) +
+    final badgeCount = effectiveLowStock +
+        effectiveExpiring +
         _voidCount +
-        localVoidAndDiscount +
         _varianceShiftsCount +
         _overdueReceivables.length +
         _openTasksCount +
@@ -261,10 +406,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         mergedConflicts.length +
         _pendingOnlineOrdersCount;
 
+    final canSwitchWorkspaces =
+        MobileWorkspaceResolver.canSwitchWorkspaces(session) &&
+            widget.onSelectWorkspace != null;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: tokens.bgPage,
       body: SafeArea(
         child: RefreshIndicator(
+          color: tokens.accent,
           onRefresh: () => _loadDashboard(storeId: activeStoreId),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -274,190 +424,981 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               children: [
                 _buildTopHeader(
                   context,
-                  authState.session,
+                  tokens,
+                  session,
                   posState.offlinePendingCount,
                   badgeCount,
                   activeStoreId,
                   mergedConflicts,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
-                if (posState.localSyncConflicts.isNotEmpty)
-                  GestureDetector(
-                    onTap: () {
-                      showAlertNotificationsModal(
-                        context,
-                        voidCountFromServer: _voidCount,
-                        varianceShiftsCount: _varianceShiftsCount,
-                        overdueReceivables: _overdueReceivables,
-                        storeName: authState.session.activeStore.name.isEmpty
-                            ? 'NusaCommerce POS'
-                            : authState.session.activeStore.name,
-                        approvals: _approvalsList,
-                        tasks: _tasksList,
-                        offlineConflicts: mergedConflicts,
-                        pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
-                        onDecideApproval: _decideApproval,
-                        onOpenOnlineOrders: () => _showOnlineOrdersSheet(context),
-                      );
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.dangerSoft,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.danger.withOpacity(0.5)),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: AppColors.danger.withOpacity(0.16),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(
-                              Icons.sync_problem_rounded,
-                              color: AppColors.dangerDark,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${posState.localSyncConflicts.length} Konflik Stok Sinkronisasi Offline',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.dangerDark,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                const Text(
-                                  'Stok habis di server saat sinkronisasi. Ketuk untuk Setujui Oversell atau Batalkan & Refund Manual.',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: AppColors.slate700,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          const Icon(
-                            Icons.arrow_forward_ios_rounded,
-                            size: 14,
-                            color: AppColors.dangerDark,
-                          ),
-                        ],
-                      ),
+                if (canSwitchWorkspaces) ...[
+                  _buildWorkspaceSwitcherStrip(tokens, workspace),
+                  const SizedBox(height: 10),
+                ],
+
+                if (_loading)
+                  NusaDashboardSkeleton(
+                    compactCashierLayout:
+                        workspace == MobileWorkspaceRole.posFastLane ||
+                            workspace == MobileWorkspaceRole.employeeEss,
+                  )
+                else ...[
+                  if (posState.localSyncConflicts.isNotEmpty &&
+                      MobileWorkspaceResolver.canUsePos(session))
+                    _buildSyncConflictBanner(
+                      context,
+                      tokens,
+                      session,
+                      posState,
+                      mergedConflicts,
                     ),
-                  ),
 
-                if (authState.session.isLocalTrial)
-                  _buildLocalTrialUpgradeBanner(context, activeStoreId),
+                  if (session.isLocalTrial)
+                    _buildLocalTrialUpgradeBanner(context, tokens, activeStoreId),
 
-                if (_error != null)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.dangerSoft,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                  if (_error != null)
+                    _buildErrorBanner(context, tokens, activeStoreId),
+
+                  // Role-Adaptive Workspace Body
+                  if (workspace == MobileWorkspaceRole.posFastLane)
+                    _buildPosFastLaneWorkspace(
+                      context,
+                      tokens,
+                      session,
+                      posState,
+                      displayName,
+                      mergedConflicts,
+                    )
+                  else if (workspace == MobileWorkspaceRole.warehouseWorkbench)
+                    _buildWarehouseWorkbenchWorkspace(
+                      context,
+                      tokens,
+                      session,
+                      posState,
+                      displayName,
+                      effectiveLowStock,
+                      effectiveExpiring,
+                    )
+                  else if (workspace == MobileWorkspaceRole.employeeEss)
+                    _buildEmployeeEssWorkspace(
+                      context,
+                      tokens,
+                      session,
+                      displayName,
+                    )
+                  else if (workspace == MobileWorkspaceRole.managerDesk)
+                    _buildManagerDeskWorkspace(
+                      context,
+                      tokens,
+                      session,
+                      posState,
+                      displayName,
+                      effectiveLowStock,
+                      effectiveExpiring,
+                      mergedConflicts,
+                    )
+                  else
+                    _buildOwnerPulseWorkspace(
+                      context,
+                      tokens,
+                      session,
+                      posState,
+                      displayName,
+                      effectiveLowStock,
+                      effectiveExpiring,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _error!,
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  color: AppColors.dangerDark,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => _loadDashboard(storeId: activeStoreId),
-                              child: const Text('Muat Ulang', style: TextStyle(fontWeight: FontWeight.w700)),
-                            ),
-                            const SizedBox(width: 8),
-                            OutlinedButton(
-                              onPressed: () async {
-                                final posCubit = context.read<PosCubit>();
-                                await context.read<AuthCubit>().logout();
-                                await posCubit.resetForLogout();
-                                if (context.mounted) {
-                                  context.go('/login');
-                                }
-                              },
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: AppColors.dangerDark,
-                                side: const BorderSide(color: AppColors.danger),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              child: const Text('Login Ulang', style: TextStyle(fontWeight: FontWeight.w700)),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Compact Operator Strip
-                _buildOperatorStrip(authState.session, displayName),
-                const SizedBox(height: 12),
-
-                // Primary Action Strip (Task-First Launch Bar)
-                _buildPrimaryActionStrip(context, posState.capabilities),
-                const SizedBox(height: 16),
-
-                // Executive Pulse Card
-                _buildExecutivePulseCard(context),
-                const SizedBox(height: 12),
-
-                // 2x2 Operational Metrics Grid
-                _buildOperationalMetricsGrid(context),
-                const SizedBox(height: 20),
-
-                // Store Operations Directory (8 Core Modules Exposed Directly)
-                const Text(
-                  'Direktori Operasional Toko',
-                  style: TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.navyDark,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                const Text(
-                  'Akses 1-ketuk seluruh alur kerja kasir, stok, piutang & kontrol cabang.',
-                  style: TextStyle(fontSize: 12, color: AppColors.slate500),
-                ),
-                const SizedBox(height: 12),
-                _buildModulesDirectory(context, posState.capabilities),
+                ],
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceSwitcherStrip(
+    NusaThemeTokens tokens,
+    MobileWorkspaceRole current,
+  ) {
+    return SizedBox(
+      key: const Key('workspace_switcher_strip'),
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final role in MobileWorkspaceResolver.operationalWorkspaces) ...[
+            NusaPillFilter(
+              key: Key('workspace_chip_${role.name}'),
+              label: MobileWorkspaceResolver.specFor(role).title,
+              icon: MobileWorkspaceResolver.specFor(role).icon,
+              selected: role == current,
+              onTap: () => widget.onSelectWorkspace?.call(role),
+            ),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOwnerPulseWorkspace(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    PosState posState,
+    String displayName,
+    int lowStock,
+    int expiring,
+  ) {
+    return Column(
+      key: const Key('workspace_owner_pulse'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOperatorStrip(tokens, session, displayName, MobileWorkspaceRole.ownerPulse),
+        const SizedBox(height: 12),
+        _buildPrimaryActionStrip(context, tokens, posState.capabilities),
+        const SizedBox(height: 14),
+        _buildExecutivePulseCard(context, tokens),
+        const SizedBox(height: 12),
+        _buildCopilotBanner(context, tokens, session, MobileWorkspaceRole.ownerPulse),
+        const SizedBox(height: 12),
+        _buildQuickActionSpeedDial(context, tokens, session),
+        const SizedBox(height: 12),
+        _buildOperationalMetricsGrid(context, tokens, lowStock, expiring),
+        const SizedBox(height: 12),
+        _buildAllModulesBanner(context, tokens),
+        const SizedBox(height: 18),
+        Text(
+          'Direktori Operasional Toko',
+          style: TextStyle(
+            fontSize: 15.5,
+            fontWeight: FontWeight.w800,
+            color: tokens.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          'Akses 1-ketuk seluruh alur kerja kasir, stok, piutang & kontrol cabang.',
+          style: TextStyle(fontSize: 12, color: tokens.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        _buildModulesDirectory(context, tokens, posState.capabilities),
+      ],
+    );
+  }
+
+  Widget _buildManagerDeskWorkspace(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    PosState posState,
+    String displayName,
+    int lowStock,
+    int expiring,
+    List<Map<String, dynamic>> mergedConflicts,
+  ) {
+    final canViewProfit = MobileWorkspaceResolver.canViewProfit(session);
+    final canUsePos = MobileWorkspaceResolver.canUsePos(session);
+    final canViewShifts = MobileWorkspaceResolver.canViewShifts(session);
+    final canViewReports = MobileWorkspaceResolver.canViewOwnerDashboard(session);
+    return Column(
+      key: const Key('workspace_manager_desk'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOperatorStrip(tokens, session, displayName, MobileWorkspaceRole.managerDesk),
+        const SizedBox(height: 12),
+        if (canUsePos || canViewShifts) ...[
+          _buildPrimaryActionStrip(context, tokens, posState.capabilities),
+          const SizedBox(height: 12),
+        ] else if (canViewReports) ...[
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: () => context.push('/reports'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: tokens.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.analytics_rounded, size: 20),
+              label: const Text(
+                'Buka Laporan & Audit Terpadu',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        // Action-first Operational Queue Strip
+        NusaCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Antrean Pengawasan Cabang',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: tokens.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  NusaBadge(
+                    label: '${_pendingApprovalsCount + _openTasksCount + _varianceShiftsCount} Item',
+                    variant: (_pendingApprovalsCount + _varianceShiftsCount) > 0
+                        ? NusaBadgeVariant.warning
+                        : NusaBadgeVariant.success,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: MobileWorkspaceResolver.canViewApprovals(session)
+                          ? () => context.push('/approvals')
+                          : null,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _compactStatChip(
+                        tokens,
+                        label: 'Approval',
+                        value: '$_pendingApprovalsCount',
+                        accent: tokens.warning,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _compactStatChip(
+                      tokens,
+                      label: 'Tugas',
+                      value: '$_openTasksCount',
+                      accent: tokens.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _compactStatChip(
+                      tokens,
+                      label: 'Selisih Shift',
+                      value: '$_varianceShiftsCount',
+                      accent: _varianceShiftsCount > 0 ? tokens.danger : tokens.positive,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (canViewReports) ...[
+          _buildExecutivePulseCard(context, tokens),
+          const SizedBox(height: 12),
+        ],
+        _buildCopilotBanner(context, tokens, session, MobileWorkspaceRole.managerDesk),
+        const SizedBox(height: 12),
+        if (canViewProfit)
+          _buildOperationalMetricsGrid(context, tokens, lowStock, expiring)
+        else
+          Row(
+            children: [
+              Expanded(
+                child: _buildOperationalMetricTile(
+                  tokens,
+                  icon: Icons.inventory_2_outlined,
+                  accentColor: (lowStock + expiring) > 0 ? tokens.danger : tokens.positive,
+                  label: 'Stok Menipis & FEFO',
+                  value: '$lowStock Menipis • $expiring FEFO',
+                  onTap: () => widget.onSwitchTab(1),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildOperationalMetricTile(
+                  tokens,
+                  icon: Icons.sync_problem_outlined,
+                  accentColor: mergedConflicts.isNotEmpty ? tokens.danger : tokens.positive,
+                  label: 'Konflik & Order Online',
+                  value: '${mergedConflicts.length} Konflik • $_pendingOnlineOrdersCount Web',
+                  onTap: () => context.push('/online-orders'),
+                ),
+              ),
+            ],
+          ),
+        const SizedBox(height: 12),
+        _buildQuickActionSpeedDial(context, tokens, session),
+      ],
+    );
+  }
+
+  Widget _buildPosFastLaneWorkspace(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    PosState posState,
+    String displayName,
+    List<Map<String, dynamic>> mergedConflicts,
+  ) {
+    final themeCubit = _maybeThemeCubit(context);
+    final isOutdoor = tokens.isHighContrast;
+    final canCustomers = MobileWorkspaceResolver.canViewCustomers(session);
+    final storeName = session.activeStore.name.isEmpty
+        ? 'OXO.ID POS'
+        : session.activeStore.name;
+
+    return Column(
+      key: const Key('workspace_pos_fast_lane'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOperatorStrip(tokens, session, displayName, MobileWorkspaceRole.posFastLane),
+        const SizedBox(height: 12),
+
+        // Giant Thumb-Zone Primary POS Fast-Lane CTA
+        SizedBox(
+          width: double.infinity,
+          height: 58,
+          child: ElevatedButton.icon(
+            key: const Key('fast_lane_open_pos_btn'),
+            onPressed: () => context.push('/pos'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: tokens.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            icon: const Icon(Icons.point_of_sale_rounded, size: 24),
+            label: Text(
+              'Mulai Transaksi Kasir (${posState.capabilities.posDisplayName})',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Strict Blind Drop Shift Status Hero (NEVER shows expected_cash)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: _hasOpenShift ? tokens.accentGradientColors : tokens.heroGradientColors,
+            ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    NusaBadge(
+                      label: _hasOpenShift
+                          ? 'SHIFT AKTIF • ${_shiftTerminalLabel.isEmpty ? 'POS' : _shiftTerminalLabel}'
+                          : 'SHIFT BELUM DIBUKA',
+                      variant: _hasOpenShift ? NusaBadgeVariant.success : NusaBadgeVariant.warning,
+                    ),
+                    if (_shiftBlindDropEnforced)
+                      const NusaBadge(
+                        label: 'Strict Blind Drop',
+                        variant: NusaBadgeVariant.navy,
+                        icon: Icons.lock_outline_rounded,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _hasOpenShift
+                    ? 'Kas Laci Terkunci (Blind Drop Aktif)'
+                    : 'Buka Shift Kasir Sebelum Melayani Pembeli',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _hasOpenShift
+                    ? 'Total kas sistem disembunyikan server hingga tutup shift diverifikasi.'
+                    : 'Catat modal awal laci kas untuk memulai shift operasional cabang.',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 42,
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push('/shifts'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white70),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.lock_clock_rounded, size: 18),
+                  label: Text(
+                    _hasOpenShift ? 'Kelola & Tutup Shift (Blind Drop)' : 'Buka Shift Sekarang',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Fast-Lane Status Chips (Held Carts, Offline Queue, High-Contrast Outdoor Toggle)
+        Row(
+          children: [
+            Expanded(
+              child: _buildOperationalMetricTile(
+                tokens,
+                icon: Icons.pause_circle_outline_rounded,
+                accentColor: tokens.accent,
+                label: 'Keranjang Ditahan',
+                value: '${posState.heldCarts.length} Transaksi',
+                onTap: () => context.push('/pos'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildOperationalMetricTile(
+                tokens,
+                icon: Icons.task_alt_rounded,
+                accentColor: tokens.positive,
+                label: 'Tugas Cabang',
+                value: '$_openTasksCount Terbuka',
+                onTap: () => showAlertNotificationsModal(
+                  context,
+                  voidCountFromServer: _voidCount,
+                  varianceShiftsCount: _varianceShiftsCount,
+                  overdueReceivables: _overdueReceivables,
+                  storeName: storeName,
+                  approvals: _approvalsList,
+                  tasks: _tasksList,
+                  offlineConflicts: mergedConflicts,
+                  pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
+                  onDecideApproval: _decideApproval,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        if (themeCubit != null) ...[
+          NusaCard(
+            onTap: () => themeCubit.toggleOutdoorHighContrast(),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.contrast_rounded,
+                  color: isOutdoor ? tokens.accent : tokens.textPrimary,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Mode Kontras Tinggi (Outdoor POS)',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: tokens.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        isOutdoor
+                            ? 'Aktif — kontras maksimal untuk sinar matahari langsung'
+                            : 'Tingkatkan ketajaman huruf & border untuk area terang',
+                        style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: isOutdoor,
+                  activeColor: tokens.accent,
+                  onChanged: (_) => themeCubit.toggleOutdoorHighContrast(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // Cashier Fast-Lane Quick Grid (RBAC Safe — NO financial P&L / AP / Approvals)
+        NusaCard(
+          child: Row(
+            children: [
+              _fastLaneTile(tokens, Icons.point_of_sale_rounded, 'Kasir POS', () => context.push('/pos')),
+              _fastLaneTile(tokens, Icons.lock_clock_rounded, 'Shift', () => context.push('/shifts')),
+              _fastLaneTile(tokens, Icons.receipt_long_rounded, 'Riwayat', () => widget.onSwitchTab(2)),
+              if (canCustomers)
+                _fastLaneTile(tokens, Icons.groups_outlined, 'Pelanggan', () => context.push('/customers'))
+              else
+                _fastLaneTile(tokens, Icons.inventory_2_outlined, 'Cek Harga', () => widget.onSwitchTab(1)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildCopilotBanner(context, tokens, session, MobileWorkspaceRole.posFastLane),
+      ],
+    );
+  }
+
+  Widget _buildWarehouseWorkbenchWorkspace(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    PosState posState,
+    String displayName,
+    int lowStock,
+    int expiring,
+  ) {
+    final canPurchases = MobileWorkspaceResolver.canManagePurchases(session);
+    final canSuppliers = MobileWorkspaceResolver.canViewSuppliers(session);
+    return Column(
+      key: const Key('workspace_warehouse_workbench'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOperatorStrip(tokens, session, displayName, MobileWorkspaceRole.warehouseWorkbench),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => context.push('/inventory-ops?tab=1'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: tokens.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                  label: const Text(
+                    'Scan Opname Stok',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ),
+            if (canPurchases) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push('/purchases?tab=0'),
+                    icon: Icon(Icons.local_shipping_outlined, size: 18, color: tokens.positive),
+                    label: const Text(
+                      'Terima PO',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: tokens.heroGradientColors),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Kesehatan Stok Gudang',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  NusaBadge(
+                    label: '${posState.allProducts.length} SKU',
+                    variant: NusaBadgeVariant.primary,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '$lowStock Menipis • $expiring Batch FEFO',
+                  style: AppTheme.moneyStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '$_openTasksCount tugas gudang aktif • $_pendingApprovalsCount persetujuan stok menunggu',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildCopilotBanner(context, tokens, session, MobileWorkspaceRole.warehouseWorkbench),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildOperationalMetricTile(
+                tokens,
+                icon: Icons.swap_horiz_rounded,
+                accentColor: tokens.accent,
+                label: 'Transfer Antar Cabang',
+                value: 'Kirim & Terima',
+                onTap: () => context.push('/inventory-ops?tab=3'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: canPurchases
+                  ? _buildOperationalMetricTile(
+                      tokens,
+                      icon: Icons.auto_awesome_outlined,
+                      accentColor: tokens.positive,
+                      label: 'Saran Kulakan AI',
+                      value: 'Reorder PO',
+                      onTap: () => context.push('/purchases?tab=2'),
+                    )
+                  : _buildOperationalMetricTile(
+                      tokens,
+                      icon: Icons.tune_rounded,
+                      accentColor: tokens.positive,
+                      label: 'Penyesuaian Stok',
+                      value: 'Koreksi Gudang',
+                      onTap: () => context.push('/inventory-ops?tab=0'),
+                    ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _buildOperationalMetricTile(
+                tokens,
+                icon: Icons.swap_vert_rounded,
+                accentColor: tokens.warning,
+                label: 'Kartu Mutasi Stok',
+                value: 'Audit Keluar/Masuk',
+                onTap: () => context.push('/inventory-ops?tab=2'),
+              ),
+            ),
+            if (canSuppliers) ...[
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildOperationalMetricTile(
+                  tokens,
+                  icon: Icons.business_outlined,
+                  accentColor: tokens.textPrimary,
+                  label: 'Data Pemasok',
+                  value: 'Vendor & PO',
+                  onTap: () => context.push('/suppliers'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmployeeEssWorkspace(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    String displayName,
+  ) {
+    final canApprovals = MobileWorkspaceResolver.canViewApprovals(session);
+    return Column(
+      key: const Key('workspace_employee_ess'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOperatorStrip(tokens, session, displayName, MobileWorkspaceRole.employeeEss),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: tokens.heroGradientColors),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const NusaBadge(
+                label: 'PORTAL STAF OPERASIONAL',
+                variant: NusaBadgeVariant.primary,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$_openTasksCount Tugas Cabang Aktif',
+                style: AppTheme.moneyStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Administrasi HRD, absensi, slip gaji, PPh 21 & BPJS dikelola secara terpusat di OXO.ID Cloud Web (/admin).',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              if (canApprovals) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    onPressed: () => context.push('/approvals'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: tokens.accent,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.verified_user_outlined, size: 20),
+                    label: Text(
+                      'Meja Persetujuan ($_pendingApprovalsCount Menunggu)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildCopilotBanner(context, tokens, session, MobileWorkspaceRole.employeeEss),
+        const SizedBox(height: 12),
+        Text(
+          'Tugas Operasional Anda ($_openTasksCount)',
+          style: TextStyle(
+            fontSize: 14.5,
+            fontWeight: FontWeight.w800,
+            color: tokens.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (_tasksList.isEmpty)
+          const NusaEmptyState(
+            icon: Icons.check_circle_outline_rounded,
+            title: 'Tidak Ada Tugas Tertunda',
+            subtitle: 'Seluruh tugas operasional Anda hari ini dalam status selesai.',
+          )
+        else
+          ..._tasksList.take(5).map(
+                (t) => NusaCard(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.assignment_outlined, color: tokens.accent, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (t['title'] ?? 'Tugas Cabang').toString(),
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                color: tokens.textPrimary,
+                              ),
+                            ),
+                            if (t['description'] != null)
+                              Text(
+                                t['description'].toString(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+      ],
+    );
+  }
+
+  Widget _fastLaneTile(
+    NusaThemeTokens tokens,
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: tokens.accentSoft,
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(
+                    color: tokens.isHighContrast ? tokens.borderDefault : Colors.transparent,
+                    width: tokens.borderWidth,
+                  ),
+                ),
+                child: Icon(icon, color: tokens.accentDark, size: 22),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: tokens.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _compactStatChip(
+    NusaThemeTokens tokens, {
+    required String label,
+    required String value,
+    required Color accent,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: tokens.bgElevated,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: tokens.textSecondary),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: AppTheme.moneyStyle(fontSize: 16, fontWeight: FontWeight.w800, color: accent),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCopilotBanner(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    MobileWorkspaceRole ws,
+  ) {
+    return NusaCard(
+      onTap: () => _openCopilot(session),
+      backgroundColor: tokens.accentSoft,
+      borderColor: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.35),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: tokens.accentGradientColors),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Tanya OXO Copilot AI (Chat & Suara)',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: tokens.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  ws == MobileWorkspaceRole.posFastLane
+                      ? 'Cek stok produk, jumlah transaksi Anda & tugas kasir lewat suara/chat.'
+                      : 'Ringkas omzet, stok kritis, approval & operasional cabang instan.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: tokens.textSecondary, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.mic_none_rounded, size: 20, color: tokens.accentDark),
+        ],
       ),
     );
   }
@@ -482,8 +1423,166 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return byUuid.values.toList();
   }
 
+  Widget _buildSyncConflictBanner(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    PosState posState,
+    List<Map<String, dynamic>> mergedConflicts,
+  ) {
+    return GestureDetector(
+      onTap: () {
+        showAlertNotificationsModal(
+          context,
+          voidCountFromServer: _voidCount,
+          varianceShiftsCount: _varianceShiftsCount,
+          overdueReceivables: _overdueReceivables,
+          storeName: session.activeStore.name.isEmpty
+              ? 'OXO.ID POS'
+              : session.activeStore.name,
+          approvals: _approvalsList,
+          tasks: _tasksList,
+          offlineConflicts: mergedConflicts,
+          pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
+          onDecideApproval: _decideApproval,
+          onOpenOnlineOrders: () => _showOnlineOrdersSheet(context),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: tokens.dangerSoft,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: tokens.danger.withOpacity(tokens.isHighContrast ? 1.0 : 0.5),
+            width: tokens.borderWidth,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: tokens.danger.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.sync_problem_rounded, color: tokens.danger, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    posState.localSyncConflicts.every((c) {
+                      final code = (c['conflict_code'] ?? '').toString();
+                      return code.isEmpty ||
+                          code == 'InsufficientStock' ||
+                          code.toLowerCase().contains('stock');
+                    })
+                        ? '${posState.localSyncConflicts.length} Konflik Stok Sinkronisasi Offline'
+                        : '${posState.localSyncConflicts.length} Nota Offline Tertahan Validasi',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: tokens.danger,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    posState.localSyncConflicts.every((c) {
+                      final code = (c['conflict_code'] ?? '').toString();
+                      return code.isEmpty ||
+                          code == 'InsufficientStock' ||
+                          code.toLowerCase().contains('stock');
+                    })
+                        ? 'Stok habis di server saat sinkronisasi. Ketuk untuk tindak lanjut.'
+                        : 'Transaksi offline ditolak server (mis. Shift Kasir / validasi). Ketuk untuk tindak lanjut.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: tokens.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 14, color: tokens.danger),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    int activeStoreId,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tokens.dangerSoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tokens.danger, width: tokens.borderWidth),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline_rounded, color: tokens.danger, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: tokens.danger,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => _loadDashboard(storeId: activeStoreId),
+                child: const Text('Muat Ulang', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  final posCubit = context.read<PosCubit>();
+                  await context.read<AuthCubit>().logout();
+                  await posCubit.resetForLogout();
+                  if (context.mounted) {
+                    context.go('/login');
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: tokens.danger,
+                  side: BorderSide(color: tokens.danger),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Login Ulang', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopHeader(
     BuildContext context,
+    NusaThemeTokens tokens,
     AuthSessionModel session,
     int offlinePendingCount,
     int badgeCount,
@@ -491,7 +1590,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     List<Map<String, dynamic>> mergedConflicts,
   ) {
     final storeName = session.activeStore.name.isEmpty
-        ? 'NusaCommerce POS'
+        ? 'OXO.ID POS'
         : session.activeStore.name;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -504,44 +1603,46 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: tokens.bgSurface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
                 ),
-                child: const Icon(Icons.menu_rounded, size: 22, color: AppColors.navyDark),
+                child: Icon(Icons.menu_rounded, size: 22, color: tokens.textPrimary),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: InkWell(
-                onTap: () => _showBranchSwitcherModal(context, session),
+                onTap: () => _showBranchSwitcherModal(context, tokens, session),
                 borderRadius: BorderRadius.circular(999),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: tokens.bgSurface,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.storefront_rounded, size: 15, color: AppColors.primary),
+                      Icon(Icons.storefront_rounded, size: 15, color: tokens.accent),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
-                          session.activeStore.name.isEmpty ? 'Cabang Aktif' : session.activeStore.name,
+                          session.activeStore.name.isEmpty
+                              ? 'Cabang Aktif'
+                              : session.activeStore.name,
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.navyDark,
+                            color: tokens.textPrimary,
                           ),
                         ),
                       ),
                       const SizedBox(width: 2),
-                      const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: AppColors.slate500),
+                      Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: tokens.textSecondary),
                     ],
                   ),
                 ),
@@ -549,10 +1650,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             ),
             const SizedBox(width: 4),
             IconButton(
+              key: const Key('home_copilot_button'),
+              tooltip: 'OXO Copilot AI',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _openCopilot(session),
+              icon: Icon(Icons.auto_awesome_rounded, size: 21, color: tokens.accent),
+            ),
+            IconButton(
               tooltip: 'Muat ulang dasbor',
               visualDensity: VisualDensity.compact,
               onPressed: _loading ? null : () => _loadDashboard(storeId: activeStoreId),
-              icon: const Icon(Icons.refresh_rounded, size: 21, color: AppColors.slate700),
+              icon: Icon(Icons.refresh_rounded, size: 21, color: tokens.textSecondary),
             ),
             Stack(
               clipBehavior: Clip.none,
@@ -575,7 +1683,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       onOpenOnlineOrders: () => _showOnlineOrdersSheet(context),
                     );
                   },
-                  icon: const Icon(Icons.notifications_none_rounded, size: 23, color: AppColors.navyDark),
+                  icon: Icon(Icons.notifications_none_rounded, size: 23, color: tokens.textPrimary),
                 ),
                 if (badgeCount > 0)
                   Positioned(
@@ -584,8 +1692,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     child: Container(
                       width: 16,
                       height: 16,
-                      decoration: const BoxDecoration(
-                        color: AppColors.danger,
+                      decoration: BoxDecoration(
+                        color: tokens.danger,
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
@@ -613,7 +1721,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               isOnline: posState.isOnline,
               isSyncing: posState.isSyncingOfflineQueue,
               offlinePendingCount: effectivePending,
-              onTap: () => ctx.read<PosCubit>().syncOfflineTransactions(),
+              onTap: () async {
+                final cubit = ctx.read<PosCubit>();
+                final synced = await cubit.syncOfflineTransactions();
+                if (!ctx.mounted) return;
+                if (synced > 0) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      backgroundColor: AppColors.successDark,
+                      content: Text('$synced nota offline berhasil disinkronkan ke Cloud.'),
+                    ),
+                  );
+                } else if (cubit.state.localSyncConflicts.isNotEmpty) {
+                  showAlertNotificationsModal(
+                    ctx,
+                    voidCountFromServer: _voidCount,
+                    varianceShiftsCount: _varianceShiftsCount,
+                    overdueReceivables: _overdueReceivables,
+                    storeName: storeName,
+                    approvals: _approvalsList,
+                    tasks: _tasksList,
+                    offlineConflicts: _mergedOfflineConflicts(cubit.state.localSyncConflicts),
+                    pendingOnlineOrdersCount: _pendingOnlineOrdersCount,
+                    onDecideApproval: _decideApproval,
+                    onOpenOnlineOrders: () => _showOnlineOrdersSheet(ctx),
+                  );
+                }
+              },
             );
           },
         ),
@@ -621,14 +1755,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildOperatorStrip(AuthSessionModel session, String displayName) {
+  Widget _buildOperatorStrip(
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+    String displayName,
+    MobileWorkspaceRole workspace,
+  ) {
     final storeCode = session.activeStore.code.isEmpty ? '-' : session.activeStore.code;
+    final wsSpec = MobileWorkspaceResolver.specFor(workspace);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: tokens.bgSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
       ),
       child: Row(
         children: [
@@ -636,10 +1776,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: AppColors.primarySoft,
+              color: tokens.accentSoft,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.person_outline_rounded, size: 22, color: AppColors.primaryDark),
+            child: Icon(wsSpec.icon, size: 20, color: tokens.accentDark),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -649,20 +1789,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 Text(
                   'Selamat bertugas, $displayName',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w800,
-                    color: AppColors.navyDark,
+                    color: tokens.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 1),
                 Text(
-                  '${session.userRole.isEmpty ? 'Operator' : session.userRole} • Kode Cabang: $storeCode',
+                  '${wsSpec.title} • ${session.userRole.isEmpty ? 'Operator' : session.userRole} • $storeCode',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.slate500,
+                    color: tokens.textSecondary,
                   ),
                 ),
               ],
@@ -671,15 +1811,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: AppColors.navyDark,
+              color: tokens.accentSoft,
               borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.35),
+                width: tokens.borderWidth,
+              ),
             ),
             child: Text(
               (session.planName.isEmpty ? 'Starter' : session.planName).toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
-                color: Colors.white,
+                color: tokens.accentDark,
                 letterSpacing: 0.4,
               ),
             ),
@@ -691,6 +1835,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   Widget _buildPrimaryActionStrip(
     BuildContext context,
+    NusaThemeTokens tokens,
     VerticalCapabilities capabilities,
   ) {
     if (!capabilities.hasTableManagement) {
@@ -703,7 +1848,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: ElevatedButton.icon(
                 onPressed: () => context.push('/pos'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: tokens.accent,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
@@ -723,13 +1868,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: OutlinedButton.icon(
                 onPressed: () => context.push('/shifts'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.navyDark,
-                  backgroundColor: Colors.white,
-                  side: const BorderSide(color: AppColors.border),
+                  foregroundColor: tokens.textPrimary,
+                  backgroundColor: tokens.bgSurface,
+                  side: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
-                icon: const Icon(Icons.lock_clock_outlined, size: 18, color: AppColors.successDark),
+                icon: Icon(Icons.lock_clock_outlined, size: 18, color: tokens.positive),
                 label: const Text(
                   'Shift Kasir',
                   maxLines: 1,
@@ -752,7 +1897,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             child: ElevatedButton.icon(
               onPressed: () => context.push('/pos'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: tokens.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
@@ -772,13 +1917,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             child: OutlinedButton.icon(
               onPressed: () => context.push('/restaurant'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.navyDark,
-                backgroundColor: Colors.white,
-                side: const BorderSide(color: AppColors.border),
+                foregroundColor: tokens.textPrimary,
+                backgroundColor: tokens.bgSurface,
+                side: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              icon: const Icon(Icons.table_restaurant_outlined, size: 18, color: AppColors.primary),
+              icon: Icon(Icons.table_restaurant_outlined, size: 18, color: tokens.accent),
               label: const Text('Meja', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
             ),
           ),
@@ -791,13 +1936,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             child: OutlinedButton.icon(
               onPressed: () => context.push('/shifts'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.navyDark,
-                backgroundColor: Colors.white,
-                side: const BorderSide(color: AppColors.border),
+                foregroundColor: tokens.textPrimary,
+                backgroundColor: tokens.bgSurface,
+                side: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              icon: const Icon(Icons.lock_clock_outlined, size: 18, color: AppColors.successDark),
+              icon: Icon(Icons.lock_clock_outlined, size: 18, color: tokens.positive),
               label: const Text('Shift', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
             ),
           ),
@@ -806,19 +1951,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildExecutivePulseCard(BuildContext context) {
+  Widget _buildExecutivePulseCard(BuildContext context, NusaThemeTokens tokens) {
     final isUp = _growthPercent >= 0;
     final sign = _growthPercent > 0 ? '+' : '';
     return InkWell(
-      onTap: () => widget.onSwitchTab(3),
+      onTap: () => context.push('/reports'),
       borderRadius: BorderRadius.circular(18),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          gradient: AppColors.executiveNavyGradient,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: tokens.heroGradientColors,
+          ),
           borderRadius: BorderRadius.circular(18),
-          boxShadow: AppColors.cardShadow,
+          boxShadow: tokens.isHighContrast ? null : AppColors.cardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -826,14 +1975,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Omzet Bersih Hari Ini',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
+                const Expanded(
+                  child: Text(
+                    'Omzet Bersih Hari Ini',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                   decoration: BoxDecoration(
@@ -841,7 +1995,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    _loading ? 'Memuat...' : '$_todayTxCount Transaksi',
+                    '$_todayTxCount Transaksi',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
@@ -852,37 +2006,49 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              _loading ? 'Memuat...' : IdrCurrencyFormatter.format(_todaySales),
-              style: AppTheme.moneyStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                IdrCurrencyFormatter.format(_todaySales),
+                style: AppTheme.moneyStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
               ),
             ),
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-                      color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
-                      size: 16,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      '$sign${_growthPercent.toStringAsFixed(1)}% vs kemarin',
-                      style: TextStyle(
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
                         color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                        size: 16,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          '$sign${_growthPercent.toStringAsFixed(1)}% vs kemarin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 const Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       'Detail Laporan',
@@ -904,27 +2070,220 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildOperationalMetricsGrid(BuildContext context) {
+  Widget _buildQuickActionSpeedDial(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+  ) {
+    final canPos = MobileWorkspaceResolver.canUsePos(session);
+    final canCashWrite = session.isOwner ||
+        session.isLocalTrial ||
+        MobileWorkspaceResolver.hasAnyPermission(session, const [
+          'accounting.petty_cash',
+          'expenses.create',
+        ]);
+    final canCreateProduct = session.isOwner ||
+        session.isLocalTrial ||
+        MobileWorkspaceResolver.hasAnyPermission(session, const [
+          'products.create',
+          'products.update',
+        ]);
+    final canOpname = MobileWorkspaceResolver.canManageInventory(session);
+
+    final actions = [
+      if (canPos)
+        (
+          label: 'Kasir POS',
+          icon: Icons.point_of_sale_rounded,
+          color: tokens.accent,
+          onTap: () => context.push('/pos'),
+        ),
+      if (canCashWrite)
+        (
+          label: 'Catat Kas',
+          icon: Icons.account_balance_wallet_rounded,
+          color: tokens.positive,
+          onTap: () => context.push('/cash-ledger'),
+        ),
+      if (canCreateProduct)
+        (
+          label: '+ Barang',
+          icon: Icons.add_box_rounded,
+          color: AppColors.purple,
+          onTap: () => widget.onSwitchTab(1),
+        ),
+      if (canOpname)
+        (
+          label: 'Scan Opname',
+          icon: Icons.qr_code_scanner_rounded,
+          color: tokens.warning,
+          onTap: () => context.push('/inventory-ops?tab=1'),
+        ),
+    ];
+
+    if (actions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+      decoration: BoxDecoration(
+        color: tokens.bgSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 10),
+            child: Text(
+              'AKSI CEPAT OPERASIONAL',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                color: tokens.textSecondary,
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (final action in actions)
+                Expanded(
+                  child: InkWell(
+                    onTap: action.onTap,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: action.color,
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: Icon(action.icon, color: Colors.white, size: 22),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            action.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: tokens.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAllModulesBanner(BuildContext context, NusaThemeTokens tokens) {
+    return InkWell(
+      onTap: () => widget.onSwitchTab(3),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: tokens.bgSurface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: tokens.accentSoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.grid_view_rounded, color: tokens.accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Semua Fitur & Modul Usaha',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Kategori, PO Beli, Retur, Buku Kas, Penawaran, KDS & Toko Online.',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: tokens.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Buka →',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: tokens.accent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOperationalMetricsGrid(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    int lowStock,
+    int expiring,
+  ) {
     return Column(
       children: [
         Row(
           children: [
             Expanded(
               child: _buildOperationalMetricTile(
+                tokens,
                 icon: Icons.monetization_on_outlined,
-                accentColor: AppColors.successDark,
+                accentColor: tokens.positive,
                 label: 'Laba Kotor Hari Ini',
-                value: _loading ? '...' : IdrCurrencyFormatter.format(_grossProfit),
-                onTap: () => widget.onSwitchTab(3),
+                value: IdrCurrencyFormatter.format(_grossProfit),
+                onTap: () => context.push('/reports'),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _buildOperationalMetricTile(
+                tokens,
                 icon: Icons.receipt_long_outlined,
-                accentColor: AppColors.warningDark,
+                accentColor: tokens.warning,
                 label: 'Piutang Pelanggan (Bon)',
-                value: _loading ? '...' : IdrCurrencyFormatter.format(_totalReceivables),
+                value: IdrCurrencyFormatter.format(_totalReceivables),
                 onTap: () => context.push('/debts'),
               ),
             ),
@@ -935,21 +2294,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           children: [
             Expanded(
               child: _buildOperationalMetricTile(
+                tokens,
                 icon: Icons.local_shipping_outlined,
-                accentColor: AppColors.primary,
+                accentColor: tokens.accent,
                 label: 'Hutang Supplier Tempo',
-                value: _loading ? '...' : IdrCurrencyFormatter.format(_totalPayables),
+                value: IdrCurrencyFormatter.format(_totalPayables),
                 onTap: () => context.push('/debts?tab=payables'),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _buildOperationalMetricTile(
+                tokens,
                 icon: Icons.inventory_2_outlined,
-                accentColor: (_lowStockCount + _expiringCount) > 0 ? AppColors.dangerDark : AppColors.purple,
+                accentColor: (lowStock + expiring) > 0 ? tokens.danger : AppColors.purple,
                 label: 'Stok Menipis & FEFO',
-                value: _loading ? '...' : '$_lowStockCount Menipis • $_expiringCount FEFO',
-                onTap: () => widget.onSwitchTab(2),
+                value: '$lowStock Menipis • $expiring FEFO',
+                onTap: () => widget.onSwitchTab(1),
               ),
             ),
           ],
@@ -958,7 +2319,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildOperationalMetricTile({
+  Widget _buildOperationalMetricTile(
+    NusaThemeTokens tokens, {
     required IconData icon,
     required Color accentColor,
     required String label,
@@ -971,9 +2333,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       child: Container(
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: tokens.bgSurface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,10 +2349,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.slate600,
+                      color: tokens.textSecondary,
                     ),
                   ),
                 ),
@@ -1005,7 +2367,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 style: AppTheme.moneyStyle(
                   fontSize: 14.5,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.navyDark,
+                  color: tokens.textPrimary,
                 ),
               ),
             ),
@@ -1017,17 +2379,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   Widget _buildModulesDirectory(
     BuildContext context,
+    NusaThemeTokens tokens,
     VerticalCapabilities capabilities,
   ) {
     final session = context.watch<AuthCubit>().state.session;
     final onlineGated = session.isModuleGated('online_store');
-    final accountingGated = session.isModuleGated('accounting');
-    final hrGated = session.isModuleGated('hr');
 
     final modules = [
       (
         icon: Icons.point_of_sale_rounded,
-        color: AppColors.primary,
+        color: tokens.accent,
         title: capabilities.posDisplayName,
         subtitle: capabilities.posSubtitle,
         isGated: false,
@@ -1035,13 +2396,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         onTap: () => context.push('/pos'),
       ),
       (
-        icon: Icons.local_shipping_outlined,
-        color: AppColors.warningDark,
-        title: 'Pemasok & Stok Masuk',
-        subtitle: 'Supplier, rekening & beli stok',
+        icon: Icons.analytics_outlined,
+        color: const Color(0xFF0284C7),
+        title: 'Pusat Laporan Bisnis (50)',
+        subtitle: '50 laporan paritas Cloud, WA & PDF',
         isGated: false,
         requiredTier: 'STARTER',
-        onTap: () => context.push('/suppliers?tab=stock-in'),
+        onTap: () => context.push('/reports'),
+      ),
+      (
+        icon: Icons.verified_user_outlined,
+        color: tokens.warning,
+        title: 'Meja Persetujuan Owner',
+        subtitle: _pendingApprovalsCount > 0
+            ? '$_pendingApprovalsCount permintaan menunggu keputusan'
+            : 'Otorisasi Maker-Checker, Void & PO',
+        isGated: false,
+        requiredTier: 'STARTER',
+        onTap: () => context.push('/approvals'),
       ),
       (
         icon: Icons.inventory_2_outlined,
@@ -1050,11 +2422,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         subtitle: 'Produk, HPP, FEFO & kamera',
         isGated: false,
         requiredTier: 'STARTER',
-        onTap: () => widget.onSwitchTab(2),
+        onTap: () => widget.onSwitchTab(1),
+      ),
+      (
+        icon: Icons.local_shipping_outlined,
+        color: tokens.warning,
+        title: 'Pemasok & Stok Masuk',
+        subtitle: 'Supplier, rekening & beli stok',
+        isGated: false,
+        requiredTier: 'STARTER',
+        onTap: () => context.push('/suppliers?tab=stock-in'),
       ),
       (
         icon: Icons.people_outline_rounded,
-        color: AppColors.primaryDark,
+        color: tokens.accentDark,
         title: 'Pelanggan & Member',
         subtitle: 'Diskon grup, poin & kasbon',
         isGated: false,
@@ -1063,7 +2444,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
       (
         icon: Icons.menu_book_outlined,
-        color: AppColors.dangerDark,
+        color: tokens.danger,
         title: 'Buku Bon & Biaya Toko',
         subtitle: 'Piutang, hutang & pengeluaran',
         isGated: false,
@@ -1072,7 +2453,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
       (
         icon: Icons.lock_clock_outlined,
-        color: AppColors.successDark,
+        color: tokens.positive,
         title: 'Shift Kasir & Z-Report',
         subtitle: 'Kas laci, mutasi & blind count',
         isGated: false,
@@ -1082,7 +2463,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       if (capabilities.hasTableManagement)
         (
           icon: Icons.table_restaurant_outlined,
-          color: AppColors.navyMid,
+          color: tokens.accentDark,
           title: 'Denah Meja & Resto F&B',
           subtitle: 'Open tab, pindah meja & KOT',
           isGated: false,
@@ -1090,38 +2471,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           onTap: () => context.push('/restaurant'),
         ),
       (
-        icon: Icons.analytics_outlined,
-        color: AppColors.navyDark,
-        title: 'Laporan Laba Rugi Owner',
-        subtitle: accountingGated
-            ? 'Ringkasan kas & SAK EMKM'
-            : 'SAK EMKM, metode & anti-fraud',
-        isGated: accountingGated,
-        requiredTier: 'PRO',
-        onTap: () {
-          if (accountingGated) {
-            showCascadeModuleTeaserModal(
-              context,
-              moduleKey: 'accounting',
-              moduleTitle: 'Laporan Keuangan & Akuntansi SAK EMKM',
-              requiredTier: 'PRO',
-              currentTier: session.tier,
-              description:
-                  'Buka laporan neraca lengkap, buku besar, dan jurnal otomatis standar SAK EMKM.',
-              benefits: const [
-                'Laporan Laba Rugi & Neraca otomatis per cabang',
-                'Buku besar & jurnal transaksi kasir real-time',
-                'Kontrol biaya & anti-fraud kasir menyeluruh',
-              ],
-            );
-          } else {
-            widget.onSwitchTab(3);
-          }
-        },
-      ),
-      (
         icon: Icons.shopping_bag_outlined,
-        color: AppColors.primary,
+        color: tokens.accent,
         title: 'Pesanan Toko Online',
         subtitle: onlineGated
             ? 'Etalase web & order otomatis'
@@ -1151,34 +2502,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           }
         },
       ),
-      (
-        icon: Icons.badge_outlined,
-        color: AppColors.navyMid,
-        title: 'HRD & Absensi Staf',
-        subtitle: 'Jadwal shift, foto & komisi',
-        isGated: hrGated,
-        requiredTier: 'ENTERPRISE',
-        onTap: () {
-          if (hrGated) {
-            showCascadeModuleTeaserModal(
-              context,
-              moduleKey: 'hr',
-              moduleTitle: 'HRD, Shift & Absensi Karyawan',
-              requiredTier: 'ENTERPRISE',
-              currentTier: session.tier,
-              description:
-                  'Pantau absensi foto/GPS staf cabang dan komisi kasir otomatis.',
-              benefits: const [
-                'Absensi kasir berbasis shift dengan foto & lokasi',
-                'Rekap keterlambatan & lembur karyawan cabang',
-                'Perhitungan komisi kasir per transaksi otomatis',
-              ],
-            );
-          } else {
-            context.push('/shifts');
-          }
-        },
-      ),
     ];
 
     return Column(
@@ -1189,6 +2512,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             children: [
               Expanded(
                 child: _buildModuleDirectoryCard(
+                  tokens,
                   icon: modules[i].icon,
                   color: modules[i].color,
                   title: modules[i].title,
@@ -1202,6 +2526,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Expanded(
                 child: i + 1 < modules.length
                     ? _buildModuleDirectoryCard(
+                        tokens,
                         icon: modules[i + 1].icon,
                         color: modules[i + 1].color,
                         title: modules[i + 1].title,
@@ -1219,7 +2544,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildModuleDirectoryCard({
+  Widget _buildModuleDirectoryCard(
+    NusaThemeTokens tokens, {
     required IconData icon,
     required Color color,
     required String title,
@@ -1234,10 +2560,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       child: Container(
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: isGated ? const Color(0xFFFFFBEB) : Colors.white,
+          color: isGated ? tokens.warningSoft : tokens.bgSurface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isGated ? const Color(0xFFFDE68A) : AppColors.border,
+            color: isGated ? tokens.warning : tokens.borderSubtle,
+            width: tokens.borderWidth,
           ),
         ),
         child: Row(
@@ -1247,7 +2574,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: color, size: 19),
@@ -1265,10 +2592,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                           title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.navyDark,
+                            color: tokens.textPrimary,
                             height: 1.2,
                           ),
                         ),
@@ -1284,9 +2611,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: AppColors.slate500,
+                      color: tokens.textSecondary,
                       height: 1.25,
                     ),
                   ),
@@ -1322,9 +2649,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   Future<void> _showOnlineOrdersSheet(BuildContext context) async {
+    final tokens = NusaThemeTokens.of(context);
     List<Map<String, dynamic>> orders = [];
     bool loadingOrders = true;
     String? ordersError;
+    String? modalActionError;
     String selectedFilter = 'all';
 
     Future<void> fetchOrders(StateSetter setModalState) async {
@@ -1347,11 +2676,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       }
     }
 
+    Future<void> updateOrderInline(
+      int orderId,
+      String newStatus,
+      StateSetter setModalState, {
+      String? trackingNumber,
+    }) async {
+      setModalState(() => modalActionError = null);
+      try {
+        await _api.dio.post(
+          ApiEndpoints.updateOnlineOrderStatus(orderId),
+          data: {
+            'online_order_status': newStatus,
+            if (trackingNumber != null && trackingNumber.trim().isNotEmpty)
+              'shipping_tracking_number': trackingNumber.trim(),
+          },
+        );
+        await fetchOrders(setModalState);
+      } catch (e) {
+        setModalState(() => modalActionError = ApiClient.extractErrorMessage(e));
+      }
+    }
+
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: tokens.bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1375,9 +2726,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Pesanan Toko Online (Webstore)',
-                          style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                          style: TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w800,
+                            color: tokens.textPrimary,
+                          ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.refresh_rounded),
@@ -1387,7 +2742,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
-                      height: 34,
+                      height: 36,
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         children: [
@@ -1413,23 +2768,43 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         ],
                       ),
                     ),
+                    if (modalActionError != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: tokens.dangerSoft,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: tokens.danger),
+                        ),
+                        child: Text(
+                          modalActionError!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: tokens.danger,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Expanded(
                       child: loadingOrders
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const NusaListSkeleton(itemCount: 4)
                           : ordersError != null
                               ? Center(
                                   child: Text(
                                     ordersError!,
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(color: AppColors.dangerDark),
+                                    style: TextStyle(color: tokens.danger),
                                   ),
                                 )
                               : orders.isEmpty
-                                  ? const Center(
+                                  ? Center(
                                       child: Text(
                                         'Belum ada pesanan toko online pada filter ini.',
-                                        style: TextStyle(color: AppColors.slate500),
+                                        style: TextStyle(color: tokens.textSecondary),
                                       ),
                                     )
                                   : ListView.separated(
@@ -1439,7 +2814,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                       itemBuilder: (_, idx) {
                                         final o = orders[idx];
                                         final id = (o['id'] as num?)?.toInt() ?? 0;
-                                        final status = (o['online_order_status'] ?? 'pending_payment').toString();
+                                        final status =
+                                            (o['online_order_status'] ?? 'pending_payment').toString();
                                         final total = (o['grand_total'] as num?)?.toDouble() ?? 0;
                                         return NusaCard(
                                           padding: const EdgeInsets.all(12),
@@ -1451,7 +2827,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                                   Expanded(
                                                     child: Text(
                                                       '${o['number'] ?? '#ONLINE'} • ${o['customer_name'] ?? 'Pelanggan'}',
-                                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w800,
+                                                        fontSize: 13,
+                                                        color: tokens.textPrimary,
+                                                      ),
                                                     ),
                                                   ),
                                                   Text(
@@ -1459,7 +2839,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                                     style: AppTheme.moneyStyle(
                                                       fontSize: 13.5,
                                                       fontWeight: FontWeight.w800,
-                                                      color: AppColors.primary,
+                                                      color: tokens.accent,
                                                     ),
                                                   ),
                                                 ],
@@ -1468,18 +2848,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                               Text(
                                                 '${o['items_count'] ?? 0} item • Status: ${status.toUpperCase()}'
                                                 '${o['tracking_number'] != null ? ' • Resi: ${o['tracking_number']}' : ''}',
-                                                style: const TextStyle(fontSize: 11.5, color: AppColors.slate600),
+                                                style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
                                               ),
-                                              if (o['shipping_address'] != null && o['shipping_address'].toString().isNotEmpty)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(top: 2),
-                                                  child: Text(
-                                                    o['shipping_address'].toString(),
-                                                    maxLines: 2,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: const TextStyle(fontSize: 11, color: AppColors.slate500),
-                                                  ),
-                                                ),
                                               const SizedBox(height: 8),
                                               Wrap(
                                                 spacing: 6,
@@ -1487,25 +2857,42 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                                 children: [
                                                   if (status == 'pending_payment' || status == 'paid')
                                                     OutlinedButton(
-                                                      onPressed: () async {
-                                                        await _updateOnlineOrder(id, 'processing', setModalState, fetchOrders);
-                                                      },
-                                                      style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                                                      onPressed: () => updateOrderInline(
+                                                        id,
+                                                        'processing',
+                                                        setModalState,
+                                                      ),
+                                                      style: OutlinedButton.styleFrom(
+                                                        visualDensity: VisualDensity.compact,
+                                                      ),
                                                       child: const Text('Proses Order'),
                                                     ),
                                                   if (status == 'processing' || status == 'paid')
                                                     ElevatedButton(
-                                                      onPressed: () => _promptShipOnlineOrder(ctx, id, setModalState, fetchOrders),
-                                                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
+                                                      onPressed: () => _promptShipOnlineOrder(
+                                                        ctx,
+                                                        id,
+                                                        (tracking) => updateOrderInline(
+                                                          id,
+                                                          'shipped',
+                                                          setModalState,
+                                                          trackingNumber: tracking,
+                                                        ),
+                                                      ),
+                                                      style: ElevatedButton.styleFrom(
+                                                        visualDensity: VisualDensity.compact,
+                                                      ),
                                                       child: const Text('Input Resi & Kirim'),
                                                     ),
                                                   if (status == 'shipped')
                                                     ElevatedButton(
-                                                      onPressed: () async {
-                                                        await _updateOnlineOrder(id, 'completed', setModalState, fetchOrders);
-                                                      },
+                                                      onPressed: () => updateOrderInline(
+                                                        id,
+                                                        'completed',
+                                                        setModalState,
+                                                      ),
                                                       style: ElevatedButton.styleFrom(
-                                                        backgroundColor: AppColors.successDark,
+                                                        backgroundColor: tokens.positive,
                                                         visualDensity: VisualDensity.compact,
                                                       ),
                                                       child: const Text('Tandai Selesai'),
@@ -1531,40 +2918,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
-  Future<void> _updateOnlineOrder(
-    int orderId,
-    String newStatus,
-    StateSetter setModalState,
-    Future<void> Function(StateSetter) reload, {
-    String? trackingNumber,
-  }) async {
-    try {
-      await _api.dio.post(
-        ApiEndpoints.updateOnlineOrderStatus(orderId),
-        data: {
-          'online_order_status': newStatus,
-          if (trackingNumber != null && trackingNumber.trim().isNotEmpty)
-            'shipping_tracking_number': trackingNumber.trim(),
-        },
-      );
-      await reload(setModalState);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.danger,
-            content: Text(ApiClient.extractErrorMessage(e)),
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _promptShipOnlineOrder(
     BuildContext context,
     int orderId,
-    StateSetter setModalState,
-    Future<void> Function(StateSetter) reload,
+    Future<void> Function(String tracking) onConfirm,
   ) async {
     final resiCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -1585,20 +2942,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
     );
     if (ok == true) {
-      await _updateOnlineOrder(
-        orderId,
-        'shipped',
-        setModalState,
-        reload,
-        trackingNumber: resiCtrl.text,
-      );
+      await onConfirm(resiCtrl.text);
     }
   }
 
-  void _showBranchSwitcherModal(BuildContext context, AuthSessionModel session) {
+  void _showBranchSwitcherModal(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    AuthSessionModel session,
+  ) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: tokens.bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -1608,9 +2963,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Pilih Cabang Toko Aktif',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: tokens.textPrimary,
+              ),
             ),
             const SizedBox(height: 12),
             ...session.availableStores.map(
@@ -1618,22 +2977,34 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: CircleAvatar(
                   backgroundColor: branch.id == session.activeStore.id
-                      ? AppColors.primary
-                      : AppColors.primarySoft,
+                      ? tokens.accent
+                      : tokens.accentSoft,
                   child: Icon(
                     Icons.store_rounded,
-                    color: branch.id == session.activeStore.id ? Colors.white : AppColors.primary,
+                    color: branch.id == session.activeStore.id ? Colors.white : tokens.accent,
                   ),
                 ),
-                title: Text(branch.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text('Kode: ${branch.code} • ${branch.city ?? 'Indonesia'}'),
+                title: Text(
+                  branch.name,
+                  style: TextStyle(fontWeight: FontWeight.w700, color: tokens.textPrimary),
+                ),
+                subtitle: Text(
+                  'Kode: ${branch.code} • ${branch.city ?? 'Indonesia'}',
+                  style: TextStyle(color: tokens.textSecondary),
+                ),
                 trailing: branch.id == session.activeStore.id
-                    ? const Icon(Icons.check_circle_rounded, color: AppColors.success)
+                    ? Icon(Icons.check_circle_rounded, color: tokens.positive)
                     : null,
-                onTap: () {
-                  context.read<AuthCubit>().switchStoreBranch(branch);
+                onTap: () async {
                   Navigator.pop(ctx);
-                  _loadDashboard(storeId: branch.id);
+                  if (branch.id == session.activeStore.id) return;
+                  await context.read<AuthCubit>().switchStoreBranch(branch);
+                  if (context.mounted) {
+                    await context.read<PosCubit>().syncWithCloud(force: true);
+                  }
+                  if (mounted) {
+                    await _loadDashboard(storeId: branch.id);
+                  }
                 },
               ),
             ),
@@ -1643,14 +3014,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildLocalTrialUpgradeBanner(BuildContext context, int activeStoreId) {
+  Widget _buildLocalTrialUpgradeBanner(
+    BuildContext context,
+    NusaThemeTokens tokens,
+    int activeStoreId,
+  ) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.primarySoft,
+        color: tokens.accentSoft,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withOpacity(0.28)),
+        border: Border.all(
+          color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.32),
+          width: tokens.borderWidth,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1662,13 +3040,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.14),
+                  color: tokens.accent.withOpacity(0.16),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.cloud_upload_outlined, color: AppColors.primary, size: 20),
+                child: Icon(Icons.cloud_upload_outlined, color: tokens.accentDark, size: 20),
               ),
               const SizedBox(width: 10),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1677,16 +3055,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.navyDark,
+                        color: tokens.textPrimary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Cadangkan ke NusaCommerce Cloud agar aman jika HP ganti atau rusak.',
+                      'Cadangkan ke OXO Cloud agar aman jika HP ganti atau rusak.',
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.slate700,
+                        color: tokens.textSecondary,
                       ),
                     ),
                   ],
@@ -1705,7 +3083,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: tokens.accent,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

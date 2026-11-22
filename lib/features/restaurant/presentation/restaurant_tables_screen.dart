@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
@@ -148,7 +149,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -308,7 +309,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: NusaThemeTokens.of(context).bgPage,
       appBar: AppBar(
         title: const Text('Denah Meja Restoran (F&B)'),
         actions: [

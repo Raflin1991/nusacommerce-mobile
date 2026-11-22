@@ -168,6 +168,47 @@ class ProductVariantModel extends Equatable {
   List<Object?> get props => [id, name, sku, sellingPrice, stock];
 }
 
+class WarehouseStockModel extends Equatable {
+  final int storeId;
+  final String storeName;
+  final String storeCode;
+  final bool isWarehouse;
+  final String? city;
+  final double available;
+
+  const WarehouseStockModel({
+    required this.storeId,
+    required this.storeName,
+    this.storeCode = '',
+    this.isWarehouse = false,
+    this.city,
+    this.available = 0.0,
+  });
+
+  factory WarehouseStockModel.fromJson(Map<String, dynamic> json) {
+    return WarehouseStockModel(
+      storeId: (json['store_id'] as num?)?.toInt() ?? 0,
+      storeName: (json['store_name'] ?? 'Cabang').toString(),
+      storeCode: (json['store_code'] ?? '').toString(),
+      isWarehouse: json['is_warehouse'] == true || json['type']?.toString() == 'warehouse',
+      city: json['city']?.toString(),
+      available: (json['available'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'store_id': storeId,
+        'store_name': storeName,
+        'store_code': storeCode,
+        'is_warehouse': isWarehouse,
+        'city': city,
+        'available': available,
+      };
+
+  @override
+  List<Object?> get props => [storeId, storeName, storeCode, isWarehouse, city, available];
+}
+
 class ProductModel extends Equatable {
   final int id;
   final String name;
@@ -178,11 +219,19 @@ class ProductModel extends Equatable {
   final double costPrice;
   final double stock;
   final String unitCode;
+  final int? unitId;
   final int categoryId;
   final String categoryName;
+  final int? brandId;
+  final String? brandName;
+  final double reorderLevel;
+  final bool trackStock;
   final bool isLowStock;
   final bool soldByWeight;
   final bool requiresPrescription;
+  final double taxRate;
+  final bool taxInclusive;
+  final String? taxGroupName;
   final String? scalePlu;
   final String? digitalTargetLabel;
   final String? shelfLocation;
@@ -192,6 +241,9 @@ class ProductModel extends Equatable {
   final List<ProductBatchModel> batches;
   final List<ProductUnitConversion> unitConversions;
   final List<ProductVolumeTier> volumeTiers;
+  final List<WarehouseStockModel> warehouseStocks;
+  final double multiWarehouseStock;
+  final double otherWarehousesStock;
 
   const ProductModel({
     required this.id,
@@ -203,11 +255,19 @@ class ProductModel extends Equatable {
     this.costPrice = 0,
     required this.stock,
     this.unitCode = 'pcs',
+    this.unitId,
     this.categoryId = 1,
     this.categoryName = 'Umum',
+    this.brandId,
+    this.brandName,
+    this.reorderLevel = 5.0,
+    this.trackStock = true,
     this.isLowStock = false,
     this.soldByWeight = false,
     this.requiresPrescription = false,
+    this.taxRate = 0.0,
+    this.taxInclusive = false,
+    this.taxGroupName,
     this.scalePlu,
     this.digitalTargetLabel,
     this.shelfLocation,
@@ -217,13 +277,23 @@ class ProductModel extends Equatable {
     this.batches = const [],
     this.unitConversions = const [],
     this.volumeTiers = const [],
+    this.warehouseStocks = const [],
+    this.multiWarehouseStock = 0.0,
+    this.otherWarehousesStock = 0.0,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
     final categoryMap = json['category'] is Map ? Map<String, dynamic>.from(json['category'] as Map) : null;
+    final brandMap = json['brand'] is Map ? Map<String, dynamic>.from(json['brand'] as Map) : null;
     final unitMap = json['unit'] is Map ? Map<String, dynamic>.from(json['unit'] as Map) : null;
     final locMap = json['shelf_location'] is Map ? Map<String, dynamic>.from(json['shelf_location'] as Map) : null;
     final digitalMap = json['digital_meta'] is Map ? Map<String, dynamic>.from(json['digital_meta'] as Map) : null;
+    final taxGroupMap = json['tax_group'] is Map ? Map<String, dynamic>.from(json['tax_group'] as Map) : null;
+    final parsedTaxRate = (taxGroupMap?['total_rate'] as num?)?.toDouble() ??
+        (json['tax_rate'] as num?)?.toDouble() ??
+        0.0;
+    final parsedTaxInclusive = taxGroupMap?['is_inclusive'] == true || json['tax_inclusive'] == true;
+    final parsedTaxGroupName = taxGroupMap?['name']?.toString() ?? json['tax_group_name']?.toString();
 
     String? shelfStr;
     if (json['shelf_location'] is String) {
@@ -310,6 +380,17 @@ class ProductModel extends Equatable {
     final stockVal = (json['stock'] as num?)?.toDouble() ?? 0.0;
     final minStock = (json['reorder_level'] as num?)?.toDouble() ?? 5.0;
     final lowStock = json['is_low_stock'] == true || stockVal <= minStock;
+    final rawWh = json['warehouse_stocks'] as List<dynamic>? ?? const [];
+    final warehouseStocksList = rawWh
+        .whereType<Map>()
+        .map((w) => WarehouseStockModel.fromJson(Map<String, dynamic>.from(w)))
+        .toList();
+    final multiStock = (json['multi_warehouse_stock'] as num?)?.toDouble() ??
+        (warehouseStocksList.isNotEmpty
+            ? warehouseStocksList.fold<double>(0.0, (s, w) => s + w.available)
+            : stockVal);
+    final otherStock = (json['other_warehouses_stock'] as num?)?.toDouble() ??
+        (multiStock - stockVal).clamp(0.0, double.infinity);
 
     return ProductModel(
       id: (json['id'] as num?)?.toInt() ?? 1,
@@ -321,17 +402,31 @@ class ProductModel extends Equatable {
       costPrice: (json['cost_price'] as num?)?.toDouble() ?? 0.0,
       stock: stockVal,
       unitCode: unitCode,
+      unitId: unitMap != null
+          ? (unitMap['id'] as num?)?.toInt()
+          : (json['unit_id'] as num?)?.toInt(),
       categoryId: categoryMap != null
           ? ((categoryMap['id'] as num?)?.toInt() ?? 1)
           : ((json['category_id'] as num?)?.toInt() ?? 1),
       categoryName: categoryMap != null
           ? (categoryMap['name'] ?? 'Umum').toString()
           : (json['category_name'] ?? 'Umum').toString(),
+      brandId: brandMap != null
+          ? (brandMap['id'] as num?)?.toInt()
+          : (json['brand_id'] as num?)?.toInt(),
+      brandName: brandMap != null
+          ? brandMap['name']?.toString()
+          : json['brand_name']?.toString(),
+      reorderLevel: minStock,
+      trackStock: json['track_stock'] != false,
       isLowStock: lowStock,
       soldByWeight: soldByWeight,
       requiresPrescription: json['requires_prescription'] == true ||
           json['is_prescription_required'] == true ||
           (json['drug_class'] ?? '').toString().toLowerCase() == 'obat_keras',
+      taxRate: parsedTaxRate,
+      taxInclusive: parsedTaxInclusive,
+      taxGroupName: parsedTaxGroupName,
       scalePlu: json['scale_plu']?.toString(),
       digitalTargetLabel: digitalMap != null
           ? digitalMap['target_label']?.toString()
@@ -343,6 +438,9 @@ class ProductModel extends Equatable {
       batches: batchesList,
       unitConversions: unitConversionsList,
       volumeTiers: volumeTiersList,
+      warehouseStocks: warehouseStocksList,
+      multiWarehouseStock: multiStock,
+      otherWarehousesStock: otherStock,
     );
   }
 
@@ -356,11 +454,25 @@ class ProductModel extends Equatable {
         'cost_price': costPrice,
         'stock': stock,
         'unit_code': unitCode,
+        'unit_id': unitId,
         'category_id': categoryId,
         'category_name': categoryName,
+        'brand_id': brandId,
+        'brand_name': brandName,
+        'reorder_level': reorderLevel,
+        'track_stock': trackStock,
         'is_low_stock': isLowStock,
         'sold_by_weight': soldByWeight,
         'requires_prescription': requiresPrescription,
+        'tax_rate': taxRate,
+        'tax_inclusive': taxInclusive,
+        if (taxGroupName != null) 'tax_group_name': taxGroupName,
+        if (taxRate > 0 || taxGroupName != null)
+          'tax_group': {
+            'name': taxGroupName ?? 'Pajak',
+            'is_inclusive': taxInclusive,
+            'total_rate': taxRate,
+          },
         'scale_plu': scalePlu,
         'digital_target_label': digitalTargetLabel,
         'shelf_location': shelfLocation,
@@ -370,6 +482,9 @@ class ProductModel extends Equatable {
         'batches': batches.map((b) => b.toJson()).toList(),
         'unit_conversions': unitConversions.map((u) => u.toJson()).toList(),
         'volume_tiers': volumeTiers.map((t) => t.toJson()).toList(),
+        'warehouse_stocks': warehouseStocks.map((w) => w.toJson()).toList(),
+        'multi_warehouse_stock': multiWarehouseStock,
+        'other_warehouses_stock': otherWarehousesStock,
       };
 
   /// Phase 2.4: Resolve wholesale/tiered unit price based on cart quantity.
@@ -411,6 +526,9 @@ class ProductModel extends Equatable {
         nm.startsWith('jasa ');
   }
 
+  /// Cloud POS & APK POS parity rule: tracked physical products with balance <= 0 must not appear in POS.
+  bool get isSellableInPos => !trackStock || isServiceOrNonStockItem || stock > 0;
+
   @override
   List<Object?> get props => [
         id,
@@ -418,11 +536,17 @@ class ProductModel extends Equatable {
         sku,
         sellingPrice,
         stock,
+        trackStock,
         isLowStock,
         requiresPrescription,
+        taxRate,
+        taxInclusive,
         batches,
         unitConversions,
         volumeTiers,
+        warehouseStocks,
+        multiWarehouseStock,
+        otherWarehousesStock,
       ];
 }
 

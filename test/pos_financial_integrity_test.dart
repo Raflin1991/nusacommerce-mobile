@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1098,5 +1101,241 @@ void main() {
       expect(find.byType(NusaBrandLogo), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    test('test_pos_state_computes_exclusive_and_inclusive_tax_accurately', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      final cubit = PosCubit(apiClient: apiClient, offlineDb: OfflineDatabase(prefs));
+      final exclProd = ProductModel.fromJson({
+        'id': 801,
+        'name': 'Smartphone PPN 12% Eksklusif',
+        'selling_price': 1000000.0,
+        'stock': 10.0,
+        'tax_group': {'id': 5, 'name': 'PPN 12%', 'is_inclusive': false, 'total_rate': 12.0},
+      });
+      final inclProd = ProductModel.fromJson({
+        'id': 802,
+        'name': 'Kopi PPN 11% Inklusif',
+        'selling_price': 50000.0,
+        'stock': 10.0,
+        'tax_group': {'id': 1, 'name': 'PPN 11%', 'is_inclusive': true, 'total_rate': 11.0},
+      });
+
+      cubit.addToCart(exclProd, quantity: 1);
+      expect(cubit.state.subtotal, 1000000.0);
+      expect(cubit.state.exclusiveTaxTotal, 120000.0);
+      expect(cubit.state.grandTotal, 1120000.0);
+
+      cubit.clearCart();
+      cubit.addToCart(inclProd, quantity: 2);
+      expect(cubit.state.subtotal, 100000.0);
+      expect(cubit.state.exclusiveTaxTotal, 0.0);
+      expect(cubit.state.grandTotal, 100000.0);
+
+      await cubit.close();
+    });
+
+    test('test_online_http_422_rejection_throws_without_enqueueing_offline_or_deducting_stock', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+      apiClient.dio.interceptors.insert(
+        0,
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.path.contains('/pos/checkout')) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  type: DioExceptionType.badResponse,
+                  response: Response(
+                    requestOptions: options,
+                    statusCode: 422,
+                    data: {
+                      'success': false,
+                      'error_code': 'ShiftRequired',
+                      'message': 'Buka shift kasir terlebih dahulu sebelum melayani transaksi penjualan.',
+                    },
+                  ),
+                ),
+              );
+              return;
+            }
+            handler.next(options);
+          },
+        ),
+      );
+
+      final offlineDb = OfflineDatabase(prefs);
+      final cubit = PosCubit(apiClient: apiClient, offlineDb: offlineDb);
+      final item = ProductModel.fromJson({
+        'id': 901,
+        'name': 'Baseus GaN 65W',
+        'selling_price': 380000.0,
+        'stock': 10.0,
+      });
+
+      await offlineDb.cacheProducts([item.toJson()]);
+      await cubit.initializeCatalog();
+      cubit.reconcileCartWithLatestCatalog(refreshedProducts: [item]);
+      cubit.addToCart(item, quantity: 1);
+
+      await expectLater(
+        () => cubit.completeCheckout(
+          payments: const [
+            {'payment_method_id': 1, 'amount': 380000, 'tendered_amount': 380000},
+          ],
+          paymentMethodNames: const ['Tunai'],
+          paidTotal: 380000,
+          changeReturned: 0,
+          balanceDue: 0,
+        ),
+        throwsA(
+          isA<CheckoutServerException>()
+              .having((e) => e.errorCode, 'errorCode', 'ShiftRequired')
+              .having((e) => e.isShiftRequired, 'isShiftRequired', isTrue),
+        ),
+      );
+
+      expect(offlineDb.getOfflineSalesQueue(), isEmpty);
+      expect(cubit.state.offlinePendingCount, 0);
+      expect(cubit.state.cart.length, 1);
+      expect(cubit.state.allProducts.firstWhere((p) => p.id == 901).stock, 10.0);
+      expect(offlineDb.getCachedProducts().firstWhere((p) => p['id'] == 901)['stock'], 10.0);
+
+      await cubit.close();
+    });
+
+    testWidgets('test_nusa_sync_status_pill_distinguishes_online_pending_from_offline', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                NusaSyncStatusPill(isOnline: true, isSyncing: false, offlinePendingCount: 1),
+                NusaSyncStatusPill(isOnline: false, isSyncing: false, offlinePendingCount: 1),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Online • 1 Nota Menunggu Sinkron'), findsOneWidget);
+      expect(find.text('Offline • 1 Nota Tersimpan di HP'), findsOneWidget);
+    });
+
+    test('test_exclusive_tax_4dp_precision_and_api_client_online_recovery_on_422', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final apiClient = ApiClient(
+        secureStorage: const FlutterSecureStorage(),
+        prefs: prefs,
+      );
+
+      Map<String, dynamic>? capturedPriceCartBody;
+      bool simulateNetworkDropOnce = true;
+      apiClient.dio.httpClientAdapter = _CallbackHttpClientAdapter((options) async {
+        if (options.path.contains('/pos/price-cart')) {
+          capturedPriceCartBody = Map<String, dynamic>.from(options.data as Map);
+          return ResponseBody.fromString(
+            jsonEncode({'success': true, 'data': {'items': []}}),
+            200,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            },
+          );
+        }
+        if (options.path.contains('/pos/checkout')) {
+          if (simulateNetworkDropOnce) {
+            simulateNetworkDropOnce = false;
+            throw DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            );
+          }
+          return ResponseBody.fromString(
+            jsonEncode({
+              'success': false,
+              'error_code': 'ShiftRequired',
+              'message': 'Buka shift',
+            }),
+            422,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            },
+          );
+        }
+        return ResponseBody.fromString(
+          '{}',
+          200,
+          headers: {
+            Headers.contentTypeHeader: [Headers.jsonContentType],
+          },
+        );
+      });
+
+      // Simulate transient network drop setting isOnline = false, then server 422 response recovering isOnline = true
+      try {
+        await apiClient.dio.post('/pos/checkout', data: {});
+      } catch (_) {}
+      expect(apiClient.isOnline, isFalse);
+
+      try {
+        await apiClient.dio.post('/pos/checkout', data: {});
+      } catch (_) {}
+      expect(apiClient.isOnline, isTrue);
+
+      final cubit = PosCubit(apiClient: apiClient, offlineDb: OfflineDatabase(prefs));
+      final oddPriceProd = ProductModel.fromJson({
+        'id': 905,
+        'name': 'Produk Harga Ganjil PPN 12%',
+        'selling_price': 1238.0,
+        'stock': 10.0,
+        'batches': [
+          {'id': 77, 'batch_number': 'B-77', 'quantity': 5.0, 'is_expired': false},
+        ],
+        'tax_group': {'id': 5, 'name': 'PPN 12%', 'is_inclusive': false, 'total_rate': 12.0},
+      });
+
+      cubit.addToCart(oddPriceProd, quantity: 1);
+      // 1238 * 12% = 148.56 (4dp parity with TaxResolver, NOT rounded to 149)
+      expect(cubit.state.exclusiveTaxTotal, 148.56);
+      expect(cubit.state.grandTotal, 1386.56);
+
+      // Verify price-cart omits negative exchange lines and forwards batch_id + totalDiscount
+      cubit.selectCustomer({'id': 12, 'name': 'VIP', 'default_discount_percent': 10});
+      await cubit.verifyServerCartPrice(customerId: 12);
+      expect(capturedPriceCartBody, isNotNull);
+      expect(capturedPriceCartBody!['discount']['value'], 124.0);
+      final sentItems = capturedPriceCartBody!['items'] as List;
+      expect(sentItems.length, 1);
+      expect(sentItems.first['batch_id'], 77);
+
+      await cubit.close();
+    });
   });
+}
+
+class _CallbackHttpClientAdapter implements HttpClientAdapter {
+  final Future<ResponseBody> Function(RequestOptions options) _handler;
+
+  _CallbackHttpClientAdapter(this._handler);
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) =>
+      _handler(options);
+
+  @override
+  void close({bool force = false}) {}
 }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/hardware/barcode_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/nusa_barcode_scanner_view.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../../core/widgets/product_illustration_widget.dart';
 import '../../auth/bloc/auth_cubit.dart';
@@ -12,7 +15,7 @@ import '../bloc/pos_cubit.dart';
 import '../models/pos_models.dart';
 
 /// LAYAR 3 — PENJUALAN BARU (POS CATALOG & FLOATING CART)
-/// NusaCommerce Mobile Enterprise POS Catalog Screen
+/// OXO.ID Mobile Enterprise POS Catalog Screen
 class PosCatalogScreen extends StatefulWidget {
   const PosCatalogScreen({super.key});
 
@@ -22,6 +25,8 @@ class PosCatalogScreen extends StatefulWidget {
 
 class _PosCatalogScreenState extends State<PosCatalogScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _hardwareScannerFocusNode = FocusNode(skipTraversal: true);
+  final HardwareBarcodeWedgeBuffer _wedgeBuffer = HardwareBarcodeWedgeBuffer();
   bool _isListView = false;
   bool _isCartExpanded = false;
 
@@ -38,7 +43,32 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _hardwareScannerFocusNode.dispose();
     super.dispose();
+  }
+
+  void _handleHardwareScannerKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    final focusedWidget = FocusManager.instance.primaryFocus?.context?.widget;
+    if (focusedWidget is EditableText) return;
+
+    final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    final scanned = _wedgeBuffer.onKeyCharacter(
+      character: event.character,
+      isEnter: isEnter,
+    );
+    if (scanned != null && scanned.isNotEmpty) {
+      final ok = context.read<PosCubit>().handleBarcodeScanned(scanned);
+      if (ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 2),
+            content: Text('Scanner HID: $scanned ditambahkan ke keranjang.'),
+          ),
+        );
+      }
+    }
   }
 
   void _onProductTapped(BuildContext context, ProductModel product) {
@@ -69,7 +99,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   void _showVariantPickerSheet(BuildContext context, ProductModel product) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -109,7 +139,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -164,7 +194,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -189,6 +219,23 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               style: const TextStyle(fontSize: 13, color: AppColors.slate600),
             ),
             const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final preset in const ['0.25', '0.5', '1.0', '1.5', '2.0'])
+                  ActionChip(
+                    label: Text(
+                      '$preset ${product.unitCode}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    onPressed: () {
+                      ctrl.text = preset;
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
             TextField(
               controller: ctrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -221,7 +268,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -253,18 +300,14 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               child: SizedBox(
                 height: 210,
                 width: double.infinity,
-                child: MobileScanner(
-                  onDetect: (capture) {
-                    final barcodes = capture.barcodes;
-                    if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
-                      final code = barcodes.first.rawValue!;
-                      final ok = context.read<PosCubit>().handleBarcodeScanned(code);
-                      Navigator.pop(ctx);
-                      if (ok && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Barcode $code berhasil ditambahkan!')),
-                        );
-                      }
+                child: NusaBarcodeScannerView(
+                  onDetect: (code) {
+                    final ok = context.read<PosCubit>().handleBarcodeScanned(code);
+                    Navigator.pop(ctx);
+                    if (ok && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Barcode $code berhasil ditambahkan!')),
+                      );
                     }
                   },
                 ),
@@ -310,11 +353,12 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
           : (state.selectedTable != null ? state.selectedTable!['name'].toString() : ''),
     );
     String discMode = 'rp'; // 'rp' | 'pct'
+    String? modalError;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -343,6 +387,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       selected: discMode == 'rp',
                       onTap: () => setModalState(() {
                         discMode = 'rp';
+                        modalError = null;
                         discountCtrl.clear();
                       }),
                     ),
@@ -352,14 +397,35 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       selected: discMode == 'pct',
                       onTap: () => setModalState(() {
                         discMode = 'pct';
+                        modalError = null;
                         discountCtrl.clear();
                       }),
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final pct in const [5, 10, 15, 20])
+                      NusaPillFilter(
+                        label: '$pct%',
+                        selected: discMode == 'pct' && discountCtrl.text.trim() == '$pct',
+                        onTap: () => setModalState(() {
+                          discMode = 'pct';
+                          modalError = null;
+                          discountCtrl.text = '$pct';
+                        }),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: discountCtrl,
+                  onChanged: (_) {
+                    if (modalError != null) setModalState(() => modalError = null);
+                  },
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: discMode == 'rp' ? 'Diskon Nota (Rp)' : 'Diskon Nota (%)',
@@ -370,6 +436,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 TextField(
                   controller: pinCtrl,
                   obscureText: true,
+                  onChanged: (_) {
+                    if (modalError != null) setModalState(() => modalError = null);
+                  },
                   keyboardType: TextInputType.text,
                   decoration: const InputDecoration(
                     labelText: 'PIN / Sandi Manajer (Wajib jika diskon > 15%)',
@@ -386,6 +455,34 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     prefixIcon: const Icon(Icons.bookmark_border_rounded, color: AppColors.warningDark),
                   ),
                 ),
+                if (modalError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            modalError!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.dangerDark,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -418,14 +515,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           }
                           final ok = posCubit.applyCartDiscount(amt);
                           if (!ok) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.danger,
-                                  content: Text('Diskon > 15% memerlukan PIN / Sandi Manajer yang sah!'),
-                                ),
-                              );
-                            }
+                            setModalState(() {
+                              modalError = 'Diskon > 15% memerlukan PIN / Sandi Manajer yang sah!';
+                            });
                             return;
                           }
                           if (ctx.mounted) Navigator.pop(ctx);
@@ -448,7 +540,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -552,14 +644,33 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                             metaParts.join(' • '),
                             style: const TextStyle(fontSize: 12, color: AppColors.slate500),
                           ),
-                          trailing: ElevatedButton(
-                            onPressed: () {
-                              if (originalIndex >= 0) {
-                                posCubit.resumeHeldCart(originalIndex);
-                              }
-                              Navigator.pop(ctx);
-                            },
-                            child: const Text('Buka'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Hapus Antrean',
+                                onPressed: () {
+                                  if (originalIndex >= 0) {
+                                    posCubit.deleteHeldCart(originalIndex);
+                                    setModalState(() {});
+                                  }
+                                },
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: AppColors.danger,
+                                  size: 20,
+                                ),
+                              ),
+                              ElevatedButton(
+                                onPressed: () {
+                                  if (originalIndex >= 0) {
+                                    posCubit.resumeHeldCart(originalIndex);
+                                  }
+                                  Navigator.pop(ctx);
+                                },
+                                child: const Text('Buka'),
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -587,11 +698,12 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     bool isExpressLaundry = (item.notes ?? '').toLowerCase().contains('express');
     double effectiveUnitPrice = item.unitPrice;
     String discMode = 'rp';
+    String? modalError;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -691,6 +803,33 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final chip in const [
+                      'Tanpa Gula',
+                      'Es Sedikit',
+                      'Bungkus Pisah',
+                      'Pedas',
+                      'Tanpa Es',
+                    ])
+                      ActionChip(
+                        label: Text(chip, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        onPressed: () {
+                          setModalState(() {
+                            final cur = noteCtrl.text.trim();
+                            if (cur.isEmpty) {
+                              noteCtrl.text = chip;
+                            } else if (!cur.toLowerCase().contains(chip.toLowerCase())) {
+                              noteCtrl.text = '$cur, $chip';
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 TextField(
                   controller: noteCtrl,
                   decoration: const InputDecoration(
@@ -727,6 +866,34 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     ),
                   ),
                 ],
+                if (modalError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            modalError!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.dangerDark,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -758,14 +925,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 ? await posCubit.verifyManagerPin(pin, action: 'discount')
                                 : false;
                             if (!verified) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    backgroundColor: AppColors.danger,
-                                    content: Text('Diskon item > 15% butuh PIN Manajer yang sah!'),
-                                  ),
-                                );
-                              }
+                              setModalState(() {
+                                modalError = 'Diskon item > 15% butuh PIN Manajer yang sah!';
+                              });
                               return;
                             }
                           }
@@ -798,7 +960,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -954,7 +1116,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -1100,6 +1262,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         }
       },
       builder: (context, state) {
+        final tokens = NusaThemeTokens.of(context);
         final activeStore = context.watch<AuthCubit>().state.session.activeStore;
         final capabilities = state.capabilities;
         final screenWidth = MediaQuery.of(context).size.width;
@@ -1111,37 +1274,73 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             : (catalogWidth >= 450 ? 3 : 2);
 
         return Scaffold(
-          backgroundColor: AppColors.background,
+          backgroundColor: tokens.bgPage,
           appBar: AppBar(
-            backgroundColor: Colors.white,
+            backgroundColor: tokens.bgSurface,
             surfaceTintColor: Colors.transparent,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_rounded),
               onPressed: () => context.canPop() ? context.pop() : context.go('/home'),
             ),
             titleSpacing: 4,
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  capabilities.posDisplayName,
-                  style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+            title: InkWell(
+              onTap: (capabilities.hasTableManagement && state.selectedTable != null)
+                  ? null
+                  : () => _showStoreWarehouseSwitcherSheet(context),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      capabilities.posDisplayName,
+                      style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: tokens.textPrimary),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          (capabilities.hasTableManagement && state.selectedTable != null)
+                              ? Icons.table_restaurant_rounded
+                              : (activeStore.isWarehouse
+                                  ? Icons.warehouse_rounded
+                                  : Icons.storefront_rounded),
+                          size: 12,
+                          color: (capabilities.hasTableManagement && state.selectedTable != null)
+                              ? tokens.accent
+                              : tokens.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            capabilities.hasTableManagement && state.selectedTable != null
+                                ? 'Meja: ${state.selectedTable!['name']} (${state.selectedTable!['section']})'
+                                : activeStore.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: (capabilities.hasTableManagement && state.selectedTable != null)
+                                  ? tokens.accent
+                                  : tokens.textSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (!(capabilities.hasTableManagement && state.selectedTable != null)) ...[
+                          const SizedBox(width: 2),
+                          Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 15,
+                            color: tokens.textSecondary,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
-                Text(
-                  capabilities.hasTableManagement && state.selectedTable != null
-                      ? 'Meja: ${state.selectedTable!['name']} (${state.selectedTable!['section']})'
-                      : activeStore.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: (capabilities.hasTableManagement && state.selectedTable != null)
-                        ? AppColors.primary
-                        : AppColors.slate500,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+              ),
             ),
             actions: [
               // Quick Shift Status Pill
@@ -1217,16 +1416,31 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     ),
                   ),
                 ),
+              // Quick Price & Stock Checker Button
+              IconButton(
+                tooltip: 'Cek Harga Cepat',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 44),
+                onPressed: () => _showQuickPriceCheckerSheet(context),
+                icon: Icon(Icons.price_check_rounded, color: tokens.textSecondary, size: 21),
+              ),
               // Restaurant Mode Switcher Button (Capabilities-Driven)
               if (capabilities.hasTableManagement)
                 IconButton(
                   tooltip: 'Denah Meja Restoran (F&B)',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 38, minHeight: 44),
                   onPressed: () => context.push('/restaurant'),
-                  icon: const Icon(Icons.table_restaurant_outlined, color: AppColors.slate700),
+                  icon: Icon(Icons.table_restaurant_outlined, color: tokens.textSecondary, size: 20),
                 ),
               // Sync with Cloud Button
               IconButton(
                 tooltip: 'Sinkronkan Data Cloud',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 44),
                 onPressed: () async {
                   await context.read<PosCubit>().syncWithCloud(force: false);
                   if (context.mounted) {
@@ -1237,34 +1451,39 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 },
                 icon: Icon(
                   state.isLoading ? Icons.sync_rounded : Icons.cloud_done_outlined,
-                  color: AppColors.primary,
+                  color: tokens.accent,
+                  size: 20,
                 ),
               ),
             ],
           ),
-          body: isTablet
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _buildCatalogColumn(
-                        context,
-                        state,
-                        gridColumns,
-                        screenWidth,
-                        isTablet: true,
+          body: KeyboardListener(
+            focusNode: _hardwareScannerFocusNode,
+            onKeyEvent: _handleHardwareScannerKeyEvent,
+            child: isTablet
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _buildCatalogColumn(
+                          context,
+                          state,
+                          gridColumns,
+                          screenWidth,
+                          isTablet: true,
+                        ),
                       ),
-                    ),
-                    _buildTabletSideCartPanel(context, state, sideCartWidth),
-                  ],
-                )
-              : _buildCatalogColumn(
-                  context,
-                  state,
-                  gridColumns,
-                  screenWidth,
-                  isTablet: false,
-                ),
+                      _buildTabletSideCartPanel(context, state, sideCartWidth),
+                    ],
+                  )
+                : _buildCatalogColumn(
+                    context,
+                    state,
+                    gridColumns,
+                    screenWidth,
+                    isTablet: false,
+                  ),
+          ),
         );
       },
     );
@@ -1277,63 +1496,70 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     double screenWidth, {
     required bool isTablet,
   }) {
+    final tokens = NusaThemeTokens.of(context);
     final capabilities = state.capabilities;
     return Column(
       children: [
               // 1. Compact Operational Bar (Customer + Sync), Fixed Search/Scan & Category Chips
               Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(bottom: BorderSide(color: AppColors.border)),
+                decoration: BoxDecoration(
+                  color: tokens.bgSurface,
+                  border: Border(bottom: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
                 ),
                 padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
                 child: Column(
                   children: [
                     Row(
                       children: [
-                        Expanded(child: _buildCustomerStatusBar(context, state)),
-                        const SizedBox(width: 8),
-                        NusaSyncStatusPill(
-                          isOnline: state.isOnline,
-                          isSyncing: state.isSyncingOfflineQueue,
-                          offlinePendingCount: state.offlinePendingCount,
-                          compact: true,
-                          onTap: () async {
-                            if (!state.isOnline) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      state.offlinePendingCount > 0
-                                          ? 'Offline • ${state.offlinePendingCount} Nota tersimpan aman di perangkat.'
-                                          : 'Perangkat sedang offline. Transaksi tetap dapat dilakukan.',
-                                    ),
-                                  ),
-                                );
-                              }
-                              return;
-                            }
-                            if (state.offlinePendingCount > 0) {
-                              final synced = await context
-                                  .read<PosCubit>()
-                                  .syncOfflineTransactions();
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      synced > 0
-                                          ? '$synced nota offline berhasil disinkronkan ke Cloud.'
-                                          : 'Belum ada nota yang berhasil disinkronkan.',
-                                    ),
-                                  ),
-                                );
-                              }
-                            } else {
-                              await context
-                                  .read<PosCubit>()
-                                  .syncWithCloud(force: false, preserveActiveCart: true);
-                            }
-                          },
+                        Expanded(flex: 5, child: _buildCustomerStatusBar(context, state)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          flex: 4,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: NusaSyncStatusPill(
+                              isOnline: state.isOnline,
+                              isSyncing: state.isSyncingOfflineQueue,
+                              offlinePendingCount: state.offlinePendingCount,
+                              compact: true,
+                              onTap: () async {
+                                if (!state.isOnline) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          state.offlinePendingCount > 0
+                                              ? 'Offline • ${state.offlinePendingCount} Nota tersimpan aman di perangkat.'
+                                              : 'Perangkat sedang offline. Transaksi tetap dapat dilakukan.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                                if (state.offlinePendingCount > 0) {
+                                  final synced = await context
+                                      .read<PosCubit>()
+                                      .syncOfflineTransactions();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          synced > 0
+                                              ? '$synced nota offline berhasil disinkronkan ke Cloud.'
+                                              : 'Belum ada nota yang berhasil disinkronkan.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  await context
+                                      .read<PosCubit>()
+                                      .syncWithCloud(force: false, preserveActiveCart: true);
+                                }
+                              },
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1423,9 +1649,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                             height: 44,
                             child: TextField(
                               controller: _searchController,
+                              textInputAction: TextInputAction.search,
                               onChanged: (val) {
                                 setState(() {});
                                 context.read<PosCubit>().updateSearchQuery(val);
+                              },
+                              onSubmitted: (val) {
+                                final cleaned = val.trim();
+                                if (cleaned.isEmpty) return;
+                                final cubit = context.read<PosCubit>();
+                                final matched = cubit.handleBarcodeScanned(cleaned);
+                                if (matched) {
+                                  _searchController.clear();
+                                  setState(() {});
+                                  cubit.updateSearchQuery('');
+                                }
                               },
                               style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
                               decoration: InputDecoration(
@@ -1471,11 +1709,39 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: 'Cek Stok Multi-Gudang',
+                          child: Material(
+                            color: AppColors.warningSoft,
+                            borderRadius: BorderRadius.circular(12),
+                            child: InkWell(
+                              onTap: () => _showWarehouseStockSheet(
+                                context,
+                                initialQuery: _searchController.text,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                                ),
+                                child: const Icon(
+                                  Icons.warehouse_outlined,
+                                  color: AppColors.warningDark,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                         Tooltip(
                           message: _isListView ? 'Tampilan Grid' : 'Tampilan Daftar',
                           child: Material(
-                            color: AppColors.slate100,
+                            color: tokens.bgElevated,
                             borderRadius: BorderRadius.circular(12),
                             child: InkWell(
                               onTap: () => setState(() => _isListView = !_isListView),
@@ -1485,11 +1751,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 height: 44,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.border),
+                                  border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
                                 ),
                                 child: Icon(
                                   _isListView ? Icons.grid_view_rounded : Icons.view_list_rounded,
-                                  color: AppColors.navyDark,
+                                  color: tokens.textPrimary,
                                   size: 21,
                                 ),
                               ),
@@ -1499,15 +1765,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // Dynamic Database Category Chips (Compact & Zero Clipping)
+                    // Dynamic Database Category Chips (Only categories with sellable POS stock)
                     SizedBox(
                       height: 34,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
-                        itemCount: state.categories.length,
+                        itemCount: state.posCategories.length,
                         separatorBuilder: (_, __) => const SizedBox(width: 6),
                         itemBuilder: (context, idx) {
-                          final cat = state.categories[idx];
+                          final cat = state.posCategories[idx];
                           final id = (cat['id'] as num?)?.toInt() ?? 0;
                           final isSelected = state.selectedCategoryId == id;
                           return NusaPillFilter(
@@ -1518,6 +1784,30 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         },
                       ),
                     ),
+                    // Dynamic Brand Chips (Displayed when >1 brand exists in sellable catalog)
+                    if (state.posBrands.length > 1) ...[
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: 30,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: state.posBrands.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 6),
+                          itemBuilder: (context, idx) {
+                            final brand = state.posBrands[idx];
+                            final bid = (brand['id'] as num?)?.toInt() ?? 0;
+                            final isSelected = state.selectedBrandId == bid;
+                            return NusaPillFilter(
+                              label: brand['name'].toString(),
+                              icon: bid == 0 ? Icons.sell_outlined : null,
+                              selected: isSelected,
+                              selectedColor: const Color(0xFF0284C7),
+                              onTap: () => context.read<PosCubit>().selectBrand(bid),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1588,17 +1878,38 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               // 2. Product Catalog Area (Grid or List View)
               Expanded(
                 child: state.filteredProducts.isEmpty
-                    ? NusaEmptyState(
-                        icon: Icons.inventory_2_outlined,
-                        title: 'Produk Tidak Ditemukan',
-                        subtitle: 'Tidak ada produk yang cocok dengan filter atau kata kunci pencarian.',
-                        actionLabel: 'Reset Filter',
-                        onAction: () {
-                          _searchController.clear();
-                          setState(() {});
-                          context.read<PosCubit>().updateSearchQuery('');
-                          context.read<PosCubit>().selectCategory(0);
-                        },
+                    ? Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              NusaEmptyState(
+                                icon: Icons.inventory_2_outlined,
+                                title: 'Tidak Ada Produk Tersedia di POS',
+                                subtitle:
+                                    'Produk dengan stok 0 di cabang ini otomatis disembunyikan agar konsisten dengan Cloud POS.',
+                                actionLabel: 'Reset Filter',
+                                onAction: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                  context.read<PosCubit>().updateSearchQuery('');
+                                  context.read<PosCubit>().selectCategory(0);
+                                  context.read<PosCubit>().selectBrand(0);
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: () => _showWarehouseStockSheet(
+                                  context,
+                                  initialQuery: _searchController.text,
+                                ),
+                                icon: const Icon(Icons.warehouse_outlined, size: 18),
+                                label: const Text('Cek Stok Multi-Gudang'),
+                              ),
+                            ],
+                          ),
+                        ),
                       )
                     : _isListView
                         ? ListView.separated(
@@ -1616,7 +1927,8 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               crossAxisCount: gridColumns,
                               mainAxisSpacing: 10,
                               crossAxisSpacing: 10,
-                              mainAxisExtent: screenWidth >= 600 ? 242 : 234,
+                              mainAxisExtent: (screenWidth >= 600 ? 256.0 : 254.0) *
+                                  MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.2),
                             ),
                             itemCount: state.filteredProducts.length,
                             itemBuilder: (context, index) {
@@ -1639,17 +1951,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   Widget _buildPosProductCard(BuildContext context, PosState state, ProductModel product) {
+    final tokens = NusaThemeTokens.of(context);
     final inCartQty = _productQtyInCart(state, product.id);
     final hasInCart = inCartQty > 0;
     final outOfStock = product.stock <= 0;
     final cartIdx = hasInCart ? state.cart.lastIndexWhere((c) => c.product.id == product.id) : -1;
 
+    final String stockLabel = product.isServiceOrNonStockItem || !product.trackStock
+        ? 'Jasa / Non-Stok'
+        : 'Stok ${IdrCurrencyFormatter.formatQty(product.stock)}';
     final String stockMeta = product.sku.isNotEmpty
-        ? '${product.sku} • Stok ${IdrCurrencyFormatter.formatQty(product.stock)}'
-        : 'Stok ${IdrCurrencyFormatter.formatQty(product.stock)} ${product.unitCode}';
+        ? '${product.sku} • $stockLabel'
+        : '$stockLabel ${product.unitCode}';
 
     return Material(
-      color: Colors.white,
+      color: tokens.bgSurface,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1659,16 +1975,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: hasInCart ? AppColors.primary : AppColors.border,
-              width: hasInCart ? 1.6 : 1.0,
+              color: hasInCart ? tokens.accent : tokens.borderSubtle,
+              width: hasInCart ? (tokens.isHighContrast ? 2.2 : 1.6) : tokens.borderWidth,
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Full-Width High-Clarity Product Showcase Frame (118dp)
+              // 1. High-Clarity Product Showcase Frame (108dp gives generous typography room)
               SizedBox(
-                height: 118,
+                height: 108,
                 width: double.infinity,
                 child: Stack(
                   children: [
@@ -1676,11 +1992,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       iconType: product.iconType,
                       imageUrl: product.imageUrl,
                       width: double.infinity,
-                      height: 118,
+                      height: 108,
                       showBorder: false,
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
-                      backgroundColor: Colors.white,
-                      padding: const EdgeInsets.all(8),
+                      backgroundColor: tokens.bgSurface,
+                      padding: const EdgeInsets.all(6),
                       fit: BoxFit.contain,
                     ),
                     // Top-Left Active Cart Counter Pill
@@ -1691,7 +2007,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: AppColors.primary,
+                            color: tokens.accent,
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
@@ -1710,20 +2026,20 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         top: 6,
                         right: 6,
                         child: Material(
-                          color: Colors.white.withOpacity(0.95),
-                          shape: const CircleBorder(
-                            side: BorderSide(color: AppColors.border),
+                          color: tokens.bgSurface.withOpacity(0.95),
+                          shape: CircleBorder(
+                            side: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth),
                           ),
                           child: InkWell(
                             customBorder: const CircleBorder(),
                             onTap: () => context.read<PosCubit>().decrementCartItem(cartIdx),
-                            child: const SizedBox(
+                            child: SizedBox(
                               width: 28,
                               height: 28,
                               child: Icon(
                                 Icons.remove_rounded,
                                 size: 16,
-                                color: AppColors.navyDark,
+                                color: tokens.textPrimary,
                               ),
                             ),
                           ),
@@ -1736,16 +2052,38 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(
-                            color: AppColors.primarySoft,
+                            color: tokens.accentSoft,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+                            border: Border.all(color: tokens.accent.withOpacity(0.25)),
                           ),
                           child: Text(
                             product.soldByWeight ? 'KG' : '${product.variants.length} Varian',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.primary,
+                              color: tokens.accent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Bottom-Left Wholesale Tier Badge (Grosir Bertingkat)
+                    if (product.volumeTiers.isNotEmpty)
+                      Positioned(
+                        bottom: 6,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.successSoft,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppColors.success.withOpacity(0.35)),
+                          ),
+                          child: const Text(
+                            'Grosir',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.successDark,
                             ),
                           ),
                         ),
@@ -1753,13 +2091,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   ],
                 ),
               ),
-              const Divider(height: 1, thickness: 1, color: AppColors.divider),
-              // 2. Structured Typography & Action Footer (Zero Dead Space)
+              Divider(height: 1, thickness: 1, color: tokens.borderSubtle),
+              // 2. Structured Typography & Action Footer (Zero Vertical Clipping, Zero Price Ellipsis)
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  color: hasInCart ? AppColors.primarySoft.withOpacity(0.28) : Colors.white,
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+                  color: hasInCart ? tokens.accentSoft.withOpacity(tokens.isDark ? 0.45 : 0.35) : tokens.bgSurface,
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1767,25 +2105,53 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         product.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.navyDark,
-                          height: 1.2,
+                          color: tokens.textPrimary,
+                          height: 1.22,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        stockMeta,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: outOfStock
-                              ? AppColors.dangerDark.withOpacity(0.85)
-                              : (product.isLowStock ? AppColors.warningDark : AppColors.slate500),
-                        ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              stockMeta,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: outOfStock && product.trackStock && !product.isServiceOrNonStockItem
+                                    ? tokens.danger
+                                    : (product.isLowStock && product.trackStock ? tokens.warning : tokens.textSecondary),
+                              ),
+                            ),
+                          ),
+                          if (product.otherWarehousesStock > 0) ...[
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () => _showWarehouseStockSheet(context, initialProduct: product),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppColors.warningSoft,
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                                ),
+                                child: Text(
+                                  '+Gdg ${IdrCurrencyFormatter.formatQty(product.otherWarehousesStock)}',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.warningDark,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const Spacer(),
                       Row(
@@ -1795,23 +2161,24 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               amount: product.sellingPrice,
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.navyDark,
+                              color: tokens.textPrimary,
+                              fitWidth: true,
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 6),
                           Container(
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: hasInCart ? AppColors.successDark : AppColors.primarySoft,
+                              color: hasInCart ? tokens.positive : tokens.accentSoft,
                               borderRadius: BorderRadius.circular(9),
                               border: hasInCart
                                   ? null
-                                  : Border.all(color: AppColors.primary.withOpacity(0.25)),
+                                  : Border.all(color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.3)),
                             ),
                             child: Icon(
                               Icons.add_rounded,
-                              color: hasInCart ? Colors.white : AppColors.primary,
+                              color: hasInCart ? Colors.white : tokens.accent,
                               size: 19,
                             ),
                           ),
@@ -1829,15 +2196,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   Widget _buildPosProductListTile(BuildContext context, PosState state, ProductModel product) {
+    final tokens = NusaThemeTokens.of(context);
     final inCartQty = _productQtyInCart(state, product.id);
     final hasInCart = inCartQty > 0;
     final outOfStock = product.stock <= 0;
 
     return NusaCard(
       padding: const EdgeInsets.all(10),
-      borderColor: hasInCart ? AppColors.primary : AppColors.border,
-      borderWidth: hasInCart ? 1.5 : 1.0,
-      backgroundColor: hasInCart ? AppColors.primarySoft.withOpacity(0.2) : Colors.white,
+      borderColor: hasInCart ? tokens.accent : tokens.borderSubtle,
+      borderWidth: hasInCart ? (tokens.isHighContrast ? 2.2 : 1.5) : tokens.borderWidth,
+      backgroundColor: hasInCart ? tokens.accentSoft.withOpacity(tokens.isDark ? 0.35 : 0.25) : tokens.bgSurface,
       onTap: () => _onProductTapped(context, product),
       child: Row(
         children: [
@@ -1860,13 +2228,20 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         product.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.navyDark,
+                          color: tokens.textPrimary,
                         ),
                       ),
                     ),
+                    if (product.volumeTiers.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      const NusaBadge(
+                        label: 'Grosir',
+                        variant: NusaBadgeVariant.success,
+                      ),
+                    ],
                     if (hasInCart) ...[
                       const SizedBox(width: 6),
                       NusaBadge(
@@ -1883,18 +2258,32 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
                     color: outOfStock
-                        ? AppColors.dangerDark.withOpacity(0.85)
-                        : (product.isLowStock ? AppColors.warningDark : AppColors.slate500),
+                        ? tokens.danger
+                        : (product.isLowStock ? tokens.warning : tokens.textSecondary),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    NusaPriceTag(
-                      amount: product.sellingPrice,
-                      fontSize: 15,
-                      color: AppColors.navyDark,
+                    Flexible(
+                      child: NusaPriceTag(
+                        amount: product.sellingPrice,
+                        fontSize: 15,
+                        color: tokens.textPrimary,
+                        fitWidth: true,
+                      ),
                     ),
+                    if (product.otherWarehousesStock > 0) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        onTap: () => _showWarehouseStockSheet(context, initialProduct: product),
+                        borderRadius: BorderRadius.circular(6),
+                        child: NusaBadge(
+                          label: '+Gudang ${IdrCurrencyFormatter.formatQty(product.otherWarehousesStock)}',
+                          variant: NusaBadgeVariant.warning,
+                        ),
+                      ),
+                    ],
                     if (product.type == 'variable') ...[
                       const SizedBox(width: 8),
                       NusaBadge(
@@ -1912,13 +2301,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: hasInCart ? AppColors.successDark : AppColors.primarySoft,
+              color: hasInCart ? tokens.positive : tokens.accentSoft,
               borderRadius: BorderRadius.circular(11),
-              border: hasInCart ? null : Border.all(color: AppColors.primary.withOpacity(0.25)),
+              border: hasInCart ? null : Border.all(color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.3)),
             ),
             child: Icon(
               Icons.add_rounded,
-              color: hasInCart ? Colors.white : AppColors.primary,
+              color: hasInCart ? Colors.white : tokens.accent,
               size: 21,
             ),
           ),
@@ -1970,7 +2359,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -2211,10 +2600,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   Widget _buildCustomerStatusBar(BuildContext context, PosState state) {
+    final tokens = NusaThemeTokens.of(context);
     final cust = state.selectedCustomer;
     if (cust == null) {
       return Material(
-        color: const Color(0xFFF8FAFC),
+        color: tokens.bgElevated,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           onTap: () => _showCustomerSelectorSheet(context, state),
@@ -2224,35 +2614,35 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             padding: const EdgeInsets.only(left: 10, right: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
             ),
             child: Row(
               children: [
-                const Icon(Icons.person_outline_rounded, size: 16, color: AppColors.slate600),
+                Icon(Icons.person_outline_rounded, size: 16, color: tokens.textSecondary),
                 const SizedBox(width: 6),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Pelanggan Umum',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.textPrimary),
                   ),
                 ),
-                const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: AppColors.slate500),
+                Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: tokens.textSecondary),
                 Container(
                   width: 1,
                   height: 18,
                   margin: const EdgeInsets.symmetric(horizontal: 4),
-                  color: AppColors.border,
+                  color: tokens.borderSubtle,
                 ),
                 Tooltip(
                   message: 'Member Baru',
                   child: InkWell(
                     onTap: () => _showQuickAddCustomerModal(context),
                     borderRadius: BorderRadius.circular(8),
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
-                      child: Icon(Icons.person_add_alt_1_outlined, size: 16, color: AppColors.primary),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(Icons.person_add_alt_1_outlined, size: 16, color: tokens.accent),
                     ),
                   ),
                 ),
@@ -2268,7 +2658,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     final pts = (cust['loyalty_points'] as num?)?.toInt() ?? 0;
 
     return Material(
-      color: AppColors.primarySoft,
+      color: tokens.accentSoft,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: () => _showCustomerSelectorSheet(context, state),
@@ -2278,11 +2668,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.primary.withOpacity(0.28)),
+            border: Border.all(color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.35), width: tokens.borderWidth),
           ),
           child: Row(
             children: [
-              const Icon(Icons.workspace_premium_rounded, size: 16, color: AppColors.primary),
+              Icon(Icons.workspace_premium_rounded, size: 16, color: tokens.accent),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -2291,7 +2681,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       : '${cust['name']} ($groupName)',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: tokens.textPrimary),
                 ),
               ),
               if (pts > 0) ...[
@@ -2302,7 +2692,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: state.redeemedLoyaltyPoints > 0 ? AppColors.success : AppColors.warningSoft,
+                      color: state.redeemedLoyaltyPoints > 0 ? tokens.positive : tokens.warningSoft,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -2312,7 +2702,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
-                        color: state.redeemedLoyaltyPoints > 0 ? Colors.white : AppColors.warningDark,
+                        color: state.redeemedLoyaltyPoints > 0 ? Colors.white : tokens.warning,
                       ),
                     ),
                   ),
@@ -2321,9 +2711,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               const SizedBox(width: 4),
               InkWell(
                 onTap: () => context.read<PosCubit>().selectCustomer(null),
-                child: const Padding(
-                  padding: EdgeInsets.all(2),
-                  child: Icon(Icons.close_rounded, size: 15, color: AppColors.slate600),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(Icons.close_rounded, size: 15, color: tokens.textSecondary),
                 ),
               ),
             ],
@@ -2334,6 +2724,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   Widget _buildBottomCartPanel(BuildContext context, PosState state) {
+    final tokens = NusaThemeTokens.of(context);
     final hasItems = state.cart.isNotEmpty;
     final String summaryPreview = !hasItems
         ? 'Pilih produk untuk mulai transaksi'
@@ -2343,10 +2734,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: tokens.bgSurface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-        border: const Border(top: BorderSide(color: AppColors.border)),
-        boxShadow: AppColors.floatingCartShadow,
+        border: Border(top: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
+        boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.floatingCartShadow,
       ),
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
       child: SafeArea(
@@ -2368,7 +2759,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
-                              color: hasItems ? AppColors.primary : AppColors.slate200,
+                              color: hasItems ? tokens.accent : tokens.bgElevated,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -2376,7 +2767,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               style: AppTheme.moneyStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w800,
-                                color: hasItems ? Colors.white : AppColors.slate600,
+                                color: hasItems ? Colors.white : tokens.textSecondary,
                               ),
                             ),
                           ),
@@ -2389,7 +2780,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: hasItems ? AppColors.navyDark : AppColors.slate400,
+                                color: hasItems ? tokens.textPrimary : tokens.textTertiary,
                               ),
                             ),
                           ),
@@ -2399,7 +2790,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   ? Icons.keyboard_arrow_down_rounded
                                   : Icons.keyboard_arrow_up_rounded,
                               size: 20,
-                              color: AppColors.slate600,
+                              color: tokens.textSecondary,
                             ),
                         ],
                       ),
@@ -2433,6 +2824,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   List<Widget> _buildCartActionToolbar(BuildContext context, PosState state, bool hasItems) {
+    final tokens = NusaThemeTokens.of(context);
     return [
       const SizedBox(width: 6),
       InkWell(
@@ -2441,7 +2833,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: state.totalDiscount > 0 ? AppColors.successSoft : AppColors.primarySoft,
+            color: state.totalDiscount > 0 ? tokens.positiveSoft : tokens.accentSoft,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
@@ -2451,7 +2843,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w800,
-              color: state.totalDiscount > 0 ? AppColors.successDark : AppColors.primary,
+              color: state.totalDiscount > 0 ? tokens.positive : tokens.accent,
             ),
           ),
         ),
@@ -2465,18 +2857,19 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               }
             : null,
         borderRadius: BorderRadius.circular(8),
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-          child: Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          child: Icon(Icons.delete_outline_rounded, size: 18, color: tokens.danger),
         ),
       ),
     ];
   }
 
   List<Widget> _buildCartCheckoutFooter(BuildContext context, PosState state, bool hasItems) {
+    final tokens = NusaThemeTokens.of(context);
     final hasSurplusCredit = state.isExchangeMode && state.exchangeSurplusCredit > 0;
     return [
-      const Divider(height: 12, color: AppColors.divider),
+      Divider(height: 12, color: tokens.borderSubtle),
       Row(
         children: [
           Expanded(
@@ -2489,13 +2882,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: hasSurplusCredit ? AppColors.primary : AppColors.slate500,
+                    color: hasSurplusCredit ? tokens.accent : tokens.textSecondary,
                   ),
                 ),
                 NusaPriceTag(
                   amount: hasSurplusCredit ? state.exchangeSurplusCredit : state.grandTotal,
                   fontSize: 18,
-                  color: hasSurplusCredit ? AppColors.primary : AppColors.navyDark,
+                  color: hasSurplusCredit ? tokens.accent : tokens.textPrimary,
                 ),
               ],
             ),
@@ -2508,7 +2901,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                side: const BorderSide(color: AppColors.border),
+                side: BorderSide(color: tokens.borderDefault, width: tokens.borderWidth),
               ),
               icon: const Icon(Icons.pause_rounded, size: 18),
               label: const Text('Hold', style: TextStyle(fontWeight: FontWeight.w800)),
@@ -2530,12 +2923,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
   }
 
   Widget _buildTabletSideCartPanel(BuildContext context, PosState state, double width) {
+    final tokens = NusaThemeTokens.of(context);
     final hasItems = state.cart.isNotEmpty;
     return Container(
       width: width,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(left: BorderSide(color: AppColors.border)),
+      decoration: BoxDecoration(
+        color: tokens.bgSurface,
+        border: Border(left: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
       ),
       child: SafeArea(
         top: false,
@@ -2550,7 +2944,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: hasItems ? AppColors.primary : AppColors.slate200,
+                      color: hasItems ? tokens.accent : tokens.bgElevated,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -2558,12 +2952,12 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       style: AppTheme.moneyStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: hasItems ? Colors.white : AppColors.slate600,
+                        color: hasItems ? Colors.white : tokens.textSecondary,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Keranjang Kasir',
                       maxLines: 1,
@@ -2571,35 +2965,35 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.navyDark,
+                        color: tokens.textPrimary,
                       ),
                     ),
                   ),
                   if (hasItems) ..._buildCartActionToolbar(context, state, hasItems),
                 ],
               ),
-              const Divider(height: 16, color: AppColors.divider),
+              Divider(height: 16, color: tokens.borderSubtle),
               Expanded(
                 child: !hasItems
-                    ? const Center(
+                    ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.shopping_cart_outlined, size: 42, color: AppColors.slate400),
-                            SizedBox(height: 10),
+                            Icon(Icons.shopping_cart_outlined, size: 42, color: tokens.textTertiary),
+                            const SizedBox(height: 10),
                             Text(
                               'Keranjang Masih Kosong',
                               style: TextStyle(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.slate600,
+                                color: tokens.textSecondary,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Text(
                               'Ketuk produk di katalog kiri\nuntuk menambah ke nota.',
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                              style: TextStyle(fontSize: 12, color: tokens.textTertiary),
                             ),
                           ],
                         ),
@@ -2911,4 +3305,689 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           },
                         );
   }
+
+  /// Switch Active Store / Warehouse Branch directly inside POS (Multi-Gudang Parity)
+  void _showStoreWarehouseSwitcherSheet(BuildContext context) {
+    final authState = context.read<AuthCubit>().state;
+    final stores = authState.session.availableStores;
+    final activeId = authState.session.activeStore.id;
+    final tokens = NusaThemeTokens.of(context);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: tokens.bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.warehouse_rounded, color: AppColors.primary, size: 22),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Pilih Cabang / Gudang Aktif POS',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: tokens.textPrimary),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Katalog POS otomatis menyaring hanya produk dengan stok tersedia (> 0) pada gudang/cabang terpilih.',
+                  style: TextStyle(fontSize: 12, color: tokens.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 340),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: stores.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, idx) {
+                      final branch = stores[idx];
+                      final isSelected = branch.id == activeId;
+                      return InkWell(
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          if (!isSelected) {
+                            await context.read<AuthCubit>().switchStoreBranch(branch);
+                            if (context.mounted) {
+                              await context.read<PosCubit>().syncWithCloud(
+                                    force: true,
+                                    preserveActiveCart: false,
+                                  );
+                            }
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isSelected ? tokens.accentSoft : tokens.bgElevated,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? tokens.accent : tokens.borderSubtle,
+                              width: isSelected ? 1.5 : tokens.borderWidth,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                branch.isWarehouse ? Icons.warehouse_rounded : Icons.storefront_rounded,
+                                color: isSelected ? tokens.accent : tokens.textSecondary,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      branch.name,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: tokens.textPrimary,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${branch.isWarehouse ? 'Gudang' : 'Gerai'} • ${branch.code}${branch.city != null && branch.city!.isNotEmpty ? ' • ${branch.city}' : ''}',
+                                      style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isSelected)
+                                const NusaBadge(label: 'Aktif', variant: NusaBadgeVariant.primary),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Multi-Warehouse Stock Lookup Modal (Endless Aisle Parity with Cloud Web POS)
+  void _showWarehouseStockSheet(
+    BuildContext context, {
+    ProductModel? initialProduct,
+    String initialQuery = '',
+  }) {
+    final posCubit = context.read<PosCubit>();
+    final queryCtrl = TextEditingController(
+      text: initialProduct?.sku ?? initialQuery,
+    );
+    final tokens = NusaThemeTokens.of(context);
+    bool isLoading = true;
+    String? inlineError;
+    List<Map<String, dynamic>> results = [];
+    bool initialized = false;
+
+    Future<void> runLookup(
+      StateSetter setModalState,
+      BuildContext sheetCtx, {
+      int? productId,
+      String? query,
+    }) async {
+      setModalState(() {
+        isLoading = true;
+        inlineError = null;
+      });
+      final res = await posCubit.fetchWarehouseStock(
+        productId: productId,
+        query: query ?? queryCtrl.text,
+      );
+      if (sheetCtx.mounted) {
+        setModalState(() {
+          isLoading = false;
+          results = res.results;
+          inlineError = res.error;
+        });
+      }
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: tokens.bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            if (!initialized) {
+              initialized = true;
+              Future.microtask(
+                () => runLookup(
+                  setModalState,
+                  modalCtx,
+                  productId: initialProduct?.id,
+                  query: queryCtrl.text,
+                ),
+              );
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 14,
+                bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 20,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(modalCtx).size.height * 0.8,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warehouse_rounded, color: AppColors.warningDark, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Cek Stok Multi-Gudang & Cabang',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: tokens.textPrimary),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: queryCtrl,
+                            onSubmitted: (_) => runLookup(setModalState, modalCtx),
+                            decoration: const InputDecoration(
+                              hintText: 'Cari produk, SKU, atau barcode di seluruh gudang...',
+                              prefixIcon: Icon(Icons.search_rounded, size: 19),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: isLoading ? null : () => runLookup(setModalState, modalCtx),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          ),
+                          child: const Text('Cari'),
+                        ),
+                      ],
+                    ),
+                    if (inlineError != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.dangerSoft,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                        ),
+                        child: Text(
+                          inlineError!,
+                          style: const TextStyle(fontSize: 12, color: AppColors.danger, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    if (isLoading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 28),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (results.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            'Tidak ada data stok multi-gudang untuk kata kunci tersebut.',
+                            style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
+                          ),
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: results.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (_, idx) {
+                            final item = results[idx];
+                            final warehouses = (item['warehouses'] as List<dynamic>? ?? [])
+                                .whereType<Map>()
+                                .map((e) => Map<String, dynamic>.from(e))
+                                .toList();
+                            final curAvail = (item['current_store_available'] as num?)?.toDouble() ?? 0.0;
+                            final totalNetwork = (item['total_network_stock'] as num?)?.toDouble() ?? curAvail;
+                            final unit = (item['unit'] ?? 'pcs').toString();
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: tokens.bgElevated,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              (item['name'] ?? 'Produk').toString(),
+                                              style: TextStyle(
+                                                fontSize: 13.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: tokens.textPrimary,
+                                              ),
+                                            ),
+                                            Text(
+                                              'SKU: ${item['sku'] ?? '-'} • Total Jaringan: ${IdrCurrencyFormatter.formatQty(totalNetwork)} $unit',
+                                              style: TextStyle(fontSize: 11, color: tokens.textSecondary),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      NusaBadge(
+                                        label: 'Gerai Ini: ${IdrCurrencyFormatter.formatQty(curAvail)}',
+                                        variant: curAvail > 0 ? NusaBadgeVariant.success : NusaBadgeVariant.danger,
+                                      ),
+                                    ],
+                                  ),
+                                  if (warehouses.isNotEmpty) ...[
+                                    const Divider(height: 14),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 6,
+                                      children: warehouses.map((wh) {
+                                        final avail = (wh['available'] as num?)?.toDouble() ?? 0.0;
+                                        final isWh = wh['is_warehouse'] == true;
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: tokens.bgSurface,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(
+                                              color: avail > 0
+                                                  ? AppColors.success.withOpacity(0.35)
+                                                  : tokens.borderSubtle,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '${isWh ? 'Gudang' : 'Cabang'} ${wh['store_name']}: ${IdrCurrencyFormatter.formatQty(avail)} $unit',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: avail > 0 ? AppColors.successDark : tokens.textSecondary,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Fast-Lane Quick Price & Stock Checker Modal (Scan barcode or type SKU/name)
+  void _showQuickPriceCheckerSheet(BuildContext context) {
+    final searchCtrl = TextEditingController();
+    final tokens = NusaThemeTokens.of(context);
+    final cubit = context.read<PosCubit>();
+    ProductModel? selectedProduct;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: tokens.bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final q = searchCtrl.text.trim().toLowerCase();
+          final matches = cubit.state.allProducts.where((p) {
+            if (q.isEmpty) return true;
+            return p.name.toLowerCase().contains(q) ||
+                p.sku.toLowerCase().contains(q) ||
+                p.barcode.toLowerCase().contains(q) ||
+                (p.brandName?.toLowerCase().contains(q) ?? false);
+          }).take(15).toList();
+
+          if (q.isNotEmpty && matches.length == 1) {
+            selectedProduct = matches.first;
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 18,
+                right: 18,
+                top: 14,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.82,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: tokens.borderDefault,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Icon(Icons.price_check_rounded, color: tokens.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Cek Harga & Stok Cepat',
+                            style: TextStyle(
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w800,
+                              color: tokens.textPrimary,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Scan Barcode',
+                          onPressed: () {
+                            showModalBottomSheet<void>(
+                              context: ctx,
+                              backgroundColor: tokens.bgSurface,
+                              shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+                              ),
+                              builder: (scanCtx) => Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: SizedBox(
+                                  height: 220,
+                                  child: NusaBarcodeScannerView(
+                                    onDetect: (code) {
+                                      Navigator.pop(scanCtx);
+                                      searchCtrl.text = code;
+                                      setModalState(() {
+                                        selectedProduct = cubit.state.allProducts
+                                            .where((p) =>
+                                                p.barcode.toLowerCase() == code.toLowerCase() ||
+                                                p.sku.toLowerCase() == code.toLowerCase())
+                                            .firstOrNull;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          icon: Icon(Icons.qr_code_scanner_rounded, color: tokens.accent),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: searchCtrl,
+                      autofocus: true,
+                      onChanged: (_) => setModalState(() {
+                        if (searchCtrl.text.trim().isEmpty) selectedProduct = null;
+                      }),
+                      decoration: InputDecoration(
+                        hintText: 'Scan barcode atau ketik nama / SKU produk...',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 19),
+                        suffixIcon: searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.close_rounded, size: 17),
+                                onPressed: () {
+                                  searchCtrl.clear();
+                                  setModalState(() => selectedProduct = null);
+                                },
+                              )
+                            : null,
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (selectedProduct != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: tokens.bgElevated,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: tokens.accent.withOpacity(0.35)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              selectedProduct!.name,
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w800,
+                                color: tokens.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'SKU: ${selectedProduct!.sku} • Barcode: ${selectedProduct!.barcode.isEmpty ? '-' : selectedProduct!.barcode}',
+                              style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                            ),
+                            if (selectedProduct!.shelfLocation != null &&
+                                selectedProduct!.shelfLocation!.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Lokasi Rak: ${selectedProduct!.shelfLocation}',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: tokens.accent,
+                                ),
+                              ),
+                            ],
+                            const Divider(height: 18),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Harga Jual',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: tokens.textSecondary,
+                                  ),
+                                ),
+                                Text(
+                                  '${IdrCurrencyFormatter.format(selectedProduct!.sellingPrice)} / ${selectedProduct!.unitCode}',
+                                  style: AppTheme.moneyStyle(
+                                    fontSize: 18,
+                                    color: tokens.accent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Stok Gerai Ini',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: tokens.textSecondary,
+                                  ),
+                                ),
+                                Text(
+                                  '${IdrCurrencyFormatter.formatQty(selectedProduct!.stock)} ${selectedProduct!.unitCode}'
+                                  '${selectedProduct!.otherWarehousesStock > 0 ? ' (+${IdrCurrencyFormatter.formatQty(selectedProduct!.otherWarehousesStock)} gdg lain)' : ''}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: selectedProduct!.stock > 0
+                                        ? AppColors.successDark
+                                        : AppColors.danger,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (selectedProduct!.volumeTiers.isNotEmpty) ...[
+                              const Divider(height: 16),
+                              Text(
+                                'Harga Grosir Bertingkat:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: tokens.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              for (final t in selectedProduct!.volumeTiers)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 3),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Min ${IdrCurrencyFormatter.formatQty(t.minQuantity)} ${selectedProduct!.unitCode}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: tokens.textSecondary,
+                                        ),
+                                      ),
+                                      Text(
+                                        IdrCurrencyFormatter.format(t.tierPrice),
+                                        style: AppTheme.moneyStyle(
+                                          fontSize: 12.5,
+                                          color: AppColors.successDark,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                            if (selectedProduct!.isSellableInPos) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: tokens.accent,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    _onProductTapped(context, selectedProduct!);
+                                  },
+                                  icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
+                                  label: const Text('Tambahkan ke Keranjang'),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ] else
+                      Flexible(
+                        child: matches.isEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 20),
+                                child: Text(
+                                  'Produk tidak ditemukan untuk "${searchCtrl.text}".',
+                                  style: TextStyle(color: tokens.textSecondary),
+                                ),
+                              )
+                            : ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: matches.length,
+                                separatorBuilder: (_, __) => const Divider(height: 1),
+                                itemBuilder: (_, idx) {
+                                  final p = matches[idx];
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      p.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.w700),
+                                    ),
+                                    subtitle: Text(
+                                      'SKU ${p.sku} • Stok ${IdrCurrencyFormatter.formatQty(p.stock)} ${p.unitCode}',
+                                      style: const TextStyle(fontSize: 11.5),
+                                    ),
+                                    trailing: Text(
+                                      IdrCurrencyFormatter.format(p.sellingPrice),
+                                      style: AppTheme.moneyStyle(
+                                        fontSize: 13.5,
+                                        color: tokens.accent,
+                                      ),
+                                    ),
+                                    onTap: () => setModalState(() => selectedProduct = p),
+                                  );
+                                },
+                              ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  bool ctxMountedCheck(BuildContext ctx) => ctx.mounted;
 }

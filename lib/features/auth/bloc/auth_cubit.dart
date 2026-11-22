@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -11,12 +12,14 @@ class AuthState extends Equatable {
   final bool isAuthenticated;
   final AuthSessionModel session;
   final String? errorMessage;
+  final int sessionRevision;
 
   const AuthState({
     this.isLoading = false,
     this.isAuthenticated = false,
     required this.session,
     this.errorMessage,
+    this.sessionRevision = 0,
   });
 
   AuthState copyWith({
@@ -24,17 +27,25 @@ class AuthState extends Equatable {
     bool? isAuthenticated,
     AuthSessionModel? session,
     String? errorMessage,
+    int? sessionRevision,
   }) {
     return AuthState(
       isLoading: isLoading ?? this.isLoading,
       isAuthenticated: isAuthenticated ?? this.isAuthenticated,
       session: session ?? this.session,
       errorMessage: errorMessage,
+      sessionRevision: sessionRevision ?? this.sessionRevision,
     );
   }
 
   @override
-  List<Object?> get props => [isLoading, isAuthenticated, session, errorMessage];
+  List<Object?> get props => [
+        isLoading,
+        isAuthenticated,
+        session,
+        errorMessage,
+        sessionRevision,
+      ];
 }
 
 class AuthCubit extends Cubit<AuthState> {
@@ -50,8 +61,10 @@ class AuthCubit extends Cubit<AuthState> {
           session: AuthSessionModel.empty(),
         ));
 
-  /// Check existing session on startup without ever forcing auto-logout on transient/expired responses
-  Future<void> checkExistingSession() async {
+  /// Check existing session on startup without ever forcing auto-logout on transient/expired responses.
+  /// When [awaitRemoteRefresh] is `false` and a valid cached session exists, emits immediately
+  /// (zero offline cold-start freeze) and refreshes `/auth/me` silently in the background.
+  Future<void> checkExistingSession({bool awaitRemoteRefresh = true}) async {
     final cachedMap = _offlineDb.getCachedAuthSession();
     final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
 
@@ -69,6 +82,7 @@ class AuthCubit extends Cubit<AuthState> {
         isLoading: false,
         isAuthenticated: true,
         session: cachedSession,
+        sessionRevision: state.sessionRevision,
       ));
       return;
     }
@@ -84,6 +98,7 @@ class AuthCubit extends Cubit<AuthState> {
           isLoading: false,
           isAuthenticated: true,
           session: cachedSession,
+          sessionRevision: state.sessionRevision,
         ));
         return;
       }
@@ -92,6 +107,7 @@ class AuthCubit extends Cubit<AuthState> {
         isLoading: false,
         isAuthenticated: false,
         session: AuthSessionModel.empty(),
+        sessionRevision: state.sessionRevision,
       ));
       return;
     }
@@ -101,7 +117,12 @@ class AuthCubit extends Cubit<AuthState> {
         isLoading: false,
         isAuthenticated: true,
         session: cachedSession,
+        sessionRevision: state.sessionRevision,
       ));
+      if (!awaitRemoteRefresh) {
+        unawaited(_refreshSessionFromCloudSilently());
+        return;
+      }
     } else {
       emit(state.copyWith(
         isLoading: true,
@@ -110,6 +131,28 @@ class AuthCubit extends Cubit<AuthState> {
       ));
     }
 
+    final refreshed = await _refreshSessionFromCloudSilently();
+    if (refreshed) return;
+
+    if (cachedSession != null && cachedSession.userId > 0) {
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: true,
+        session: cachedSession,
+        sessionRevision: state.sessionRevision,
+      ));
+      return;
+    }
+
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: false,
+      session: AuthSessionModel.empty(),
+      sessionRevision: state.sessionRevision,
+    ));
+  }
+
+  Future<bool> _refreshSessionFromCloudSilently() async {
     try {
       final response = await _apiClient.dio.get(ApiEndpoints.me);
       final data = response.data['data'] as Map<String, dynamic>?;
@@ -125,32 +168,46 @@ class AuthCubit extends Cubit<AuthState> {
           await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
         }
         await _offlineDb.saveAuthSession(session.toJson());
-        emit(AuthState(
-          isLoading: false,
-          isAuthenticated: true,
-          session: session,
-        ));
-        return;
+        if (data['numbering_formats'] is Map) {
+          await _offlineDb.cacheNumberingFormats(
+            Map<String, dynamic>.from(data['numbering_formats'] as Map),
+          );
+        }
+        await _persistStoreProfileFromSession(session);
+        if (!isClosed) {
+          emit(AuthState(
+            isLoading: false,
+            isAuthenticated: true,
+            session: session,
+            sessionRevision: state.sessionRevision,
+          ));
+        }
+        return true;
       }
     } catch (_) {
       // Jangan pernah paksa logout ("Sesi login telah berakhir") saat refresh background gagal.
       // Pertahankan sesi aktif di perangkat hingga pengguna menekan Keluar Sesi (Logout).
     }
+    return false;
+  }
 
-    if (cachedSession != null && cachedSession.userId > 0) {
-      emit(AuthState(
-        isLoading: false,
-        isAuthenticated: true,
-        session: cachedSession,
-      ));
-      return;
-    }
-
-    emit(AuthState(
-      isLoading: false,
-      isAuthenticated: false,
-      session: AuthSessionModel.empty(),
-    ));
+  Future<void> _persistStoreProfileFromSession(AuthSessionModel session) async {
+    final existing = _offlineDb.getStoreProfile();
+    await _offlineDb.saveStoreProfile({
+      ...existing,
+      'name': session.tenantName.isNotEmpty ? session.tenantName : 'OXO.ID POS',
+      'code': session.activeStore.code.isNotEmpty ? session.activeStore.code : 'MAIN',
+      'branch': session.activeStore.name,
+      'address': (session.activeStore.address ?? '').trim().isNotEmpty
+          ? session.activeStore.address
+          : (existing['address'] ?? '-'),
+      'phone': (session.activeStore.phone ?? '').trim().isNotEmpty
+          ? session.activeStore.phone
+          : (existing['phone'] ?? '-'),
+      'paper_size': existing['paper_size'] ?? '58mm',
+      'receipt_footer':
+          'Terima kasih telah berbelanja di ${session.tenantName.isNotEmpty ? session.tenantName : session.activeStore.name}!',
+    });
   }
 
   /// Multi-Tenant Login against POST /api/v1/auth/login
@@ -208,20 +265,19 @@ class AuthCubit extends Cubit<AuthState> {
         await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
       }
       await _offlineDb.saveAuthSession(session.toJson());
+      if (data['numbering_formats'] is Map) {
+        await _offlineDb.cacheNumberingFormats(
+          Map<String, dynamic>.from(data['numbering_formats'] as Map),
+        );
+      }
 
-      await _offlineDb.saveStoreProfile({
-        'name': session.tenantName.isNotEmpty ? session.tenantName : 'NusaCommerce POS',
-        'branch': session.activeStore.name,
-        'address': (session.activeStore.address ?? '').trim().isNotEmpty ? session.activeStore.address : '-',
-        'phone': (session.activeStore.phone ?? '').trim().isNotEmpty ? session.activeStore.phone : '-',
-        'receipt_footer':
-            'Terima kasih telah berbelanja di ${session.tenantName.isNotEmpty ? session.tenantName : session.activeStore.name}!',
-      });
+      await _persistStoreProfileFromSession(session);
 
       emit(AuthState(
         isLoading: false,
         isAuthenticated: true,
         session: session,
+        sessionRevision: state.sessionRevision + 1,
       ));
       return true;
     } catch (e) {
@@ -270,9 +326,11 @@ class AuthCubit extends Cubit<AuthState> {
 
     await _offlineDb.saveStoreProfile({
       'name': session.tenantName,
+      'code': session.activeStore.code.isNotEmpty ? session.activeStore.code : 'TRIAL',
       'branch': session.activeStore.name,
       'address': session.activeStore.address ?? 'Mode Toko Mandiri (Offline Lokal)',
       'phone': '-',
+      'paper_size': '58mm',
       'receipt_footer': 'Terima kasih telah berbelanja di ${session.tenantName}!',
     });
 
@@ -290,6 +348,7 @@ class AuthCubit extends Cubit<AuthState> {
       isLoading: false,
       isAuthenticated: true,
       session: session,
+      sessionRevision: state.sessionRevision + 1,
     ));
   }
 
@@ -302,8 +361,10 @@ class AuthCubit extends Cubit<AuthState> {
     }
     final updatedSession = state.session.copyWith(activeStore: branch);
     await _offlineDb.saveAuthSession(updatedSession.toJson());
+    await _persistStoreProfileFromSession(updatedSession);
     emit(state.copyWith(
       session: updatedSession,
+      sessionRevision: state.sessionRevision + 1,
     ));
 
     try {
@@ -316,27 +377,45 @@ class AuthCubit extends Cubit<AuthState> {
       if (newToken != null && newToken.isNotEmpty) {
         await _apiClient.saveToken(newToken);
       }
-      if (data?['entitlements'] is Map) {
-        final ent = Map<String, dynamic>.from(data!['entitlements'] as Map);
-        final refreshed = AuthSessionModel.fromApiData({
-          'user': {
-            'id': updatedSession.userId,
-            'name': updatedSession.userName,
-            'email': updatedSession.userEmail,
-            'roles': [updatedSession.userRole],
-            'is_owner': updatedSession.isOwner,
-          },
-          'tenant': {
-            'name': updatedSession.tenantName,
-            'subdomain': updatedSession.tenantSubdomain,
-            'plan_name': updatedSession.planName,
-          },
-          'entitlements': ent,
-          'active_store': (data['active_store'] as Map?) ?? updatedSession.activeStore.toJson(),
-          'available_stores': updatedSession.availableStores.map((s) => s.toJson()).toList(),
-          'permissions': data['permissions'] ?? updatedSession.permissions,
-        });
+      if (data != null) {
+        final nextStore = data['active_store'] is Map
+            ? StoreBranchModel.fromJson(Map<String, dynamic>.from(data['active_store'] as Map))
+            : updatedSession.activeStore;
+        final nextPermissions = (data['permissions'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            updatedSession.permissions;
+
+        final AuthSessionModel refreshed;
+        if (data['entitlements'] is Map) {
+          final ent = Map<String, dynamic>.from(data['entitlements'] as Map);
+          refreshed = AuthSessionModel.fromApiData({
+            'user': {
+              'id': updatedSession.userId,
+              'name': updatedSession.userName,
+              'email': updatedSession.userEmail,
+              'roles': [updatedSession.userRole],
+              'is_owner': updatedSession.isOwner,
+            },
+            'tenant': {
+              'name': updatedSession.tenantName,
+              'subdomain': updatedSession.tenantSubdomain,
+              'plan_name': updatedSession.planName,
+            },
+            'entitlements': ent,
+            'active_store': nextStore.toJson(),
+            'available_stores': updatedSession.availableStores.map((s) => s.toJson()).toList(),
+            'permissions': nextPermissions,
+          });
+        } else {
+          refreshed = updatedSession.copyWith(
+            activeStore: nextStore,
+            permissions: nextPermissions,
+          );
+        }
+
         await _offlineDb.saveAuthSession(refreshed.toJson());
+        await _persistStoreProfileFromSession(refreshed);
         emit(state.copyWith(session: refreshed));
       }
     } catch (_) {

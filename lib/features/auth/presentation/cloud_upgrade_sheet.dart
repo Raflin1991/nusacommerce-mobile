@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../bloc/auth_cubit.dart';
@@ -12,7 +13,7 @@ Future<bool?> showCloudMigrationSheet(BuildContext context) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.white,
+    backgroundColor: NusaThemeTokens.of(context).bgSurface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -77,7 +78,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
       setState(() {
         _submitting = false;
         _localError = authCubit.state.errorMessage ??
-            'Gagal terhubung ke NusaCommerce Cloud. Data lokal Anda tetap aman di perangkat.';
+            'Gagal terhubung ke OXO Cloud. Data lokal Anda tetap aman di perangkat.';
       });
       return;
     }
@@ -141,7 +142,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Hubungkan ke NusaCommerce Cloud',
+                          'Hubungkan ke OXO Cloud',
                           style: TextStyle(
                             fontSize: 16.5,
                             fontWeight: FontWeight.w800,
@@ -228,7 +229,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
-                  labelText: 'Email Akun NusaCommerce *',
+                  labelText: 'Email Akun OXO.ID *',
                   prefixIcon: Icon(Icons.email_outlined),
                 ),
               ),

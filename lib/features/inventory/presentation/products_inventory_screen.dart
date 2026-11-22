@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/nusa_barcode_scanner_view.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../../core/widgets/product_illustration_widget.dart';
 import '../../auth/bloc/auth_cubit.dart';
@@ -11,7 +13,7 @@ import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
 
 /// LAYAR 7 — DATA BARANG & STOK (TAB 3 NAVIGASI)
-/// NusaCommerce Mobile Enterprise Inventory & Stock Opname Screen
+/// OXO.ID Mobile Enterprise Inventory & Stock Opname Screen
 class ProductsInventoryScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
 
@@ -58,15 +60,23 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
       text: existing != null ? IdrCurrencyFormatter.formatQty(existing.stock) : '25',
     );
     final shelfCtrl = TextEditingController(text: existing?.shelfLocation ?? 'Rak Utama');
+    final reorderCtrl = TextEditingController(
+      text: IdrCurrencyFormatter.formatQty(existing?.reorderLevel ?? 5),
+    );
 
     final selectableCats = posState.categories.where((c) => (c['id'] as num?)?.toInt() != 0).toList();
     int? selectedCatId = existing?.categoryId ??
         (selectableCats.isNotEmpty ? (selectableCats.first['id'] as num?)?.toInt() : null);
+    int? selectedBrandId = existing?.brandId;
+    int? selectedUnitId = existing?.unitId;
+    String selectedType = existing?.type ?? 'physical';
+    bool isSaving = false;
+    String? saveError;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -83,9 +93,43 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  existing == null ? 'Tambah Barang Baru' : 'Detail & Stock Opname — ${existing.name}',
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        existing == null ? 'Tambah Barang Baru' : 'Detail & Stock Opname — ${existing.name}',
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    if (existing != null)
+                      IconButton(
+                        tooltip: 'Hapus Produk',
+                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: ctx,
+                            builder: (dCtx) => AlertDialog(
+                              title: const Text('Hapus Produk?'),
+                              content: Text('Yakin ingin menghapus "${existing.name}" dari katalog?'),
+                              actions: [
+                                TextButton(
+                                    onPressed: () => Navigator.pop(dCtx, false),
+                                    child: const Text('Batal')),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                                  onPressed: () => Navigator.pop(dCtx, true),
+                                  child: const Text('Hapus'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true && ctx.mounted) {
+                            await context.read<PosCubit>().deleteProduct(existing.id);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          }
+                        },
+                      ),
+                  ],
                 ),
                 if (existing != null) ...[
                   const SizedBox(height: 10),
@@ -127,27 +171,136 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                if (selectableCats.isNotEmpty) ...[
-                  DropdownButtonFormField<int>(
-                    value: selectableCats.any((c) => (c['id'] as num?)?.toInt() == selectedCatId)
-                        ? selectedCatId
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Kategori Produk',
-                      prefixIcon: Icon(Icons.category_outlined),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        value: selectableCats.any((c) => (c['id'] as num?)?.toInt() == selectedCatId)
+                            ? selectedCatId
+                            : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Kategori Produk',
+                          prefixIcon: Icon(Icons.category_outlined),
+                        ),
+                        items: selectableCats
+                            .map(
+                              (c) => DropdownMenuItem<int>(
+                                value: (c['id'] as num).toInt(),
+                                child: Text(c['name'].toString()),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) => setModalState(() => selectedCatId = v),
+                      ),
                     ),
-                    items: selectableCats
-                        .map(
-                          (c) => DropdownMenuItem<int>(
-                            value: (c['id'] as num).toInt(),
-                            child: Text(c['name'].toString()),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setModalState(() => selectedCatId = v),
-                  ),
-                  const SizedBox(height: 10),
-                ],
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: OutlinedButton(
+                        onPressed: () {
+                          final catCtrl = TextEditingController();
+                          showDialog(
+                            context: ctx,
+                            builder: (cCtx) => AlertDialog(
+                              title: const Text('Tambah Kategori Baru'),
+                              content: TextField(
+                                controller: catCtrl,
+                                autofocus: true,
+                                decoration: const InputDecoration(labelText: 'Nama Kategori'),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(cCtx), child: const Text('Batal')),
+                                FilledButton(
+                                  onPressed: () async {
+                                    final nm = catCtrl.text.trim();
+                                    if (nm.isEmpty) return;
+                                    final res = await context.read<PosCubit>().saveCategory({'name': nm});
+                                    if (cCtx.mounted) Navigator.pop(cCtx);
+                                    if (res['success'] == true && res['data'] is Map) {
+                                      setModalState(() {
+                                        final newCat = Map<String, dynamic>.from(res['data'] as Map);
+                                        selectableCats.add(newCat);
+                                        selectedCatId = (newCat['id'] as num?)?.toInt();
+                                      });
+                                    }
+                                  },
+                                  child: const Text('Simpan'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        child: const Text('+ Kategori'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value: posState.brands.any((b) => (b['id'] as num?)?.toInt() == selectedBrandId)
+                            ? selectedBrandId
+                            : null,
+                        decoration: const InputDecoration(labelText: 'Merek (Opsional)'),
+                        items: [
+                          const DropdownMenuItem<int?>(value: null, child: Text('Tanpa Merek')),
+                          ...posState.brands.map((b) => DropdownMenuItem<int?>(
+                                value: (b['id'] as num).toInt(),
+                                child: Text(b['name'].toString()),
+                              )),
+                        ],
+                        onChanged: (v) => setModalState(() => selectedBrandId = v),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value: posState.units.any((u) => (u['id'] as num?)?.toInt() == selectedUnitId)
+                            ? selectedUnitId
+                            : null,
+                        decoration: const InputDecoration(labelText: 'Satuan'),
+                        items: [
+                          const DropdownMenuItem<int?>(value: null, child: Text('Pcs / Default')),
+                          ...posState.units.map((u) => DropdownMenuItem<int?>(
+                                value: (u['id'] as num).toInt(),
+                                child: Text('${u['name']} (${u['symbol'] ?? 'pcs'})'),
+                              )),
+                        ],
+                        onChanged: (v) => setModalState(() => selectedUnitId = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedType == 'service' ? 'service' : 'physical',
+                        decoration: const InputDecoration(labelText: 'Tipe Item'),
+                        items: const [
+                          DropdownMenuItem(value: 'physical', child: Text('Barang Fisik (Stok)')),
+                          DropdownMenuItem(value: 'service', child: Text('Jasa / Non-Stok')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setModalState(() => selectedType = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: reorderCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Min. Stok Alert'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(
@@ -173,17 +326,12 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                   content: SizedBox(
                                     height: 220,
                                     width: 280,
-                                    child: MobileScanner(
-                                      onDetect: (capture) {
+                                    child: NusaBarcodeScannerView(
+                                      onDetect: (code) {
                                         if (scanned) return;
-                                        final code = capture.barcodes.isNotEmpty
-                                            ? capture.barcodes.first.rawValue
-                                            : null;
-                                        if (code != null && code.isNotEmpty) {
-                                          scanned = true;
-                                          barcodeCtrl.text = code;
-                                          Navigator.pop(sCtx);
-                                        }
+                                        scanned = true;
+                                        barcodeCtrl.text = code;
+                                        Navigator.pop(sCtx);
                                       },
                                     ),
                                   ),
@@ -286,50 +434,105 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     ),
                   ],
                 ),
+                if (saveError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.danger.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                    ),
+                    child: Text(
+                      saveError!,
+                      style: const TextStyle(color: AppColors.danger, fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 NusaButton(
                   icon: Icons.save_rounded,
+                  isLoading: isSaving,
                   label: existing == null ? 'Simpan Barang Baru' : 'Simpan Hasil Stock Opname',
-                  onPressed: () {
-                    final name = nameCtrl.text.trim();
-                    if (name.isEmpty) return;
-                    final price = IdrCurrencyFormatter.parse(priceCtrl.text);
-                    final cost = IdrCurrencyFormatter.parse(costCtrl.text);
-                    final stock = double.tryParse(stockCtrl.text.replaceAll(',', '.')) ?? 0.0;
-                    final catName = selectableCats
-                            .where((c) => (c['id'] as num?)?.toInt() == selectedCatId)
-                            .firstOrNull?['name']
-                            ?.toString() ??
-                        existing?.categoryName ??
-                        'Umum';
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final name = nameCtrl.text.trim();
+                          if (name.isEmpty) return;
+                          final price = IdrCurrencyFormatter.parse(priceCtrl.text);
+                          final cost = IdrCurrencyFormatter.parse(costCtrl.text);
+                          final stock = double.tryParse(stockCtrl.text.replaceAll(',', '.')) ?? 0.0;
+                          final catName = selectableCats
+                                  .where((c) => (c['id'] as num?)?.toInt() == selectedCatId)
+                                  .firstOrNull?['name']
+                                  ?.toString() ??
+                              existing?.categoryName ??
+                              'Umum';
 
-                    final updated = ProductModel(
-                      id: existing?.id ?? DateTime.now().millisecondsSinceEpoch,
-                      name: name,
-                      sku: skuCtrl.text.trim(),
-                      barcode: barcodeCtrl.text.trim().isNotEmpty
-                          ? barcodeCtrl.text.trim()
-                          : (existing?.barcode ?? ''),
-                      sellingPrice: price > 0 ? price : (existing?.sellingPrice ?? 0),
-                      costPrice: cost > 0 ? cost : (existing?.costPrice ?? 0),
-                      stock: stock,
-                      unitCode: existing?.unitCode ?? 'pcs',
-                      categoryId: selectedCatId ?? existing?.categoryId ?? 1,
-                      categoryName: catName,
-                      isLowStock: stock <= 5,
-                      shelfLocation: shelfCtrl.text.trim(),
-                      iconType: existing?.iconType ?? 'default',
-                      imageUrl: existing?.imageUrl,
-                      variants: existing?.variants ?? const [],
-                      batches: existing?.batches ?? const [],
-                    );
+                          final reorderLvl = double.tryParse(reorderCtrl.text.replaceAll(',', '.')) ?? 5.0;
+                          final matchedUnit = posState.units
+                              .where((u) => (u['id'] as num?)?.toInt() == selectedUnitId)
+                              .firstOrNull;
+                          final matchedBrand = posState.brands
+                              .where((b) => (b['id'] as num?)?.toInt() == selectedBrandId)
+                              .firstOrNull;
 
-                    context.read<PosCubit>().saveProductInventory(updated, isNew: existing == null);
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Data barang "${updated.name}" berhasil disimpan.')),
-                    );
-                  },
+                          final updated = ProductModel(
+                            id: existing?.id ?? DateTime.now().millisecondsSinceEpoch,
+                            name: name,
+                            sku: skuCtrl.text.trim(),
+                            barcode: barcodeCtrl.text.trim().isNotEmpty
+                                ? barcodeCtrl.text.trim()
+                                : (existing?.barcode ?? ''),
+                            sellingPrice: price > 0 ? price : (existing?.sellingPrice ?? 0),
+                            costPrice: cost > 0 ? cost : (existing?.costPrice ?? 0),
+                            stock: stock,
+                            unitId: selectedUnitId ?? existing?.unitId,
+                            unitCode: (matchedUnit?['symbol'] ?? existing?.unitCode ?? 'pcs').toString(),
+                            categoryId: selectedCatId ?? existing?.categoryId ?? 0,
+                            categoryName: catName,
+                            brandId: selectedBrandId ?? existing?.brandId,
+                            brandName: matchedBrand?['name']?.toString() ?? existing?.brandName,
+                            reorderLevel: reorderLvl,
+                            trackStock: selectedType != 'service',
+                            type: selectedType == 'service' ? 'service' : 'simple',
+                            isLowStock: selectedType != 'service' && stock <= reorderLvl,
+                            shelfLocation: shelfCtrl.text.trim(),
+                            iconType: existing?.iconType ?? 'default',
+                            imageUrl: existing?.imageUrl,
+                            variants: existing?.variants ?? const [],
+                            batches: existing?.batches ?? const [],
+                          );
+
+                          setModalState(() {
+                            isSaving = true;
+                            saveError = null;
+                          });
+                          final result = await context
+                              .read<PosCubit>()
+                              .saveProductInventory(updated, isNew: existing == null);
+                          if (!ctx.mounted) return;
+                          if (!result.ok) {
+                            setModalState(() {
+                              isSaving = false;
+                              saveError = result.errorMessage ?? 'Gagal menyimpan barang ke server Cloud.';
+                            });
+                            return;
+                          }
+                          Navigator.pop(ctx);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: result.syncedToCloud ? AppColors.successDark : AppColors.warningDark,
+                              content: Text(
+                                result.syncedToCloud
+                                    ? 'Data barang "${updated.name}" tersimpan & sinkron ke Cloud.'
+                                    : 'Barang "${updated.name}" disimpan offline & akan disinkronkan saat online.',
+                              ),
+                            ),
+                          );
+                        },
                 ),
               ],
             ),
@@ -347,7 +550,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -407,13 +610,11 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                       child: SizedBox(
                         height: 200,
                         width: double.infinity,
-                        child: MobileScanner(
-                          onDetect: (capture) {
+                        child: NusaBarcodeScannerView(
+                          stopOnFirstDetection: false,
+                          onDetect: (raw) {
                             if (scannedProduct != null) return;
-                            final raw = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
-                            if (raw != null && raw.isNotEmpty) {
-                              resolveCode(raw);
-                            }
+                            resolveCode(raw);
                           },
                         ),
                       ),
@@ -495,7 +696,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           final updated = ProductModel(
                             id: scannedProduct!.id,
                             name: scannedProduct!.name,
@@ -518,15 +719,26 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                             variants: scannedProduct!.variants,
                             batches: scannedProduct!.batches,
                           );
-                          context.read<PosCubit>().saveProductInventory(
+                          final result = await context.read<PosCubit>().saveProductInventory(
                                 updated,
                                 isNew: false,
                                 notes: 'Stock Opname Kamera (Selisih ${variance >= 0 ? '+' : ''}$variance)',
                               );
+                          if (!ctx.mounted) return;
+                          if (!result.ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                backgroundColor: AppColors.danger,
+                                content: Text(result.errorMessage ?? 'Gagal menyimpan penyesuaian stok.'),
+                              ),
+                            );
+                            return;
+                          }
                           Navigator.pop(ctx);
+                          if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              backgroundColor: AppColors.successDark,
+                              backgroundColor: result.syncedToCloud ? AppColors.successDark : AppColors.warningDark,
                               content: Text('Stock Opname "${updated.name}" diperbarui menjadi $actualQty.'),
                             ),
                           );
@@ -547,6 +759,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final allProducts = context.watch<PosCubit>().state.allProducts;
     final lowStockCount = allProducts.where((p) => p.isLowStock).length;
     final totalStockAssetValue = allProducts.fold<double>(0.0, (s, p) => s + (p.stock * p.costPrice));
@@ -562,9 +775,9 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: tokens.bgPage,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: tokens.bgSurface,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.menu_rounded),
@@ -573,8 +786,18 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
         title: const Text('Barang & Inventaris'),
         actions: [
           IconButton(
+            tooltip: 'Kategori, Merek & Satuan',
+            icon: Icon(Icons.category_outlined, color: tokens.accent),
+            onPressed: () => context.push('/catalog-taxonomies'),
+          ),
+          IconButton(
+            tooltip: 'Operasi Gudang & Mutasi Stok',
+            icon: Icon(Icons.inventory_outlined, color: tokens.accent),
+            onPressed: () => context.push('/inventory-ops'),
+          ),
+          IconButton(
             tooltip: 'Sinkronkan Data Produk',
-            icon: const Icon(Icons.sync_rounded, color: AppColors.primary),
+            icon: Icon(Icons.sync_rounded, color: tokens.accent),
             onPressed: () async {
               await context.read<PosCubit>().syncWithCloud(force: false);
               if (context.mounted) {
@@ -590,9 +813,9 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
         children: [
           // 1. 3-Column Summary Metric Strip + Search + Filter Chips
           Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+            decoration: BoxDecoration(
+              color: tokens.bgSurface,
+              border: Border(bottom: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
             ),
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
             child: Column(
@@ -601,25 +824,28 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                   children: [
                     Expanded(
                       child: _inventoryMetricTile(
+                        tokens,
                         label: 'SKU Aktif',
                         value: '${allProducts.length}',
-                        valueColor: AppColors.navyDark,
+                        valueColor: tokens.textPrimary,
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: _inventoryMetricTile(
+                        tokens,
                         label: 'Stok Menipis',
                         value: '$lowStockCount',
-                        valueColor: lowStockCount > 0 ? AppColors.danger : AppColors.successDark,
+                        valueColor: lowStockCount > 0 ? tokens.danger : tokens.positive,
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: _inventoryMetricTile(
+                        tokens,
                         label: 'Nilai Stok (HPP)',
                         value: IdrCurrencyFormatter.formatCompact(totalStockAssetValue),
-                        valueColor: AppColors.primary,
+                        valueColor: tokens.accent,
                       ),
                     ),
                   ],
@@ -630,7 +856,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
                     hintText: 'Cari nama barang, SKU, atau barcode...',
-                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.slate400),
+                    prefixIcon: Icon(Icons.search_rounded, color: tokens.textTertiary),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear_rounded, size: 18),
@@ -660,6 +886,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 8),
+                _buildQuickSubModuleStrip(context, tokens),
               ],
             ),
           ),
@@ -713,10 +941,10 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                       product.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w800,
-                                        color: AppColors.navyDark,
+                                        color: tokens.textPrimary,
                                       ),
                                     ),
                                     const SizedBox(height: 3),
@@ -727,7 +955,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                             'SKU: ${product.sku}',
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(fontSize: 11, color: AppColors.slate500),
+                                            style: TextStyle(fontSize: 11, color: tokens.textSecondary),
                                           ),
                                         ),
                                         if (product.shelfLocation != null && product.shelfLocation!.isNotEmpty) ...[
@@ -768,13 +996,17 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                         NusaPriceTag(amount: product.sellingPrice, fontSize: 13.5),
                                         if (product.costPrice > 0) ...[
                                           const SizedBox(width: 8),
-                                          Text(
-                                            'HPP ${IdrCurrencyFormatter.formatCompact(product.costPrice)}'
-                                            '${marginPct != null ? ' (${marginPct.toStringAsFixed(0)}%)' : ''}',
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.slate500,
+                                          Flexible(
+                                            child: Text(
+                                              'HPP ${IdrCurrencyFormatter.formatCompact(product.costPrice)}'
+                                              '${marginPct != null ? ' (${marginPct.toStringAsFixed(0)}%)' : ''}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: tokens.textSecondary,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -792,20 +1024,23 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                   constraints: const BoxConstraints(minHeight: 44, minWidth: 64),
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primarySoft,
+                                    color: tokens.accentSoft,
                                     borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                                    border: Border.all(
+                                      color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.3),
+                                      width: tokens.borderWidth,
+                                    ),
                                   ),
-                                  child: const Column(
+                                  child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.edit_note_rounded, size: 18, color: AppColors.primary),
+                                      Icon(Icons.edit_note_rounded, size: 18, color: tokens.accent),
                                       Text(
                                         'Opname',
                                         style: TextStyle(
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.w800,
-                                          color: AppColors.primary,
+                                          color: tokens.accent,
                                         ),
                                       ),
                                     ],
@@ -824,9 +1059,9 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
       // Thumb-Zone Primary CTAs
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: AppColors.border)),
+        decoration: BoxDecoration(
+          color: tokens.bgSurface,
+          border: Border(top: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
         ),
         child: SafeArea(
           top: false,
@@ -855,7 +1090,54 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
     );
   }
 
-  Widget _inventoryMetricTile({
+  Widget _buildQuickSubModuleStrip(BuildContext context, NusaThemeTokens tokens) {
+    final shortcuts = [
+      (label: '🏷️ Kategori & Merek', route: '/catalog-taxonomies?tab=0'),
+      (label: '📏 Satuan Unit', route: '/catalog-taxonomies?tab=2'),
+      (label: '🔍 Opname Multi-Item', route: '/inventory-ops?tab=1'),
+      (label: '📊 Kartu Mutasi', route: '/inventory-ops?tab=2'),
+      (label: '🖨️ Cetak Barcode', route: '/catalog-taxonomies?tab=3'),
+    ];
+
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: shortcuts.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) {
+          final item = shortcuts[i];
+          return InkWell(
+            onTap: () => context.push(item.route),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+              decoration: BoxDecoration(
+                color: tokens.accentSoft,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: tokens.accent.withOpacity(tokens.isHighContrast ? 1.0 : 0.3),
+                  width: tokens.borderWidth,
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: tokens.accentDark,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _inventoryMetricTile(
+    NusaThemeTokens tokens, {
     required String label,
     required String value,
     required Color valueColor,
@@ -863,9 +1145,9 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.background,
+        color: tokens.bgElevated,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -874,7 +1156,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.slate500),
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: tokens.textSecondary),
           ),
           const SizedBox(height: 2),
           Text(

@@ -6,6 +6,8 @@ import '../constants/api_endpoints.dart';
 import '../network/api_client.dart';
 import 'sqlite_database.dart';
 
+part 'offline_database_parity.dart';
+
 /// Offline-First Local Database Engine backed by indexed SQLite (`nusacommerce_local.db`)
 /// with seamless SharedPreferences fallback & automatic one-time migration.
 /// Persists Products, Customers, Suppliers, Offline Sale Queue (UUIDv4 idempotent),
@@ -25,6 +27,7 @@ class OfflineDatabase {
   static const String _keyPairedPrinter = 'nusa_paired_printer_v4';
   static const String _keyPairedPrinterMac = 'nusa_paired_printer_mac_v4';
   static const String _keyHasCloudSynced = 'nusa_has_cloud_synced_v4';
+  static const String _keyLastCloudSyncAt = 'nusa_last_cloud_sync_at_v4';
   static const String _keyAuthSession = 'nusa_auth_session_v4';
   static const String _keySqliteMigrated = 'nusa_sqlite_migrated_v1';
   static const String _keyBusinessVerticalMode = 'nusa_business_vertical_mode';
@@ -32,11 +35,25 @@ class OfflineDatabase {
   static const String _keyLocalExpenses = 'nusa_local_expenses_v4';
   static const String _keyLocalPayables = 'nusa_local_payables_v4';
   static const String _keyActiveTenantIdentity = 'nusa_active_tenant_identity_v4';
+  static const String _keyCachedBrands = 'nusa_local_brands_v4';
+  static const String _keyCachedUnits = 'nusa_local_units_v4';
+  static const String _keyCachedReturnReasons = 'nusa_local_return_reasons_v4';
+  static const String _keyCachedExpenseCategories = 'nusa_local_expense_categories_v4';
+  static const String _keyCachedCustomerGroups = 'nusa_local_customer_groups_v4';
+  static const String _keyLocalStockMovements = 'nusa_local_stock_movements_v4';
+  static const String _keyLocalPurchases = 'nusa_local_purchases_v4';
+  static const String _keyLocalPurchaseReturns = 'nusa_local_purchase_returns_v4';
+  static const String _keyLocalQuotations = 'nusa_local_quotations_v4';
+  static const String _keyLocalCashLedger = 'nusa_local_cash_ledger_v4';
+  static const String _keyLocalCustomerDepositLogs = 'nusa_local_deposit_logs_v4';
+  static const String _keyCachedPaymentMethods = 'nusa_local_payment_methods_v4';
+  static const String _keyNumberingFormats = 'nusa_numbering_formats_v1';
 
   List<Map<String, dynamic>>? _memProducts;
   List<Map<String, dynamic>>? _memCustomers;
   List<Map<String, dynamic>>? _memSuppliers;
   List<Map<String, dynamic>>? _memOfflineSales;
+  Future<int>? _activeQueueSyncFuture;
 
   OfflineDatabase(this._prefs);
 
@@ -121,9 +138,30 @@ class OfflineDatabase {
 
   Future<void> setHasCloudSynced(bool synced) async {
     await _prefs.setBool(_keyHasCloudSynced, synced);
+    if (synced) {
+      await _prefs.setString(_keyLastCloudSyncAt, DateTime.now().toIso8601String());
+    }
   }
 
   bool get hasCloudSynced => _prefs.getBool(_keyHasCloudSynced) ?? false;
+
+  DateTime? getLastCloudSyncAt() {
+    final raw = _prefs.getString(_keyLastCloudSyncAt);
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  Future<void> setLastCloudSyncAt(DateTime timestamp) async {
+    await _prefs.setString(_keyLastCloudSyncAt, timestamp.toIso8601String());
+  }
+
+  /// True only when an initial master data snapshot (catalog + cloud sync flag) exists locally.
+  bool get hasMasterDataSnapshot => hasCloudSynced && getCachedProducts().isNotEmpty;
+
+  /// Count of pending offline sales eligible for automatic background retry (excludes quarantined conflicts).
+  int get pendingNonConflictOfflineSalesCount => getOfflineSalesQueue()
+      .where((e) => e['sync_status'] != 'sync_conflict')
+      .length;
 
   String? getActiveTenantIdentity() => _prefs.getString(_keyActiveTenantIdentity);
 
@@ -147,9 +185,10 @@ class OfflineDatabase {
         (p) => p['is_local_only'] != true && ((p['id'] as num?)?.toInt() ?? 0) > 0,
       );
     } else if (normalized.startsWith('cloud:')) {
-      hasForeignProducts = cachedProducts.any(
-        (p) => p['is_local_only'] == true || ((p['id'] as num?)?.toInt() ?? 0) < 0,
-      );
+      hasForeignProducts = (current == null || current != normalized) &&
+          cachedProducts.any(
+            (p) => p['is_local_only'] == true || ((p['id'] as num?)?.toInt() ?? 0) < 0,
+          );
     } else {
       hasForeignProducts = false;
     }
@@ -182,6 +221,20 @@ class OfflineDatabase {
       await _prefs.remove('nusa_store_profile$v');
       await _prefs.remove('nusa_has_cloud_synced$v');
     }
+    await _prefs.remove(_keyCachedBrands);
+    await _prefs.remove(_keyCachedUnits);
+    await _prefs.remove(_keyCachedReturnReasons);
+    await _prefs.remove(_keyCachedExpenseCategories);
+    await _prefs.remove(_keyCachedCustomerGroups);
+    await _prefs.remove(_keyLocalStockMovements);
+    await _prefs.remove(_keyLocalPurchases);
+    await _prefs.remove(_keyLocalPurchaseReturns);
+    await _prefs.remove(_keyLocalQuotations);
+    await _prefs.remove(_keyLocalCashLedger);
+    await _prefs.remove(_keyLocalCustomerDepositLogs);
+    await _prefs.remove(_keyCachedPaymentMethods);
+    await _prefs.remove(_keyNumberingFormats);
+    await _prefs.remove(_keyLastCloudSyncAt);
   }
 
   // ===========================================================================
@@ -226,19 +279,37 @@ class OfflineDatabase {
   }
 
   Future<void> updateLocalProductStock(int productId, double newStock) async {
-    bool isLow = newStock <= 5.0;
+    await batchUpdateLocalProductStocks({productId: newStock});
+  }
+
+  /// Atomically persists multiple stock updates (e.g., all lines of an offline checkout)
+  /// in a single SQLite transaction + single SharedPreferences write to prevent race conditions.
+  Future<void> batchUpdateLocalProductStocks(Map<int, double> updates) async {
+    if (updates.isEmpty) return;
     final products = getCachedProducts();
     for (final p in products) {
-      if (p['id'] == productId) {
+      final pid = (p['id'] as num?)?.toInt();
+      if (pid != null && updates.containsKey(pid)) {
+        final newStock = updates[pid]!;
         p['stock'] = newStock;
-        isLow = newStock <= ((p['reorder_level'] as num?)?.toDouble() ?? 5.0);
-        p['is_low_stock'] = isLow;
-        break;
+        final reorder = (p['reorder_level'] as num?)?.toDouble() ?? 5.0;
+        p['is_low_stock'] = newStock <= reorder;
       }
     }
     _memProducts = products;
-    await _sqlite.updateProductStock(productId, newStock, isLowStock: isLow);
+    await _sqlite.batchUpdateProductStocks(updates);
     await _prefs.setString(_keyCachedProducts, jsonEncode(products));
+  }
+
+  // ===========================================================================
+  // 1b. PAYMENT METHODS CACHE (Offline-First Checkout Parity)
+  // ===========================================================================
+  Future<void> cachePaymentMethods(List<Map<String, dynamic>> methods) async {
+    await _prefs.setString(_keyCachedPaymentMethods, jsonEncode(methods));
+  }
+
+  List<Map<String, dynamic>> getCachedPaymentMethods() {
+    return _readPrefsList(_keyCachedPaymentMethods);
   }
 
   Future<void> addOrUpdateLocalProduct(Map<String, dynamic> product) async {
@@ -371,8 +442,21 @@ class OfflineDatabase {
     await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
   }
 
-  /// Flush pending offline sales to NusaCommerce Cloud POST /api/v1/pos/checkout
-  Future<int> syncOfflineQueue(ApiClient apiClient) async {
+  /// Flush pending offline sales to OXO.ID Cloud POST /api/v1/pos/checkout.
+  /// Guarded by an in-flight mutex (`_activeQueueSyncFuture`) and deterministic
+  /// `X-Idempotency-Key` (= persisted `local_uuid`) so flaky retries never double-count.
+  Future<int> syncOfflineQueue(ApiClient apiClient) {
+    if (_activeQueueSyncFuture != null) {
+      return _activeQueueSyncFuture!;
+    }
+    final future = _performSyncOfflineQueue(apiClient).whenComplete(() {
+      _activeQueueSyncFuture = null;
+    });
+    _activeQueueSyncFuture = future;
+    return future;
+  }
+
+  Future<int> _performSyncOfflineQueue(ApiClient apiClient) async {
     List<Map<String, dynamic>> queue = [];
     if (_sqlite.isSupported) {
       queue = await _sqlite.getUnsyncedOfflineSales();
@@ -387,20 +471,46 @@ class OfflineDatabase {
 
     for (final rawPayload in queue) {
       final payload = Map<String, dynamic>.from(rawPayload);
-      final id = (payload['local_uuid'] ?? '').toString();
+      final id = (payload['local_uuid'] ?? '').toString().trim();
 
-      // Do not automatically retry sales already flagged as stock/business conflict;
-      // await owner/manager manual reconciliation (Approve Oversell or Cancel).
+      // Do not automatically retry sales already flagged as compliance/validation conflict;
+      // await owner/manager manual reconciliation.
       if (payload['sync_status'] == 'sync_conflict') {
         remaining.add(payload);
         continue;
       }
 
+      final sendPayload = Map<String, dynamic>.from(payload)
+        ..remove('sync_status')
+        ..remove('conflict_code')
+        ..remove('conflict_reason')
+        ..remove('conflict_detected_at')
+        ..['synced_from_offline'] = true;
+      final nodeCode = (sendPayload['origin_node_code'] ??
+              _prefs.getString('nusa_mobile_node_code') ??
+              '')
+          .toString()
+          .trim()
+          .toUpperCase();
+
       try {
-        await apiClient.dio.post(ApiEndpoints.checkout, data: payload);
+        final response = await apiClient.dio.post(
+          ApiEndpoints.checkout,
+          data: sendPayload,
+          options: Options(
+            headers: {
+              if (id.isNotEmpty) 'X-Idempotency-Key': id,
+              if (nodeCode.isNotEmpty) 'X-Edge-Node-Code': nodeCode,
+            },
+          ),
+        );
         syncedCount++;
         if (id.isNotEmpty) {
           await _sqlite.markOfflineSaleSynced(id);
+          await _markLocalSaleHistorySynced(
+            id,
+            response.data is Map ? Map<String, dynamic>.from(response.data as Map) : null,
+          );
         }
       } on DioException catch (e) {
         final statusCode = e.response?.statusCode;
@@ -417,9 +527,24 @@ class OfflineDatabase {
                 msgLower.contains('stok') ||
                 msgLower.contains('insufficient stock'));
 
+        final isRejectedBusinessRule = !ApiClient.isNetworkOfflineError(e) &&
+            statusCode != null &&
+            (statusCode == 400 ||
+                statusCode == 403 ||
+                statusCode == 409 ||
+                statusCode == 422);
+
         if (isInsufficientStock) {
           payload['sync_status'] = 'sync_conflict';
           payload['conflict_code'] = errorCode.isNotEmpty ? errorCode : 'InsufficientStock';
+          payload['conflict_reason'] = message;
+          payload['conflict_detected_at'] = DateTime.now().toIso8601String();
+          if (id.isNotEmpty) {
+            await _sqlite.updateOfflineSalePayload(id, payload, isSynced: 0);
+          }
+        } else if (isRejectedBusinessRule) {
+          payload['sync_status'] = 'sync_conflict';
+          payload['conflict_code'] = errorCode.isNotEmpty ? errorCode : 'ValidationError';
           payload['conflict_reason'] = message;
           payload['conflict_detected_at'] = DateTime.now().toIso8601String();
           if (id.isNotEmpty) {
@@ -437,12 +562,93 @@ class OfflineDatabase {
     return syncedCount;
   }
 
+  Future<void> _markLocalSaleHistorySynced(
+    String localUuid,
+    Map<String, dynamic>? responseBody,
+  ) async {
+    final history = getLocalSalesHistory();
+    bool changed = false;
+    final serverData = responseBody?['data'] is Map
+        ? Map<String, dynamic>.from(responseBody!['data'] as Map)
+        : null;
+    final meta = responseBody?['meta'] is Map
+        ? Map<String, dynamic>.from(responseBody!['meta'] as Map)
+        : null;
+
+    for (final s in history) {
+      if (s['local_uuid']?.toString() == localUuid) {
+        s['is_offline_pending'] = false;
+        s['synced_from_offline'] = true;
+        if (serverData != null) {
+          if (serverData['id'] != null) s['id'] = serverData['id'];
+          if ((serverData['number'] ?? '').toString().isNotEmpty) {
+            s['number'] = serverData['number'];
+          }
+        }
+        if (meta != null && meta['conflict_flagged'] == true) {
+          s['conflict_flagged'] = true;
+          s['conflict_id'] = meta['conflict_id'];
+          s['conflict_type'] = meta['conflict_type'];
+        }
+        changed = true;
+      }
+    }
+    if (changed) {
+      await _prefs.setString(_keyCompletedSalesHistory, jsonEncode(history));
+    }
+  }
+
   /// Return all locally flagged `sync_conflict` offline sales awaiting owner reconciliation.
   List<Map<String, dynamic>> getOfflineSyncConflicts() {
     return getOfflineSalesQueue()
         .where((e) => e['sync_status'] == 'sync_conflict')
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+  }
+
+  /// Retry syncing a conflicted offline sale without forcing oversell (e.g. after opening a cashier shift).
+  Future<bool> retryOfflineSaleConflict(
+    String localUuid,
+    ApiClient apiClient,
+  ) async {
+    final queue = getOfflineSalesQueue();
+    final idx = queue.indexWhere((e) => e['local_uuid']?.toString() == localUuid);
+    if (idx < 0) return false;
+
+    final payload = Map<String, dynamic>.from(queue[idx]);
+    payload.remove('sync_status');
+    payload.remove('conflict_code');
+    payload.remove('conflict_reason');
+    payload.remove('conflict_detected_at');
+    payload['synced_from_offline'] = true;
+    final nodeCode = (payload['origin_node_code'] ?? _prefs.getString('nusa_mobile_node_code') ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
+
+    try {
+      final response = await apiClient.dio.post(
+        ApiEndpoints.checkout,
+        data: payload,
+        options: Options(
+          headers: {
+            'X-Idempotency-Key': localUuid,
+            if (nodeCode.isNotEmpty) 'X-Edge-Node-Code': nodeCode,
+          },
+        ),
+      );
+      queue.removeAt(idx);
+      _memOfflineSales = queue;
+      await _sqlite.markOfflineSaleSynced(localUuid);
+      await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
+      await _markLocalSaleHistorySynced(
+        localUuid,
+        response.data is Map ? Map<String, dynamic>.from(response.data as Map) : null,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Resolve an offline InsufficientStock conflict by approving oversell (`allow_oversell: true`).
@@ -460,13 +666,31 @@ class OfflineDatabase {
     payload.remove('conflict_reason');
     payload.remove('conflict_detected_at');
     payload['allow_oversell'] = true;
+    payload['synced_from_offline'] = true;
+    final nodeCode = (payload['origin_node_code'] ?? _prefs.getString('nusa_mobile_node_code') ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
 
     try {
-      await apiClient.dio.post(ApiEndpoints.checkout, data: payload);
+      final response = await apiClient.dio.post(
+        ApiEndpoints.checkout,
+        data: payload,
+        options: Options(
+          headers: {
+            'X-Idempotency-Key': localUuid,
+            if (nodeCode.isNotEmpty) 'X-Edge-Node-Code': nodeCode,
+          },
+        ),
+      );
       queue.removeAt(idx);
       _memOfflineSales = queue;
       await _sqlite.markOfflineSaleSynced(localUuid);
       await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
+      await _markLocalSaleHistorySynced(
+        localUuid,
+        response.data is Map ? Map<String, dynamic>.from(response.data as Map) : null,
+      );
       return true;
     } catch (_) {
       return false;
@@ -596,7 +820,7 @@ class OfflineDatabase {
     final raw = _prefs.getString(_keyStoreProfile);
     if (raw == null || raw.isEmpty) {
       return {
-        'name': 'NusaCommerce POS',
+        'name': 'OXO.ID POS',
         'branch': 'Toko Utama',
         'address': '-',
         'phone': '-',
@@ -608,7 +832,7 @@ class OfflineDatabase {
       return Map<String, dynamic>.from(jsonDecode(raw) as Map);
     } catch (_) {
       return {
-        'name': 'NusaCommerce POS',
+        'name': 'OXO.ID POS',
         'branch': 'Toko Utama',
         'address': '-',
         'phone': '-',
@@ -1759,10 +1983,32 @@ class OfflineDatabase {
     if (nextBalance <= 0.5) {
       item['is_overdue'] = false;
     }
+    final payLogs = (item['payments'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    payLogs.insert(0, {
+      'id': DateTime.now().millisecondsSinceEpoch,
+      'amount': applied,
+      'method_name': paymentMethod,
+      'payment_date': DateTime.now().toIso8601String().split('T').first,
+      'cashier': 'Pemilik',
+    });
+    item['payments'] = payLogs;
 
     list[idx] = item;
     await _prefs.setString(_keyLocalPayables, jsonEncode(list));
     await _sqlite.upsertLocalPayable(item);
+
+    await addLocalCashEntry(
+      title: 'Bayar Hutang Supplier ${item['supplier_name'] ?? ''} (${item['number'] ?? item['invoice_number'] ?? ''})',
+      category: 'Pembelian & Hutang',
+      direction: 'out',
+      channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
+          ? 'cash'
+          : 'non_cash',
+      methodName: paymentMethod,
+      amount: applied,
+    );
 
     final methodLower = paymentMethod.toLowerCase();
     if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
@@ -2030,5 +2276,188 @@ class OfflineDatabase {
         'no_sale_opens_count': noSaleOpensCount,
       },
     };
+  }
+
+  /// Cache Cloud-synced custom ERP document numbering formats locally for offline rendering.
+  Future<void> cacheNumberingFormats(Map<String, dynamic> formats) async {
+    await _prefs.setString(_keyNumberingFormats, jsonEncode(formats));
+  }
+
+  Map<String, dynamic> getCachedNumberingFormats() {
+    final raw = _prefs.getString(_keyNumberingFormats);
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {}
+    return const {};
+  }
+
+  /// Resolve the explicitly customized numbering template for [docType], if any.
+  String? getCustomNumberFormat(String docType) {
+    final formats = getCachedNumberingFormats();
+    final customMap = formats['_custom'];
+    if (customMap is Map && customMap[docType] is String) {
+      final val = (customMap[docType] as String).trim();
+      if (val.isNotEmpty) return val;
+    }
+    return null;
+  }
+
+  /// Guarantee an offline-safe `{node}` partition token exists inside [template]
+  /// so multiple offline cashiers/devices in the same store can never generate identical numbers.
+  static String injectNodeToken(String template) {
+    if (template.contains('{node}')) return template;
+    final seqMatch = RegExp(r'\{seq(?::\d+)?\}').firstMatch(template);
+    if (seqMatch != null) {
+      return template.replaceRange(seqMatch.start, seqMatch.start, '{node}-');
+    }
+    return '${template.replaceAll(RegExp(r'[-/]+$'), '')}-{node}';
+  }
+
+  /// Clamp rendered document number to [maxLength] while preserving trailing uniqueness
+  /// segments (`{node}` + `{seq}`) so database VARCHAR limits never cause collisions.
+  static String fitMaxLength(String rendered, int maxLength) {
+    if (maxLength <= 0 || rendered.length <= maxLength) return rendered;
+    final parts = <String>[];
+    final matches = RegExp(r'[-_/]').allMatches(rendered);
+    int last = 0;
+    for (final m in matches) {
+      if (m.start > last) parts.add(rendered.substring(last, m.start));
+      parts.add(rendered.substring(m.start, m.end));
+      last = m.end;
+    }
+    if (last < rendered.length) parts.add(rendered.substring(last));
+
+    if (parts.length >= 5) {
+      final tail = parts.sublist(parts.length - 4).join();
+      final headBudget = maxLength - tail.length;
+      if (headBudget >= 3) {
+        final headRaw = parts.sublist(0, parts.length - 4).join();
+        final head = headRaw
+            .substring(0, headBudget.clamp(0, headRaw.length))
+            .replaceAll(RegExp(r'[-_/]+$'), '');
+        final combined = '$head$tail';
+        return combined.length <= maxLength
+            ? combined
+            : combined.substring(combined.length - maxLength);
+      }
+    }
+    return rendered.substring(rendered.length - maxLength);
+  }
+
+  /// Render a Cloud/Custom document number format template locally (1:1 parity with PHP `NumberFormat::render`).
+  static String renderNumberFormat({
+    required String template,
+    required String storeCode,
+    required String nodeCode,
+    required int seq,
+    DateTime? now,
+    bool enforceOfflineNode = true,
+    int maxLength = 32,
+  }) {
+    final ts = now ?? DateTime.now();
+    final cleanStore = storeCode.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final storeSeg = cleanStore.isEmpty
+        ? 'STORE'
+        : (cleanStore.length > 6 ? cleanStore.substring(0, 6) : cleanStore);
+    final cleanNode = nodeCode.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final nodeSeg = cleanNode.isEmpty
+        ? 'M01'
+        : (cleanNode.length > 6 ? cleanNode.substring(0, 6) : cleanNode);
+
+    final effectiveTemplate = enforceOfflineNode ? injectNodeToken(template) : template;
+
+    final y4 = ts.year.toString().padLeft(4, '0');
+    final y2 = y4.substring(y4.length - 2);
+    final m2 = ts.month.toString().padLeft(2, '0');
+    final d2 = ts.day.toString().padLeft(2, '0');
+
+    String rendered = effectiveTemplate
+        .replaceAll('{store}', storeSeg)
+        .replaceAll('{node}', nodeSeg)
+        .replaceAll('{Y}', y4)
+        .replaceAll('{y}', y2)
+        .replaceAll('{m}', m2)
+        .replaceAll('{d}', d2)
+        .replaceAll('{Ym}', '$y4$m2')
+        .replaceAll('{Ymd}', '$y4$m2$d2')
+        .replaceAll('{seq}', seq.toString());
+
+    rendered = rendered.replaceAllMapped(RegExp(r'\{seq:(\d+)\}'), (match) {
+      final pad = (int.tryParse(match.group(1) ?? '4') ?? 4).clamp(0, 9);
+      return pad > 0 ? seq.toString().padLeft(pad, '0') : seq.toString();
+    });
+
+    return fitMaxLength(rendered, maxLength);
+  }
+
+  /// Generates collision-free Tier-3 Mobile fallback document numbers partitioned
+  /// by unique per-device mobile node code (e.g. `M01`..`M99` or auto `M4F9A`),
+  /// honoring Cloud-synced custom formats with automatic `{node}` injection when offline.
+  Future<String> generatePartitionedFallbackNumber({
+    required String storeCode,
+    String docPrefix = 'INV',
+    String? docType,
+    String? customFormat,
+    String? nodeCode,
+    DateTime? now,
+    int maxLength = 32,
+  }) async {
+    final ts = now ?? DateTime.now();
+    final cleanStore = storeCode.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final rawStoreSeg = cleanStore.isEmpty ? 'STORE' : cleanStore;
+    final storeSeg = rawStoreSeg.length > 6 ? rawStoreSeg.substring(0, 6) : rawStoreSeg;
+
+    String? resolvedNode = nodeCode ?? _prefs.getString('nusa_mobile_node_code');
+    if (resolvedNode == null || resolvedNode.trim().isEmpty) {
+      final hex4 = _uuid.v4().replaceAll('-', '').substring(0, 4).toUpperCase();
+      resolvedNode = 'M$hex4';
+      await _prefs.setString('nusa_mobile_node_code', resolvedNode);
+    }
+    final cleanNode = resolvedNode.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final rawNodeSeg = cleanNode.isEmpty ? 'M01' : cleanNode;
+    final nodeSeg = rawNodeSeg.length > 6 ? rawNodeSeg.substring(0, 6) : rawNodeSeg;
+
+    final resolvedCustom = (customFormat != null && customFormat.trim().isNotEmpty)
+        ? customFormat.trim()
+        : (docType != null ? getCustomNumberFormat(docType) : null);
+
+    if (resolvedCustom != null && resolvedCustom.isNotEmpty) {
+      final periodKey = resolvedCustom.contains('{Ymd}')
+          ? '${ts.year.toString().padLeft(4, '0')}${ts.month.toString().padLeft(2, '0')}${ts.day.toString().padLeft(2, '0')}'
+          : resolvedCustom.contains('{Ym}')
+              ? '${ts.year.toString().padLeft(4, '0')}${ts.month.toString().padLeft(2, '0')}'
+              : (resolvedCustom.contains('{Y}') || resolvedCustom.contains('{y}'))
+                  ? ts.year.toString().padLeft(4, '0')
+                  : 'ALL';
+      final keyType = (docType ?? docPrefix).trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      final seqKey = 'nusa_edge_seq_${storeSeg}_${nodeSeg}_${keyType}_$periodKey';
+      final nextSeq = (_prefs.getInt(seqKey) ?? 0) + 1;
+      await _prefs.setInt(seqKey, nextSeq);
+
+      return renderNumberFormat(
+        template: resolvedCustom,
+        storeCode: storeSeg,
+        nodeCode: nodeSeg,
+        seq: nextSeq,
+        now: ts,
+        enforceOfflineNode: true,
+        maxLength: maxLength,
+      );
+    }
+
+    final cleanDoc = docPrefix.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final rawDocSeg = cleanDoc.isEmpty ? 'INV' : cleanDoc;
+    final docSeg = rawDocSeg.length > 3 ? rawDocSeg.substring(0, 3) : rawDocSeg;
+
+    final ym = '${ts.year.toString().padLeft(4, '0')}${ts.month.toString().padLeft(2, '0')}';
+    final seqKey = 'nusa_edge_seq_${storeSeg}_${nodeSeg}_${docSeg}_$ym';
+    final nextSeq = (_prefs.getInt(seqKey) ?? 0) + 1;
+    await _prefs.setInt(seqKey, nextSeq);
+
+    return '$docSeg-$storeSeg-$nodeSeg-$ym-${nextSeq.toString().padLeft(5, '0')}';
   }
 }

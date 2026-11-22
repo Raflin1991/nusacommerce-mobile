@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/currency_formatter.dart';
+import 'wifi_printer_transport.dart';
 
 /// Direct Bluetooth Thermal Printer (ESC/POS 58mm & 80mm, Sunmi, iMin)
 /// Powered by `print_bluetooth_thermal` with auto-reconnect MAC persistence,
@@ -34,6 +36,9 @@ class PrinterService {
   static const String _keyPaperWidth = 'nusa_printer_paper_width_v4';
   static const String _keyAutoCut = 'nusa_printer_auto_cut_v4';
   static const String _keyAutoDrawer = 'nusa_printer_auto_drawer_v4';
+  static const String _keyConnectionMode = 'nusa_printer_conn_mode_v4';
+  static const String _keyWifiIp = 'nusa_printer_wifi_ip_v4';
+  static const String _keyWifiPort = 'nusa_printer_wifi_port_v4';
 
   SharedPreferences? _prefs;
 
@@ -49,7 +54,22 @@ class PrinterService {
   String paperWidth = '58mm';
   bool autoCutPaper = true;
   bool autoOpenCashDrawer = true;
+  String connectionMode = 'bluetooth'; // 'bluetooth' | 'wifi'
+  String? wifiPrinterIp;
+  int wifiPrinterPort = 9100;
   bool isScanning = false;
+
+  bool get isWifiMode =>
+      connectionMode == 'wifi' &&
+      wifiPrinterIp != null &&
+      wifiPrinterIp!.trim().isNotEmpty;
+
+  String get activePrinterLabel {
+    if (isWifiMode) {
+      return 'WiFi LAN ($wifiPrinterIp:$wifiPrinterPort)';
+    }
+    return connectedPrinter?.name ?? savedPrinterName ?? 'Printer Bluetooth';
+  }
 
   List<BluetoothPrinterDevice> discoveredDevices = [];
 
@@ -67,6 +87,9 @@ class PrinterService {
     paperWidth = prefs.getString(_keyPaperWidth) ?? '58mm';
     autoCutPaper = prefs.getBool(_keyAutoCut) ?? true;
     autoOpenCashDrawer = prefs.getBool(_keyAutoDrawer) ?? true;
+    connectionMode = prefs.getString(_keyConnectionMode) ?? 'bluetooth';
+    wifiPrinterIp = prefs.getString(_keyWifiIp);
+    wifiPrinterPort = prefs.getInt(_keyWifiPort) ?? 9100;
 
     if (savedMacAddress != null && savedMacAddress!.isNotEmpty) {
       connectedPrinter = BluetoothPrinterDevice(
@@ -74,16 +97,24 @@ class PrinterService {
         macAddress: savedMacAddress!,
         paperSize: paperWidth,
       );
+      // Non-blocking background reconnect: never freeze app startup for 5-15s
+      // if the thermal Bluetooth printer is turned off or out of range.
       if (!kIsWeb) {
-        try {
-          final connected = await PrintBluetoothThermal.connectionStatus;
-          if (!connected) {
-            await PrintBluetoothThermal.connect(macPrinterAddress: savedMacAddress!);
-          }
-        } catch (_) {
-          // Non-fatal: device may be turned off during startup; printBytes will auto-retry later.
-        }
+        unawaited(_reconnectSavedPrinterSilently(savedMacAddress!));
       }
+    }
+  }
+
+  Future<void> _reconnectSavedPrinterSilently(String mac) async {
+    try {
+      final connected = await PrintBluetoothThermal.connectionStatus
+          .timeout(const Duration(seconds: 2), onTimeout: () => false);
+      if (!connected) {
+        await PrintBluetoothThermal.connect(macPrinterAddress: mac)
+            .timeout(const Duration(seconds: 3), onTimeout: () => false);
+      }
+    } catch (_) {
+      // Non-fatal: printBytes will auto-retry with strict timeout when printing.
     }
   }
 
@@ -91,6 +122,9 @@ class PrinterService {
     String? width,
     bool? autoCut,
     bool? autoDrawer,
+    String? mode,
+    String? wifiIp,
+    int? wifiPort,
   }) async {
     if (width != null) {
       paperWidth = width;
@@ -104,13 +138,43 @@ class PrinterService {
       autoOpenCashDrawer = autoDrawer;
       await _prefs?.setBool(_keyAutoDrawer, autoDrawer);
     }
+    if (mode != null && (mode == 'bluetooth' || mode == 'wifi')) {
+      connectionMode = mode;
+      await _prefs?.setString(_keyConnectionMode, mode);
+    }
+    if (wifiIp != null) {
+      final clean = wifiIp.trim();
+      wifiPrinterIp = clean.isEmpty ? null : clean;
+      if (clean.isEmpty) {
+        await _prefs?.remove(_keyWifiIp);
+      } else {
+        await _prefs?.setString(_keyWifiIp, clean);
+      }
+    }
+    if (wifiPort != null && wifiPort > 0 && wifiPort <= 65535) {
+      wifiPrinterPort = wifiPort;
+      await _prefs?.setInt(_keyWifiPort, wifiPort);
+    }
+  }
+
+  Future<void> saveWifiPrinter({
+    required String ipAddress,
+    int port = 9100,
+    bool activateWifiMode = true,
+  }) async {
+    await savePreferences(
+      wifiIp: ipAddress,
+      wifiPort: port,
+      mode: activateWifiMode ? 'wifi' : null,
+    );
   }
 
   /// Real Bluetooth Connection Status via `PrintBluetoothThermal.connectionStatus`
   Future<bool> get isConnected async {
     if (kIsWeb) return connectedPrinter != null;
     try {
-      return await PrintBluetoothThermal.connectionStatus;
+      return await PrintBluetoothThermal.connectionStatus
+          .timeout(const Duration(seconds: 3), onTimeout: () => false);
     } catch (_) {
       return false;
     }
@@ -174,7 +238,8 @@ class PrinterService {
     try {
       bool ok = false;
       if (!kIsWeb) {
-        ok = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
+        ok = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac)
+            .timeout(const Duration(seconds: 5), onTimeout: () => false);
       }
 
       if (ok) {
@@ -234,16 +299,32 @@ class PrinterService {
     }
   }
 
-  /// Send raw ESC/POS bytes to connected physical printer (with auto-reconnect to `savedMacAddress`).
+  /// Send raw ESC/POS bytes to connected physical printer (WiFi/LAN TCP 9100 or Bluetooth,
+  /// with strict timeout + auto-reconnect).
   Future<bool> printBytes(List<int> bytes) async {
     if (kIsWeb || bytes.isEmpty) return false;
+    if (isWifiMode) {
+      final sentWifi = await sendEscPosOverTcp(
+        host: wifiPrinterIp!,
+        port: wifiPrinterPort,
+        bytes: bytes,
+      );
+      if (sentWifi) return true;
+      // If Bluetooth MAC also configured, allow seamless fallback
+      if (savedMacAddress == null || savedMacAddress!.isEmpty) {
+        return false;
+      }
+    }
     try {
-      bool connected = await PrintBluetoothThermal.connectionStatus;
+      bool connected = await PrintBluetoothThermal.connectionStatus
+          .timeout(const Duration(seconds: 3), onTimeout: () => false);
       if (!connected && savedMacAddress != null && savedMacAddress!.isNotEmpty) {
-        connected = await PrintBluetoothThermal.connect(macPrinterAddress: savedMacAddress!);
+        connected = await PrintBluetoothThermal.connect(macPrinterAddress: savedMacAddress!)
+            .timeout(const Duration(seconds: 4), onTimeout: () => false);
       }
       if (!connected) return false;
-      return await PrintBluetoothThermal.writeBytes(bytes);
+      return await PrintBluetoothThermal.writeBytes(bytes)
+          .timeout(const Duration(seconds: 5), onTimeout: () => false);
     } catch (_) {
       return false;
     }
@@ -334,9 +415,11 @@ class PrinterService {
     );
 
     try {
-      final ok = await PrintBluetoothThermal.connect(macPrinterAddress: targetMac);
+      final ok = await PrintBluetoothThermal.connect(macPrinterAddress: targetMac)
+          .timeout(const Duration(seconds: 4), onTimeout: () => false);
       if (!ok) return false;
-      return await PrintBluetoothThermal.writeBytes(bytes);
+      return await PrintBluetoothThermal.writeBytes(bytes)
+          .timeout(const Duration(seconds: 5), onTimeout: () => false);
     } catch (_) {
       return false;
     }
@@ -512,7 +595,7 @@ class PrinterService {
     final width = activeWidth == '80mm' ? 46 : 32;
     final divider = '-' * width;
     final doubleDivider = '=' * width;
-    final storeName = (storeProfile['name'] ?? 'NUSACOMMERCE POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
     final deviceLabel = connectedPrinter?.name ?? 'Printer ($activeWidth)';
     final macLabel = connectedPrinter?.macAddress ?? savedMacAddress ?? '-';
 
@@ -564,7 +647,7 @@ class PrinterService {
     final divider = '-' * width;
     final doubleDivider = '=' * width;
 
-    final storeName = (storeProfile['name'] ?? 'NusaCommerce POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
     final storeAddress = (storeProfile['address'] ?? '-').toString();
     final storePhone = (storeProfile['phone'] ?? '-').toString();
     final footer = (storeProfile['receipt_footer'] ?? 'Terima kasih atas kunjungan Anda!').toString();
@@ -712,7 +795,7 @@ class PrinterService {
     }
     sb.writeln(doubleDivider);
     sb.writeln(_center(footer, width));
-    sb.writeln(_center('Powered by NusaCommerce Cloud', width));
+    sb.writeln(_center('Powered by OXO.ID Cloud', width));
 
     return sb.toString();
   }
@@ -756,7 +839,7 @@ class PrinterService {
     final width = activeWidth == '80mm' ? 46 : 32;
     final divider = '-' * width;
     final doubleDivider = '=' * width;
-    final storeName = (storeProfile['name'] ?? 'NusaCommerce POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
     final variance = countedCash - expectedCash;
 
     final sb = StringBuffer();
@@ -779,8 +862,110 @@ class PrinterService {
       sb.writeln('Catatan: ${notes.trim()}');
     }
     sb.writeln(doubleDivider);
-    sb.writeln(_center('Powered by NusaCommerce Cloud', width));
+    sb.writeln(_center('Powered by OXO.ID Cloud', width));
     return sb.toString();
+  }
+
+  /// Build Thermal Installment / Debt Settlement Receipt (Kwitansi Pelunasan)
+  String formatSettlementReceipt({
+    required Map<String, dynamic> storeProfile,
+    required String type, // 'receivable' or 'payable'
+    required String partyName,
+    required String invoiceNumber,
+    required num paidAmount,
+    required num remainingBalance,
+    required String paymentMethod,
+    String? paidAt,
+    String? notes,
+    String? paperWidthOverride,
+  }) {
+    final activeWidth = paperWidthOverride ?? paperWidth;
+    final width = activeWidth == '80mm' ? 46 : 32;
+    final divider = '-' * width;
+    final doubleDivider = '=' * width;
+    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
+    final isReceivable = type == 'receivable';
+    final title = isReceivable ? '*** KWITANSI PIUTANG ***' : '*** BUKTI BAYAR HUTANG ***';
+    final statusText = remainingBalance <= 0 ? 'LUNAS' : 'CICILAN / SEBAGIAN';
+
+    final sb = StringBuffer();
+    sb.writeln(_center(title, width));
+    sb.writeln(_center(storeName, width));
+    sb.writeln(doubleDivider);
+    sb.writeln(_leftRight('No. Nota', invoiceNumber, width));
+    sb.writeln(_leftRight(isReceivable ? 'Pelanggan' : 'Pemasok', partyName, width));
+    if (paidAt != null && paidAt.isNotEmpty) {
+      sb.writeln(_leftRight('Tanggal', paidAt.length > 16 ? paidAt.substring(0, 16) : paidAt, width));
+    }
+    sb.writeln(_leftRight('Metode', paymentMethod, width));
+    sb.writeln(divider);
+    sb.writeln(_leftRight('Nominal Bayar', IdrCurrencyFormatter.format(paidAmount), width));
+    sb.writeln(_leftRight('Sisa Tagihan', IdrCurrencyFormatter.format(remainingBalance), width));
+    sb.writeln(_leftRight('Status', statusText, width));
+    if (notes != null && notes.trim().isNotEmpty) {
+      sb.writeln(divider);
+      sb.writeln('Catatan: ${notes.trim()}');
+    }
+    sb.writeln(doubleDivider);
+    sb.writeln(_center('Terima kasih', width));
+    return sb.toString();
+  }
+
+  /// Build Barcode / Price Tag Label Sticker text for Thermal Printer
+  String formatBarcodeLabelText({
+    required String storeName,
+    required String productName,
+    required String sku,
+    required String barcode,
+    required num price,
+    bool showPrice = true,
+    String? paperWidthOverride,
+  }) {
+    final activeWidth = paperWidthOverride ?? paperWidth;
+    final width = activeWidth == '80mm' ? 46 : 32;
+    final divider = '-' * width;
+    final sb = StringBuffer();
+    sb.writeln(_center(storeName.toUpperCase(), width));
+    sb.writeln(divider);
+    sb.writeln(_center(productName, width));
+    if (showPrice) {
+      sb.writeln(_center(IdrCurrencyFormatter.format(price), width));
+    }
+    final code = barcode.trim().isNotEmpty ? barcode.trim() : sku.trim();
+    sb.writeln(_center('|| ||| |||| ||| ||', width));
+    sb.writeln(_center(code.isNotEmpty ? code : '-', width));
+    if (sku.trim().isNotEmpty && sku.trim() != code) {
+      sb.writeln(_center('SKU: ${sku.trim()}', width));
+    }
+    sb.writeln(divider);
+    return sb.toString();
+  }
+
+  /// Print N copies of a Barcode / Price Label to connected Bluetooth printer
+  Future<bool> printBarcodeLabel({
+    required String storeName,
+    required String productName,
+    required String sku,
+    required String barcode,
+    required num price,
+    int copies = 1,
+    bool showPrice = true,
+  }) async {
+    final text = formatBarcodeLabelText(
+      storeName: storeName,
+      productName: productName,
+      sku: sku,
+      barcode: barcode,
+      price: price,
+      showPrice: showPrice,
+    );
+    final safeCopies = copies.clamp(1, 50);
+    bool allOk = true;
+    for (int i = 0; i < safeCopies; i++) {
+      final ok = await printReceiptText(text, openCashDrawer: false);
+      if (!ok) allOk = false;
+    }
+    return allOk;
   }
 
   String _center(String text, int width) {

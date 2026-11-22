@@ -25,7 +25,7 @@ class WhatsAppService {
     required Map<String, dynamic> sale,
   }) async {
     final phone = normalizePhone(customerPhone);
-    final storeName = storeProfile['name'] ?? 'NusaCommerce POS';
+    final storeName = storeProfile['name'] ?? 'OXO.ID POS';
     final number = sale['number'] ?? '#INV-0001';
     final dt = sale['sale_datetime'] ?? 'Hari Ini';
     final grandTotal = (sale['grand_total'] as num?) ?? 0;
@@ -101,7 +101,7 @@ class WhatsAppService {
         '• Uang Fisik Dihitung: *${IdrCurrencyFormatter.format(countedCash)}*\n'
         '• Selisih Kas: *${IdrCurrencyFormatter.format(variance)}*\n'
         '--------------------------------\n'
-        '_Dikirim otomatis dari NusaCommerce Mobile POS_';
+        '_Dikirim otomatis dari OXO.ID Mobile POS_';
 
     return _launchWhatsApp(phone, message);
   }
@@ -135,9 +135,58 @@ class WhatsAppService {
         '• Transaksi Void: $voidCount | Retur: $refundCount\n'
         '• Selisih Kas Shift: $varianceCount peringatan\n'
         '--------------------------------\n'
-        '_Dikirim otomatis dari NusaCommerce Mobile_';
+        '_Dikirim otomatis dari OXO.ID Mobile_';
 
     return _launchWhatsApp(phone, message);
+  }
+
+  /// Launch WhatsApp with Installment / Settlement Kwitansi (Bukti Pelunasan Piutang/Hutang)
+  static Future<bool> sendSettlementReceipt({
+    required String partyName,
+    required String phone,
+    required String invoiceNumber,
+    required num paidAmount,
+    required num remainingBalance,
+    required String paymentMethod,
+    required String storeName,
+    bool isReceivable = true,
+  }) async {
+    final normalized = normalizePhone(phone);
+    final statusLabel = remainingBalance <= 0
+        ? '*LUNAS ✅*'
+        : 'Sisa Tagihan: *${IdrCurrencyFormatter.format(remainingBalance)}*';
+    final docTitle = isReceivable ? 'KWITANSI PEMBAYARAN PIUTANG' : 'BUKTI PEMBAYARAN HUTANG';
+    final message = '🧾 *$docTitle*\n'
+        'Toko: *$storeName*\n'
+        '--------------------------------\n'
+        'Kepada: *$partyName*\n'
+        'No. Nota: *$invoiceNumber*\n'
+        'Metode: $paymentMethod\n'
+        'Nominal Dibayar: *${IdrCurrencyFormatter.format(paidAmount)}*\n'
+        'Status: $statusLabel\n'
+        '--------------------------------\n'
+        'Terima kasih atas pembayarannya 🙏';
+
+    return _launchWhatsApp(normalized, message);
+  }
+
+  static Future<bool> sendCustomMessage({
+    required String phone,
+    required String text,
+  }) async {
+    return _launchWhatsApp(normalizePhone(phone), text);
+  }
+
+  /// Opens WhatsApp share sheet with pre-formatted report/message ready to send
+  /// to any management group or contact.
+  static Future<bool> shareToAnyChat({required String text}) async {
+    final encoded = Uri.encodeComponent(text);
+    final uri = Uri.parse('https://wa.me/?text=$encoded');
+    try {
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<bool> _launchWhatsApp(String phone, String text) async {

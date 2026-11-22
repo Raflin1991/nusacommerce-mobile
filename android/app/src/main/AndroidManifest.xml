@@ -18,8 +18,18 @@
     <!-- Haptic Feedback for POS Cashier -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Android 11+ (API 30+) Package Visibility for Native Speech Recognition (OXO Copilot Voice id-ID) -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
-        android:label="NusaCommerce POS"
+        android:label="OXO.ID POS"
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">

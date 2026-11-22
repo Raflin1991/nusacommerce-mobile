@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/whatsapp_service.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
@@ -76,23 +77,29 @@ class _OperationalRadarSheet extends StatefulWidget {
 
 class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
   late List<Map<String, dynamic>> _approvals;
+  late List<Map<String, dynamic>> _cloudConflicts;
   final Set<int> _processingApprovalIds = <int>{};
   final Set<String> _processingConflictUuids = <String>{};
+  String? _conflictInlineError;
+  String? _conflictInlineSuccess;
 
   @override
   void initState() {
     super.initState();
     _approvals = widget.approvals.map((e) => Map<String, dynamic>.from(e)).toList();
+    _cloudConflicts = widget.offlineConflicts.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   List<Map<String, dynamic>> _mergeOfflineConflicts(
     List<Map<String, dynamic>> localConflicts,
   ) {
     final byUuid = <String, Map<String, dynamic>>{};
-    for (final c in widget.offlineConflicts) {
-      final uuid = (c['local_uuid'] ?? c['id'] ?? '').toString();
+    for (final c in _cloudConflicts) {
+      final uuid = (c['local_uuid'] ?? c['client_uuid'] ?? c['id'] ?? '').toString();
       if (uuid.isNotEmpty) {
-        byUuid[uuid] = Map<String, dynamic>.from(c);
+        final copy = Map<String, dynamic>.from(c);
+        copy['cloud_conflict_id'] = (c['id'] as num?)?.toInt();
+        byUuid[uuid] = copy;
       }
     }
     for (final c in localConflicts) {
@@ -108,18 +115,66 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     return byUuid.values.toList();
   }
 
-  Future<void> _handleResolveConflict(String uuid, {required bool approveOversell}) async {
+  Future<void> _handleResolveCloudConflict(
+    int cloudConflictId,
+    String key, {
+    required String resolution,
+  }) async {
+    if (_processingConflictUuids.contains(key)) return;
+    setState(() {
+      _processingConflictUuids.add(key);
+      _conflictInlineError = null;
+      _conflictInlineSuccess = null;
+    });
+    final posCubit = context.read<PosCubit>();
+    final result = await posCubit.resolveCloudOfflineConflict(
+      cloudConflictId,
+      resolution: resolution,
+      notes: resolution == 'keep_offline'
+          ? 'Disetujui fakta transaksi cabang via OXO Mobile POS'
+          : 'Menggunakan snapshot Cloud via OXO Mobile POS',
+    );
+    if (!mounted) return;
+    setState(() {
+      _processingConflictUuids.remove(key);
+      if (result.success) {
+        _cloudConflicts.removeWhere((e) => (e['id'] as num?)?.toInt() == cloudConflictId);
+        _conflictInlineSuccess = result.message;
+      } else {
+        _conflictInlineError = result.message;
+      }
+    });
+  }
+
+  Future<void> _handleResolveConflict(
+    String uuid, {
+    required bool approveOversell,
+    bool retryOnly = false,
+  }) async {
     if (_processingConflictUuids.contains(uuid)) return;
     setState(() => _processingConflictUuids.add(uuid));
     final posCubit = context.read<PosCubit>();
     final messenger = ScaffoldMessenger.of(context);
-    final ok = await posCubit.resolveOfflineStockConflict(
-      localUuid: uuid,
-      approveOversell: approveOversell,
-    );
+    final ok = retryOnly
+        ? await posCubit.retryOfflineSyncConflict(uuid)
+        : await posCubit.resolveOfflineStockConflict(
+            localUuid: uuid,
+            approveOversell: approveOversell,
+          );
     if (!mounted) return;
     setState(() => _processingConflictUuids.remove(uuid));
-    if (approveOversell) {
+    if (retryOnly) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+          content: Text(
+            ok
+                ? 'Nota offline berhasil disinkronkan ulang ke Cloud.'
+                : 'Sinkronisasi ulang masih ditolak server. Pastikan syarat (seperti Shift Kasir) sudah terpenuhi.',
+          ),
+        ),
+      );
+    } else if (approveOversell) {
       messenger.showSnackBar(
         SnackBar(
           backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
@@ -220,10 +275,11 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (context, scrollController) {
+        final tokens = NusaThemeTokens.of(context);
         return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: tokens.bgPage,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             children: [
@@ -232,7 +288,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.border,
+                  color: tokens.borderDefault,
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
@@ -243,16 +299,12 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: totalAlerts > 0
-                            ? AppColors.danger.withOpacity(0.1)
-                            : AppColors.successSoft,
+                        color: totalAlerts > 0 ? tokens.dangerSoft : tokens.positiveSoft,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
                         Icons.radar_rounded,
-                        color: totalAlerts > 0
-                            ? AppColors.danger
-                            : AppColors.successDark,
+                        color: totalAlerts > 0 ? tokens.danger : tokens.positive,
                         size: 22,
                       ),
                     ),
@@ -261,21 +313,21 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Pusat Radar Operasional Toko',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.navyDark,
+                              color: tokens.textPrimary,
                             ),
                           ),
                           Text(
                             totalAlerts > 0
                                 ? '$totalAlerts item operasional & peringatan perlu perhatian'
                                 : 'Seluruh indikator operasional toko terpantau aman',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: AppColors.slate500,
+                              color: tokens.textSecondary,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -284,12 +336,12 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded, color: AppColors.slate700),
+                      icon: Icon(Icons.close_rounded, color: tokens.textPrimary),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1, color: AppColors.border),
+              Divider(height: 1, color: tokens.borderSubtle),
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -349,9 +401,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.background,
+              color: NusaThemeTokens.of(context).bgElevated,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,18 +588,73 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
   }
 
   Widget _buildOfflineConflictsSection(List<Map<String, dynamic>> conflicts) {
+    final hasOnlyStockConflicts = conflicts.every((c) {
+      final code = (c['conflict_code'] ?? '').toString();
+      return code.isEmpty ||
+          code == 'InsufficientStock' ||
+          code.toLowerCase().contains('stock');
+    });
     return _buildSectionCard(
       title: 'Konflik Sinkronisasi Offline (${conflicts.length})',
-      subtitle: 'Transaksi offline yang terblokir akibat stok fisik server habis (InsufficientStock)',
+      subtitle: hasOnlyStockConflicts
+          ? 'Transaksi offline yang terblokir akibat stok fisik server habis (InsufficientStock)'
+          : 'Transaksi offline tertahan validasi server (mis. Shift Kasir, stok, atau aturan bisnis)',
       icon: Icons.sync_problem_rounded,
       accentColor: AppColors.danger,
       softBgColor: AppColors.danger.withOpacity(0.1),
       child: Column(
-        children: conflicts.take(10).map((c) {
-          final uuid = (c['local_uuid'] ?? c['id'] ?? '-').toString();
+        children: [
+          if (_conflictInlineError != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+              ),
+              child: Text(
+                _conflictInlineError!,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.dangerDark,
+                ),
+              ),
+            ),
+          if (_conflictInlineSuccess != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.successDark.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.successDark.withOpacity(0.35)),
+              ),
+              child: Text(
+                _conflictInlineSuccess!,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.successDark,
+                ),
+              ),
+            ),
+          ...conflicts.take(10).map((c) {
+          final uuid = (c['local_uuid'] ?? c['client_uuid'] ?? c['id'] ?? '-').toString();
+          final cloudId = (c['cloud_conflict_id'] ?? (c['is_local_conflict'] == true ? null : c['id'])) as num?;
+          final saleNumber = (c['sale_number'] ??
+                  (c['server_snapshot'] is Map ? c['server_snapshot']['sale_number'] : null) ??
+                  (c['client_payload'] is Map ? c['client_payload']['number'] : null) ??
+                  '')
+              .toString()
+              .trim();
           final reason = (c['conflict_reason'] ??
-                  c['error_message'] ??
                   c['reason'] ??
+                  (c['server_snapshot'] is Map ? c['server_snapshot']['reason'] : null) ??
+                  c['error_message'] ??
                   'Stok fisik di cabang tidak mencukupi saat sinkronisasi')
               .toString();
           final cashier = c['cashier'] is Map
@@ -555,6 +662,11 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               : 'Kasir';
           final hasLocalQueueRecord =
               c['is_local_conflict'] == true || c['sync_status'] == 'sync_conflict';
+          final conflictCode = (c['conflict_code'] ?? c['conflict_type'] ?? '').toString();
+          final isStockConflict = conflictCode.isEmpty ||
+              conflictCode == 'InsufficientStock' ||
+              conflictCode.toLowerCase().contains('stock') ||
+              conflictCode.toLowerCase().contains('oversold');
           final isProcessing = _processingConflictUuids.contains(uuid);
 
           return Container(
@@ -568,13 +680,37 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Nota Offline #$uuid • $cashier',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.navyDark,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        saleNumber.isNotEmpty
+                            ? '$saleNumber • $cashier'
+                            : 'Nota Offline #$uuid • $cashier',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ),
+                    if (conflictCode.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.danger.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          conflictCode.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.dangerDark,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -611,14 +747,93 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            backgroundColor: AppColors.warningDark,
+                            backgroundColor: isStockConflict ? AppColors.warningDark : AppColors.primary,
                             foregroundColor: Colors.white,
                           ),
                           onPressed: isProcessing
                               ? null
-                              : () => _handleResolveConflict(uuid, approveOversell: true),
+                              : () => _handleResolveConflict(
+                                    uuid,
+                                    approveOversell: isStockConflict,
+                                    retryOnly: !isStockConflict,
+                                  ),
                           child: Text(
-                            isProcessing ? 'Memproses...' : 'Setujui Oversell (Override)',
+                            isProcessing
+                                ? 'Memproses...'
+                                : (isStockConflict
+                                    ? 'Setujui Oversell (Override)'
+                                    : 'Coba Sinkron Ulang'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      if (!isStockConflict &&
+                          (conflictCode == 'ShiftRequired' ||
+                              reason.toLowerCase().contains('shift'))) ...[
+                        const SizedBox(width: 6),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            foregroundColor: AppColors.primaryDark,
+                            side: const BorderSide(color: AppColors.primary),
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () {
+                                  Navigator.of(context).pop();
+                                  context.push('/shifts');
+                                },
+                          child: const Text(
+                            'Buka Shift',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ] else if (cloudId != null && cloudId.toInt() > 0) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            foregroundColor: AppColors.navyDark,
+                            side: BorderSide(color: AppColors.slate400.withOpacity(0.6)),
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () => _handleResolveCloudConflict(
+                                    cloudId.toInt(),
+                                    uuid,
+                                    resolution: 'use_server',
+                                  ),
+                          child: const Text(
+                            'Gunakan Snapshot Cloud',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () => _handleResolveCloudConflict(
+                                    cloudId.toInt(),
+                                    uuid,
+                                    resolution: 'keep_offline',
+                                  ),
+                          child: Text(
+                            isProcessing ? 'Memproses...' : 'Terima Fakta Cabang',
                             textAlign: TextAlign.center,
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
                           ),
@@ -630,7 +845,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               ],
             ),
           );
-        }).toList(),
+        }),
+        ],
       ),
     );
   }
@@ -643,12 +859,13 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     required Color softBgColor,
     required Widget child,
   }) {
+    final tokens = NusaThemeTokens.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: tokens.bgSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -670,17 +887,17 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.navyDark,
+                        color: tokens.textPrimary,
                       ),
                     ),
                     Text(
                       subtitle,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
-                        color: AppColors.slate500,
+                        color: tokens.textSecondary,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -697,24 +914,25 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
   }
 
   Widget _buildSafePill(String label) {
+    final tokens = NusaThemeTokens.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.successSoft,
+        color: tokens.positiveSoft,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
-          const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.successDark),
+          Icon(Icons.check_circle_rounded, size: 16, color: tokens.positive),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: AppColors.successDark,
+                color: tokens.positive,
               ),
             ),
           ),
@@ -946,9 +1164,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.background,
+                    color: NusaThemeTokens.of(context).bgElevated,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

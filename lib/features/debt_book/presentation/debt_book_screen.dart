@@ -6,12 +6,17 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
+import '../../../core/hardware/printer_service.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/network_connectivity_service.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../pos/bloc/pos_cubit.dart';
+
+part 'debt_book_parity_modals.dart';
 
 /// MODUL BUKU BON UMKM (PIUTANG PELANGGAN + 1-KLIK TAGIH WA) & BIAYA OPERASIONAL (`PRD-07`)
 class DebtBookScreen extends StatefulWidget {
@@ -27,6 +32,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
   final ApiClient _api = GetIt.instance<ApiClient>();
   final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
   final NetworkConnectivityService _connectivity = GetIt.instance<NetworkConnectivityService>();
+  final PrinterService _printer = GetIt.instance<PrinterService>();
   late TabController _tabController;
 
   bool _loading = true;
@@ -40,6 +46,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
   List<Map<String, dynamic>> _expenseCategories = [];
   List<Map<String, dynamic>> _paymentMethods = [];
   String _receivableAgingFilter = 'Semua'; // 'Semua', 'Belum Jatuh Tempo', '1-30 Hari', '>30 Hari'
+  String _expenseCategoryFilter = 'Semua';
 
   @override
   void initState() {
@@ -103,7 +110,10 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
       _totalPayables = payTotal;
       _payables = localPay;
       _expenses = localExp;
-      _expenseCategories = List<Map<String, dynamic>>.from(_defaultOfflineExpenseCategories);
+      final cachedExpCats = _offlineDb.getCachedExpenseCategories();
+      _expenseCategories = cachedExpCats.isNotEmpty
+          ? cachedExpCats
+          : List<Map<String, dynamic>>.from(_defaultOfflineExpenseCategories);
       if (_paymentMethods.isEmpty) {
         _paymentMethods = List<Map<String, dynamic>>.from(_defaultOfflinePaymentMethods);
       }
@@ -194,7 +204,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -252,6 +262,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                     final methodName = _methodNameById(selectedMethodId);
                     Navigator.pop(ctx);
                     try {
+                      final invNo = (item['number'] ?? 'BON-$saleId').toString();
+                      final custPhone = (item['customer']?['phone'] ?? item['customer_phone'] ?? '').toString();
+                      final remain = (currentDue - paid).clamp(0.0, double.infinity);
                       if (isLocalItem || !(await _connectivity.checkOnline())) {
                         await _offlineDb.payLocalReceivable(
                           saleId: saleId,
@@ -260,8 +273,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                         );
                         await _loadData();
                         if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Cicilan / pelunasan kasbon dicatat secara lokal!')),
+                        _showSettlementReceiptDialog(
+                          isReceivable: true,
+                          partyName: customerName,
+                          phone: custPhone,
+                          invoiceNumber: invNo,
+                          paidAmount: paid,
+                          remainingBalance: remain,
+                          paymentMethod: methodName,
                         );
                         return;
                       }
@@ -274,8 +293,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                       );
                       await _loadData();
                       if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Pembayaran piutang Buku Bon berhasil dicatat!')),
+                      _showSettlementReceiptDialog(
+                        isReceivable: true,
+                        partyName: customerName,
+                        phone: custPhone,
+                        invoiceNumber: invNo,
+                        paidAmount: paid,
+                        remainingBalance: remain,
+                        paymentMethod: methodName,
                       );
                     } catch (e) {
                       if (!mounted) return;
@@ -313,7 +338,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -410,6 +435,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                     final methodName = _methodNameById(selectedMethodId);
                     Navigator.pop(ctx);
                     try {
+                      final invNo = (item['number'] ?? 'PO-$purchaseId').toString();
+                      final suppPhone = (item['supplier']?['phone'] ?? '').toString();
+                      final remain = (currentDue - paid).clamp(0.0, double.infinity);
                       if (isLocalItem || !(await _connectivity.checkOnline())) {
                         await _offlineDb.payLocalPayable(
                           payableId: purchaseId,
@@ -418,8 +446,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                         );
                         await _loadData();
                         if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Pembayaran hutang supplier berhasil dicatat secara lokal!')),
+                        _showSettlementReceiptDialog(
+                          isReceivable: false,
+                          partyName: supplierName,
+                          phone: suppPhone,
+                          invoiceNumber: invNo,
+                          paidAmount: paid,
+                          remainingBalance: remain,
+                          paymentMethod: methodName,
                         );
                         return;
                       }
@@ -433,8 +467,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                       );
                       await _loadData();
                       if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Pembayaran hutang supplier berhasil dicatat!')),
+                      _showSettlementReceiptDialog(
+                        isReceivable: false,
+                        partyName: supplierName,
+                        phone: suppPhone,
+                        invoiceNumber: invNo,
+                        paidAmount: paid,
+                        remainingBalance: remain,
+                        paymentMethod: methodName,
                       );
                     } catch (e) {
                       if (!mounted) return;
@@ -470,7 +510,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -600,26 +640,32 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    final tokens = NusaThemeTokens.of(context);
     final storeName = context.watch<AuthCubit>().state.session.activeStore.name;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: tokens.bgPage,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: tokens.bgSurface,
         surfaceTintColor: Colors.transparent,
         title: const Text('Buku Bon & Biaya Toko'),
         actions: [
+          TextButton.icon(
+            onPressed: () => context.push('/cash-ledger'),
+            icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+            label: const Text('Buku Kas'),
+          ),
           IconButton(
             tooltip: 'Muat Ulang',
             onPressed: _loadData,
-            icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
+            icon: Icon(Icons.refresh_rounded, color: tokens.accent),
           ),
         ],
         bottom: TabBar(
           controller: _tabController,
-          labelColor: AppColors.primary,
-          unselectedLabelColor: AppColors.slate500,
-          indicatorColor: AppColors.primary,
+          labelColor: tokens.accent,
+          unselectedLabelColor: tokens.textSecondary,
+          indicatorColor: tokens.accent,
           labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
           tabs: const [
             Tab(text: 'Piutang Bon'),
@@ -642,9 +688,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                   children: [
                     // Executive Summary Comparison Banner: Piutang vs Hutang
                     Container(
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        border: Border(bottom: BorderSide(color: AppColors.border)),
+                      decoration: BoxDecoration(
+                        color: tokens.bgSurface,
+                        border: Border(bottom: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
                       ),
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
                       child: Row(
@@ -656,9 +702,12 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                               child: Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: AppColors.warningSoft,
+                                  color: tokens.warningSoft,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                                  border: Border.all(
+                                    color: tokens.warning.withOpacity(tokens.isHighContrast ? 1.0 : 0.35),
+                                    width: tokens.borderWidth,
+                                  ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -666,14 +715,19 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        const Text(
-                                          'Piutang Bon',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.warningDark,
+                                        Expanded(
+                                          child: Text(
+                                            'Piutang Bon',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: tokens.warning,
+                                            ),
                                           ),
                                         ),
+                                        const SizedBox(width: 4),
                                         NusaBadge(
                                           label: '${_receivables.length}',
                                           variant: NusaBadgeVariant.warning,
@@ -681,10 +735,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    NusaPriceTag(
-                                      amount: _totalReceivables,
-                                      fontSize: 15.5,
-                                      color: AppColors.navyDark,
+                                    FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: NusaPriceTag(
+                                        amount: _totalReceivables,
+                                        fontSize: 15.5,
+                                        color: tokens.textPrimary,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -699,9 +757,12 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                               child: Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: AppColors.dangerSoft,
+                                  color: tokens.dangerSoft,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                                  border: Border.all(
+                                    color: tokens.danger.withOpacity(tokens.isHighContrast ? 1.0 : 0.35),
+                                    width: tokens.borderWidth,
+                                  ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -709,14 +770,19 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        const Text(
-                                          'Hutang Tempo',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.dangerDark,
+                                        Expanded(
+                                          child: Text(
+                                            'Hutang Tempo',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: tokens.danger,
+                                            ),
                                           ),
                                         ),
+                                        const SizedBox(width: 4),
                                         NusaBadge(
                                           label: '${_payables.length}',
                                           variant: NusaBadgeVariant.danger,
@@ -724,10 +790,14 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    NusaPriceTag(
-                                      amount: _totalPayables,
-                                      fontSize: 15.5,
-                                      color: AppColors.navyDark,
+                                    FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: NusaPriceTag(
+                                        amount: _totalPayables,
+                                        fontSize: 15.5,
+                                        color: tokens.textPrimary,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -763,6 +833,20 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              if (_receivables.isNotEmpty) ...[
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () => _showBatchSettlementModal(isReceivable: true),
+                                        icon: const Icon(Icons.done_all_rounded, size: 18),
+                                        label: const Text('Pelunasan Gabungan (Multi-Nota)'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                              ],
                               Builder(builder: (context) {
                                 final filteredRecs = _receivables.where((r) {
                                   final age = (r['age_days'] as num?)?.toInt() ?? 0;
@@ -857,8 +941,17 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                                     },
                                                   ),
                                                 ),
-                                                const SizedBox(width: 10),
+                                                const SizedBox(width: 8),
                                               ],
+                                              IconButton(
+                                                tooltip: 'Riwayat Cicilan',
+                                                onPressed: () => _showInstallmentHistoryModal(
+                                                  isReceivable: true,
+                                                  invoice: r,
+                                                  partyName: custName,
+                                                ),
+                                                icon: const Icon(Icons.history_rounded, color: AppColors.primary),
+                                              ),
                                               Expanded(
                                                 child: NusaButton(
                                                   label: 'Terima Cicilan',
@@ -1049,6 +1142,15 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                               ),
                                               const SizedBox(width: 10),
                                             ],
+                                            IconButton(
+                                              tooltip: 'Riwayat Bayar Hutang',
+                                              onPressed: () => _showInstallmentHistoryModal(
+                                                isReceivable: false,
+                                                invoice: p,
+                                                partyName: suppName,
+                                              ),
+                                              icon: const Icon(Icons.history_rounded, color: AppColors.primary),
+                                            ),
                                             Expanded(
                                               child: NusaButton(
                                                 label: 'Bayar Hutang',
@@ -1070,69 +1172,138 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                           ListView(
                             padding: const EdgeInsets.all(14),
                             children: [
-                              NusaButton(
-                                label: 'Tambah Biaya Operasional / Pembelian',
-                                icon: Icons.add_rounded,
-                                onPressed: _showAddExpenseModal,
-                              ),
-                              const SizedBox(height: 14),
-                              if (_expenses.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 24),
-                                  child: NusaEmptyState(
-                                    icon: Icons.receipt_long_outlined,
-                                    title: 'Belum Ada Biaya Operasional',
-                                    subtitle: 'Catat pengeluaran operasional seperti listrik, plastik, atau transportasi toko.',
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 2,
+                                    child: NusaButton(
+                                      label: 'Catat Biaya Baru',
+                                      icon: Icons.add_rounded,
+                                      onPressed: _showAddExpenseModal,
+                                    ),
                                   ),
-                                )
-                              else
-                                ..._expenses.map((exp) {
-                                  final catName = (exp['category']?['name'] ?? exp['category_name'] ?? 'Operasional').toString();
-                                  final dateStr = (exp['expense_date'] ?? exp['created_at'] ?? '').toString();
-                                  return NusaCard(
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 40,
-                                          height: 40,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.dangerSoft,
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                          child: const Icon(Icons.receipt_long_rounded, color: AppColors.danger, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: NusaButton(
+                                      label: 'Kategori',
+                                      icon: Icons.folder_outlined,
+                                      variant: NusaButtonVariant.outline,
+                                      onPressed: _showExpenseCategoriesManager,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    for (final cat in [
+                                      'Semua',
+                                      ..._expenseCategories.map((c) => (c['name'] ?? '').toString()).where((n) => n.isNotEmpty),
+                                    ])
+                                      Padding(
+                                        padding: const EdgeInsets.only(right: 6),
+                                        child: NusaPillFilter(
+                                          label: cat,
+                                          selected: _expenseCategoryFilter == cat,
+                                          onTap: () => setState(() => _expenseCategoryFilter = cat),
                                         ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                (exp['description'] ?? '-').toString(),
-                                                style: const TextStyle(
-                                                  fontSize: 13.5,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: AppColors.navyDark,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Builder(builder: (context) {
+                                final filteredExps = _expenses.where((exp) {
+                                  if (_expenseCategoryFilter == 'Semua') return true;
+                                  final cName = (exp['category']?['name'] ?? exp['category_name'] ?? 'Operasional').toString();
+                                  return cName == _expenseCategoryFilter;
+                                }).toList();
+                                if (filteredExps.isEmpty) {
+                                  return const Padding(
+                                    padding: EdgeInsets.only(top: 24),
+                                    child: NusaEmptyState(
+                                      icon: Icons.receipt_long_outlined,
+                                      title: 'Belum Ada Biaya Operasional',
+                                      subtitle: 'Catat pengeluaran operasional seperti listrik, plastik, atau transportasi toko.',
+                                    ),
+                                  );
+                                }
+                                return Column(
+                                  children: filteredExps.map((exp) {
+                                    final catName = (exp['category']?['name'] ?? exp['category_name'] ?? 'Operasional').toString();
+                                    final dateStr = (exp['expense_date'] ?? exp['created_at'] ?? '').toString();
+                                    return NusaCard(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 40,
+                                            height: 40,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.dangerSoft,
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: const Icon(Icons.receipt_long_rounded, color: AppColors.danger, size: 20),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  (exp['description'] ?? '-').toString(),
+                                                  style: const TextStyle(
+                                                    fontSize: 13.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: AppColors.navyDark,
+                                                  ),
                                                 ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  '$catName • $dateStr',
+                                                  style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Column(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              NusaPriceTag(
+                                                amount: (exp['amount'] as num?)?.toDouble() ?? 0,
+                                                fontSize: 13.5,
+                                                color: AppColors.dangerDark,
                                               ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '$catName • $dateStr',
-                                                style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  InkWell(
+                                                    onTap: () => _showEditExpenseModal(exp),
+                                                    child: const Padding(
+                                                      padding: EdgeInsets.all(4),
+                                                      child: Icon(Icons.edit_outlined, size: 17, color: AppColors.primary),
+                                                    ),
+                                                  ),
+                                                  InkWell(
+                                                    onTap: () => _confirmDeleteExpense(exp),
+                                                    child: const Padding(
+                                                      padding: EdgeInsets.all(4),
+                                                      child: Icon(Icons.delete_outline, size: 17, color: AppColors.danger),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ],
                                           ),
-                                        ),
-                                        NusaPriceTag(
-                                          amount: (exp['amount'] as num?)?.toDouble() ?? 0,
-                                          fontSize: 13.5,
-                                          color: AppColors.dangerDark,
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                );
+                              }),
                             ],
                           ),
                         ],

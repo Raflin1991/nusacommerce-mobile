@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/nusa_barcode_scanner_view.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
 
@@ -72,7 +73,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -238,7 +239,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -260,11 +261,9 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
               child: SizedBox(
                 height: 220,
                 width: double.infinity,
-                child: MobileScanner(
-                  onDetect: (capture) {
+                child: NusaBarcodeScannerView(
+                  onDetect: (raw) {
                     if (scanned) return;
-                    final raw = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
-                    if (raw == null || raw.isEmpty) return;
                     final match = posState.allProducts.where(
                       (p) => p.barcode == raw || p.sku.toLowerCase() == raw.toLowerCase(),
                     );
@@ -378,7 +377,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
         }).toList();
 
         return Scaffold(
-          backgroundColor: AppColors.background,
+          backgroundColor: NusaThemeTokens.of(context).bgPage,
           appBar: AppBar(
             title: const Text('Pemasok & Pembelian Stok'),
             actions: [

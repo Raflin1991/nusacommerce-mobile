@@ -242,7 +242,7 @@ Future<void> showCascadeModuleTeaserModal(
                           SnackBar(
                             backgroundColor: AppColors.navyDark,
                             content: Text(
-                              'Hubungi Owner / Panel Web NusaCommerce → Paket Langganan untuk mengaktifkan modul "$moduleTitle" ($normalizedRequired).',
+                              'Hubungi Owner / Panel Web OXO.ID → Paket Langganan untuk mengaktifkan modul "$moduleTitle" ($normalizedRequired).',
                             ),
                           ),
                         );

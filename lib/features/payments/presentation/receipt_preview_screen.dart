@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
@@ -6,6 +7,7 @@ import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
@@ -92,7 +94,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
           SnackBar(
             backgroundColor: AppColors.successDark,
             content: Text(
-              'Struk berhasil dicetak ke ${widget.printerService.connectedPrinter?.name ?? 'Printer Bluetooth'} ($selectedWidth)!',
+              'Struk berhasil dicetak ke ${widget.printerService.activePrinterLabel} ($selectedWidth)!',
             ),
           ),
         );
@@ -103,7 +105,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
         SnackBar(
           backgroundColor: AppColors.warningDark,
           content: Text(
-            'Printer Bluetooth belum tersambung. Menampilkan pratinjau ESC/POS ($selectedWidth).',
+            'Printer (${widget.printerService.activePrinterLabel}) belum tersambung. Menampilkan pratinjau ESC/POS ($selectedWidth).',
           ),
         ),
       );
@@ -249,6 +251,25 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     );
   }
 
+  Future<void> _handleCopyDigitalReceipt() async {
+    final storeProfile = widget.offlineDb.getStoreProfile();
+    final formatted = widget.printerService.formatThermalReceiptText(
+      storeProfile: storeProfile,
+      sale: widget.receiptData,
+      paperWidthOverride: widget.printerService.paperWidth,
+      isReprint: _isReprint,
+      reprintCount: _reprintCount,
+    );
+    await Clipboard.setData(ClipboardData(text: formatted));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: AppColors.successDark,
+        content: Text('Teks struk digital berhasil disalin ke clipboard.'),
+      ),
+    );
+  }
+
   Future<void> _handlePrintKot() async {
     try {
       final rawItems = (widget.receiptData['items'] as List<dynamic>? ?? []);
@@ -333,7 +354,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     final dueDate = sale['due_date']?.toString();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: NusaThemeTokens.of(context).bgPage,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
@@ -431,7 +452,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       ),
                     ],
                     Text(
-                      (storeProfile['name'] ?? 'NusaCommerce POS').toString(),
+                      (storeProfile['name'] ?? 'OXO.ID POS').toString(),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 2),
@@ -593,7 +614,53 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                   prefixIcon: Icon(Icons.chat_bubble_outline_rounded, color: AppColors.whatsapp),
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
+              // Active Printer Channel Indicator + Copy Digital Receipt
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: NusaThemeTokens.of(context).bgElevated,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            widget.printerService.isWifiMode
+                                ? Icons.wifi_rounded
+                                : Icons.bluetooth_connected_rounded,
+                            size: 16,
+                            color: NusaThemeTokens.of(context).accent,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              widget.printerService.activePrinterLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: NusaThemeTokens.of(context).textPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _handleCopyDigitalReceipt,
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                    label: const Text('Salin Struk', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(

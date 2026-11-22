@@ -9,6 +9,7 @@ class StoreBranchModel extends Equatable {
   final String? phone;
   final String? businessType;
   final String? posMode;
+  final bool isWarehouse;
 
   const StoreBranchModel({
     required this.id,
@@ -19,6 +20,7 @@ class StoreBranchModel extends Equatable {
     this.phone,
     this.businessType,
     this.posMode,
+    this.isWarehouse = false,
   });
 
   String? get preferredVerticalRaw =>
@@ -38,6 +40,7 @@ class StoreBranchModel extends Equatable {
       phone: json['phone']?.toString(),
       businessType: json['business_type']?.toString(),
       posMode: json['pos_mode']?.toString(),
+      isWarehouse: json['is_warehouse'] == true || json['type']?.toString() == 'warehouse',
     );
   }
 
@@ -50,10 +53,11 @@ class StoreBranchModel extends Equatable {
         'phone': phone,
         'business_type': businessType,
         'pos_mode': posMode,
+        'is_warehouse': isWarehouse,
       };
 
   @override
-  List<Object?> get props => [id, name, code, city, businessType, posMode];
+  List<Object?> get props => [id, name, code, city, businessType, posMode, isWarehouse];
 }
 
 class AuthSessionModel extends Equatable {
@@ -185,7 +189,7 @@ class AuthSessionModel extends Equatable {
     return AuthSessionModel(
       userId: 999999,
       userName: 'Pemilik $normalizedName',
-      userEmail: 'owner@lokal.nusapos.id',
+      userEmail: 'owner@lokal.oxo.id',
       userRole: 'Pemilik Usaha',
       isOwner: true,
       tenantName: normalizedName,
@@ -239,15 +243,36 @@ class AuthSessionModel extends Equatable {
             ? storesList.first
             : const StoreBranchModel(id: 1, name: 'Toko Utama', code: 'MAIN', city: 'Indonesia'));
 
-    final roles = (user['roles'] as List<dynamic>? ?? [user['role'] ?? 'Pemilik Usaha'])
+    final rawRoles = (user['roles'] as List<dynamic>?)
+            ?.map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
+        <String>[];
+    final singleRole = (user['role'] ?? '').toString().trim();
+    final roleLabel = rawRoles.isNotEmpty
+        ? rawRoles.first
+        : (singleRole.isNotEmpty ? singleRole : 'Operator');
+    final normalizedRole = roleLabel.trim().toLowerCase();
+    const ownerExactRoles = {
+      'admin',
+      'administrator',
+      'owner',
+      'pemilik',
+      'pemilik usaha',
+      'direktur',
+      'super admin',
+      'superadmin',
+    };
+    final parsedPermissions = (data['permissions'] as List<dynamic>? ?? [])
         .map((e) => e.toString())
         .toList();
-    final roleLabel = roles.isNotEmpty ? roles.first : 'Pemilik Usaha';
+    final hasExplicitIsOwner = user.containsKey('is_owner') && user['is_owner'] is bool;
+    final hasExplicitRole = rawRoles.isNotEmpty || singleRole.isNotEmpty;
     final isOwner = (user['is_owner'] == true) ||
-        roleLabel.toLowerCase().contains('admin') ||
-        roleLabel.toLowerCase().contains('owner') ||
-        roleLabel.toLowerCase().contains('pemilik') ||
-        (user['is_super_admin'] == true);
+        (user['is_super_admin'] == true) ||
+        (!hasExplicitIsOwner &&
+            hasExplicitRole &&
+            ownerExactRoles.contains(normalizedRole));
 
     final planName = (tenant['plan_name'] ?? '').toString();
     final tier = _normalizeTier(entitlements['tier'] ?? tenant['tier'], planName);
@@ -268,7 +293,7 @@ class AuthSessionModel extends Equatable {
       hiddenModules: hiddenModules,
       activeStore: activeStore,
       availableStores: storesList.isNotEmpty ? storesList : [activeStore],
-      permissions: (data['permissions'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      permissions: parsedPermissions,
     );
   }
 
@@ -294,7 +319,7 @@ class AuthSessionModel extends Equatable {
   factory AuthSessionModel.defaultOwnerDemo() {
     const mainStore = StoreBranchModel(
       id: 1,
-      name: 'Nusa Manunggal Grand Sudirman',
+      name: 'OXO Official Store Grand Sudirman',
       code: 'STORE-01',
       city: 'Jakarta Selatan',
       address: 'Jl. Jend. Sudirman Kav. 1, Jakarta',
@@ -306,7 +331,7 @@ class AuthSessionModel extends Equatable {
       userEmail: 'direktur@manunggal.co.id',
       userRole: 'Pemilik Usaha',
       isOwner: true,
-      tenantName: 'NusaCommerce',
+      tenantName: 'OXO.ID',
       tenantSubdomain: 'manunggal',
       planName: 'Enterprise',
       tier: 'enterprise',
@@ -387,6 +412,7 @@ class AuthSessionModel extends Equatable {
     String? tier,
     List<String>? activeModules,
     List<String>? hiddenModules,
+    List<String>? permissions,
     bool? isLocalTrial,
   }) {
     return AuthSessionModel(
@@ -403,7 +429,7 @@ class AuthSessionModel extends Equatable {
       hiddenModules: hiddenModules ?? this.hiddenModules,
       activeStore: activeStore ?? this.activeStore,
       availableStores: availableStores,
-      permissions: permissions,
+      permissions: permissions ?? this.permissions,
       isLocalTrial: isLocalTrial ?? this.isLocalTrial,
     );
   }
@@ -417,6 +443,7 @@ class AuthSessionModel extends Equatable {
         activeModules,
         hiddenModules,
         activeStore,
+        permissions,
         isLocalTrial,
       ];
 }
