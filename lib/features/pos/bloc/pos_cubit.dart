@@ -2979,7 +2979,10 @@ class PosCubit extends Cubit<PosState> {
             ? product.localUuid!.trim()
             : const Uuid().v4();
 
-    if (!_isLocalStandalone) {
+    final bool hasLiveNetwork =
+        !_isLocalStandalone && await _connectivityService.checkOnline();
+
+    if (hasLiveNetwork) {
       try {
         if (isBrandNew) {
           final res = await _apiClient.dio.post(

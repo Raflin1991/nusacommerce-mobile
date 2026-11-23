@@ -2163,6 +2163,7 @@ class OfflineDatabase {
     required String supplierName,
     String? supplierPhone,
     int? supplierId,
+    int? purchaseId,
     required double totalAmount,
     double paidAmount = 0.0,
     String? dueDate,
@@ -2186,7 +2187,7 @@ class OfflineDatabase {
     }
     final record = <String, dynamic>{
       'id': id,
-      'purchase_id': id,
+      'purchase_id': purchaseId ?? id,
       'invoice_number': invNo,
       'number': invNo,
       'supplier_id': supplierId,
@@ -2219,62 +2220,133 @@ class OfflineDatabase {
     required int payableId,
     required double amount,
     String paymentMethod = 'Tunai',
+    String? invoiceNumber,
   }) async {
     if (amount <= 0) return null;
     final list = _readPrefsList(_keyLocalPayables);
     final idx = list.indexWhere(
-      (p) => (p['purchase_id'] as num?)?.toInt() == payableId || (p['id'] as num?)?.toInt() == payableId,
-    );
-    if (idx < 0) return null;
-
-    final item = Map<String, dynamic>.from(list[idx]);
-    final currentBalance = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
-    final currentPaid = (item['paid_amount'] as num?)?.toDouble() ?? 0.0;
-    final applied = amount > currentBalance ? currentBalance : amount;
-    final nextBalance = (currentBalance - applied).clamp(0.0, double.infinity);
-
-    item['paid_amount'] = currentPaid + applied;
-    item['balance_due'] = nextBalance;
-    item['status'] = nextBalance <= 0.5 ? 'paid' : 'partial';
-    if (nextBalance <= 0.5) {
-      item['is_overdue'] = false;
-    }
-    final payLogs = (item['payments'] as List<dynamic>? ?? [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    payLogs.insert(0, {
-      'id': DateTime.now().millisecondsSinceEpoch,
-      'amount': applied,
-      'method_name': paymentMethod,
-      'payment_date': DateTime.now().toIso8601String().split('T').first,
-      'cashier': 'Pemilik',
-    });
-    item['payments'] = payLogs;
-
-    list[idx] = item;
-    await _prefs.setString(_keyLocalPayables, jsonEncode(list));
-    await _sqlite.upsertLocalPayable(item);
-
-    await addLocalCashEntry(
-      title: 'Bayar Hutang Supplier ${item['supplier_name'] ?? ''} (${item['number'] ?? item['invoice_number'] ?? ''})',
-      category: 'Pembelian & Hutang',
-      direction: 'out',
-      channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
-          ? 'cash'
-          : 'non_cash',
-      methodName: paymentMethod,
-      amount: applied,
+      (p) =>
+          (p['purchase_id'] as num?)?.toInt() == payableId ||
+          (p['id'] as num?)?.toInt() == payableId ||
+          (invoiceNumber != null &&
+              invoiceNumber.trim().isNotEmpty &&
+              (p['number'] == invoiceNumber || p['invoice_number'] == invoiceNumber)),
     );
 
-    final methodLower = paymentMethod.toLowerCase();
-    if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
-      await addLocalShiftCashEntry(
-        type: 'pay_out',
-        amount: applied,
-        reason: 'Bayar Hutang Supplier ${item['number'] ?? item['invoice_number'] ?? ''}',
+    if (idx >= 0) {
+      final item = Map<String, dynamic>.from(list[idx]);
+      final currentBalance = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
+      final currentPaid = (item['paid_amount'] as num?)?.toDouble() ?? 0.0;
+      final applied = amount > currentBalance ? currentBalance : amount;
+      final nextBalance = (currentBalance - applied).clamp(0.0, double.infinity);
+
+      item['paid_amount'] = currentPaid + applied;
+      item['balance_due'] = nextBalance;
+      item['status'] = nextBalance <= 0.5 ? 'paid' : 'partial';
+      if (nextBalance <= 0.5) {
+        item['is_overdue'] = false;
+      }
+      final payLogs = (item['payments'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      payLogs.insert(0, {
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'amount': applied,
+        'method_name': paymentMethod,
+        'payment_date': DateTime.now().toIso8601String().split('T').first,
+        'cashier': 'Pemilik',
+      });
+      item['payments'] = payLogs;
+
+      list[idx] = item;
+      await _prefs.setString(_keyLocalPayables, jsonEncode(list));
+      await _sqlite.upsertLocalPayable(item);
+
+      // Also sync matching record in _keyLocalPurchases
+      final purchases = _readPrefsList(_keyLocalPurchases);
+      final pIdx = purchases.indexWhere(
+        (p) =>
+            (p['id'] as num?)?.toInt() == payableId ||
+            (p['number'] != null && (p['number'] == item['number'] || p['number'] == invoiceNumber)),
       );
+      if (pIdx >= 0) {
+        final po = Map<String, dynamic>.from(purchases[pIdx]);
+        final curPaid = (po['paid_total'] as num?)?.toDouble() ?? 0.0;
+        final curGrand = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
+        final newPaid = curPaid + applied;
+        final newBalance = (curGrand - newPaid).clamp(0.0, double.infinity);
+        po['paid_total'] = newPaid;
+        po['balance_due'] = newBalance;
+        po['status'] = newBalance <= 0.5 ? 'paid' : 'partially_paid';
+        purchases[pIdx] = po;
+        await _prefs.setString(_keyLocalPurchases, jsonEncode(purchases));
+      }
+
+      await addLocalCashEntry(
+        title: 'Bayar Hutang Supplier ${item['supplier_name'] ?? ''} (${item['number'] ?? item['invoice_number'] ?? ''})',
+        category: 'Pembelian & Hutang',
+        direction: 'out',
+        channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
+            ? 'cash'
+            : 'non_cash',
+        methodName: paymentMethod,
+        amount: applied,
+      );
+
+      final methodLower = paymentMethod.toLowerCase();
+      if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
+        await addLocalShiftCashEntry(
+          type: 'pay_out',
+          amount: applied,
+          reason: 'Bayar Hutang Supplier ${item['number'] ?? item['invoice_number'] ?? ''}',
+        );
+      }
+      return item;
+    } else {
+      // Direct update on _keyLocalPurchases if not present in payables list
+      final purchases = _readPrefsList(_keyLocalPurchases);
+      final pIdx = purchases.indexWhere(
+        (p) =>
+            (p['id'] as num?)?.toInt() == payableId ||
+            (invoiceNumber != null &&
+                invoiceNumber.trim().isNotEmpty &&
+                (p['number'] == invoiceNumber || p['supplier_invoice_number'] == invoiceNumber)),
+      );
+      if (pIdx >= 0) {
+        final po = Map<String, dynamic>.from(purchases[pIdx]);
+        final curBalance = (po['balance_due'] as num?)?.toDouble() ?? 0.0;
+        final curPaid = (po['paid_total'] as num?)?.toDouble() ?? 0.0;
+        final applied = amount > curBalance ? curBalance : amount;
+        final nextBalance = (curBalance - applied).clamp(0.0, double.infinity);
+        po['paid_total'] = curPaid + applied;
+        po['balance_due'] = nextBalance;
+        po['status'] = nextBalance <= 0.5 ? 'paid' : 'partially_paid';
+        purchases[pIdx] = po;
+        await _prefs.setString(_keyLocalPurchases, jsonEncode(purchases));
+
+        await addLocalCashEntry(
+          title: 'Bayar Hutang PO ${po['number'] ?? ''} (${po['supplier_name'] ?? ''})',
+          category: 'Pembelian & Hutang',
+          direction: 'out',
+          channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
+              ? 'cash'
+              : 'non_cash',
+          methodName: paymentMethod,
+          amount: applied,
+        );
+
+        final methodLower = paymentMethod.toLowerCase();
+        if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
+          await addLocalShiftCashEntry(
+            type: 'pay_out',
+            amount: applied,
+            reason: 'Bayar Hutang PO ${po['number'] ?? ''}',
+          );
+        }
+        return po;
+      }
+      return null;
     }
-    return item;
   }
 
   List<Map<String, dynamic>> getLocalExpenses() {
@@ -2306,8 +2378,14 @@ class OfflineDatabase {
     final catName = category.trim().isEmpty ? 'Operasional Toko' : category.trim();
     final resolvedUuid =
         (localUuid != null && localUuid.trim().isNotEmpty) ? localUuid.trim() : _uuid.v4();
+    final existingExpenses = _readPrefsList(_keyLocalExpenses);
+    int nextId = now.microsecondsSinceEpoch;
+    final usedIds = existingExpenses.map((e) => (e['id'] as num?)?.toInt() ?? 0).toSet();
+    while (usedIds.contains(nextId)) {
+      nextId++;
+    }
     final record = <String, dynamic>{
-      'id': now.millisecondsSinceEpoch,
+      'id': nextId,
       'local_uuid': resolvedUuid,
       if (categoryId != null && categoryId > 0) 'category_id': categoryId,
       'category_name': catName,

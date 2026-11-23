@@ -314,7 +314,7 @@ void main() {
       await cubit2.initializeCatalog(awaitCloudSync: false);
 
       expect(cubit2.state.heldCarts.length, 2);
-      final labels = cubit2.state.heldCarts.map((h) => h['label']).toList();
+      final labels = cubit2.state.heldCarts.map((h) => h['held_label']).toList();
       expect(labels, containsAll(['Meja 01', 'Meja 05']));
 
       // Recall Meja 05 (index 0 because latest inserted at top) and verify items & customer
@@ -328,7 +328,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       final dbThird = OfflineDatabase(prefs);
       expect(dbThird.getHeldSales().length, 1);
-      expect(dbThird.getHeldSales().first['label'], 'Meja 01');
+      expect(dbThird.getHeldSales().first['held_label'], 'Meja 01');
     });
   });
 
@@ -442,6 +442,7 @@ void main() {
       addTearDown(conn.dispose);
 
       int nextServerProductId = 801;
+      final assignedByName = <String, int>{};
       final postedProducts = <Map<String, dynamic>>[];
       final postedCheckouts = <Map<String, dynamic>>[];
 
@@ -450,14 +451,16 @@ void main() {
             options.data is Map ? Map<String, dynamic>.from(options.data as Map) : <String, dynamic>{};
         if (options.method == 'POST' && options.path.endsWith('/products')) {
           final assignedId = nextServerProductId++;
+          final name = (data['name'] ?? '').toString();
+          assignedByName[name] = assignedId;
           postedProducts.add({
             'id': assignedId,
-            'name': data['name'],
+            'name': name,
             'idempotencyKey': options.headers['X-Idempotency-Key'],
           });
           return _jsonResponse({
             'success': true,
-            'data': {'id': assignedId, 'name': data['name']},
+            'data': {'id': assignedId, 'name': name},
           }, status: 201);
         }
         if (options.method == 'POST' && options.path.endsWith('/pos/checkout')) {
@@ -545,14 +548,17 @@ void main() {
       expect(postedProducts.length, 2);
       expect(postedProducts.every((p) => (p['idempotencyKey'] ?? '').toString().isNotEmpty), isTrue);
 
-      // Verify offline sale was remapped to official Cloud IDs (801 & 802) BEFORE checkout POST!
+      // Verify offline sale was remapped to exact official Cloud IDs BEFORE checkout POST!
       expect(postedCheckouts.length, 1);
       final syncedItems = (postedCheckouts.first['items'] as List).cast<Map<String, dynamic>>();
-      expect(syncedItems.map((i) => i['product_id']).toList(), [801, 802]);
+      expect(syncedItems.map((i) => i['product_id']).toList(), [
+        assignedByName['Produk Baru Negatif'],
+        assignedByName['Produk Legacy Positif'],
+      ]);
 
-      // Verify held sale was ALSO remapped to Cloud ID 802!
+      // Verify held sale was ALSO remapped to the official Cloud ID for Produk Legacy Positif!
       final heldItems = (db.getHeldSales().first['items'] as List).cast<Map<String, dynamic>>();
-      expect(heldItems.first['product_id'], 802);
+      expect(heldItems.first['product_id'], assignedByName['Produk Legacy Positif']);
     });
 
     test('BUG 5: Offline petty cash expenses sync to POST /expenses and flip is_synced = 1', () async {
@@ -800,7 +806,6 @@ void main() {
       // Attacker edits SharedPreferences to escalate tier -> 'enterprise' & unlock PRO modules!
       final forgedSession = legitimateStarter.copyWith(
         tier: 'enterprise',
-        planName: 'Enterprise PRO',
         activeModules: const ['cash_debt', 'accounting', 'loyalty', 'warehouse'],
       );
       expect(await vault.hasValidSeal(forgedSession), isFalse);

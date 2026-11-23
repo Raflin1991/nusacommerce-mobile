@@ -385,6 +385,7 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
 
     if (balanceDue > 0.5) {
       await addLocalPayable(
+        purchaseId: id,
         supplierId: supplierId,
         supplierName: supplierName,
         supplierPhone: supplierPhone,

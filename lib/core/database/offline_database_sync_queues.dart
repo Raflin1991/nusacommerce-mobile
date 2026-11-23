@@ -61,30 +61,37 @@ extension OfflineDatabaseSyncQueuesExt on OfflineDatabase {
 
     for (int i = 0; i < heldList.length; i++) {
       final held = Map<String, dynamic>.from(heldList[i]);
-      final rawItems = held['cart_items'];
-      if (rawItems is! List) continue;
       bool heldModified = false;
-      final nextItems = rawItems.map((raw) {
-        if (raw is! Map) return raw;
-        final item = Map<String, dynamic>.from(raw);
-        final pid = (item['product_id'] as num?)?.toInt() ??
-            (item['product'] is Map ? (item['product']['id'] as num?)?.toInt() : null);
-        if (pid != null && productIdMap.containsKey(pid)) {
-          final nextId = productIdMap[pid]!;
-          item['product_id'] = nextId;
-          if (item['product'] is Map) {
-            final prodMap = Map<String, dynamic>.from(item['product'] as Map);
-            prodMap['id'] = nextId;
-            prodMap['is_local_only'] = false;
-            item['product'] = prodMap;
+
+      for (final listKey in const ['cart_items', 'items']) {
+        final rawItems = held[listKey];
+        if (rawItems is! List) continue;
+        bool listChanged = false;
+        final nextItems = rawItems.map((raw) {
+          if (raw is! Map) return raw;
+          final item = Map<String, dynamic>.from(raw);
+          final pid = (item['product_id'] as num?)?.toInt() ??
+              (item['product'] is Map ? (item['product']['id'] as num?)?.toInt() : null);
+          if (pid != null && productIdMap.containsKey(pid)) {
+            final nextId = productIdMap[pid]!;
+            item['product_id'] = nextId;
+            if (item['product'] is Map) {
+              final prodMap = Map<String, dynamic>.from(item['product'] as Map);
+              prodMap['id'] = nextId;
+              prodMap['is_local_only'] = false;
+              item['product'] = prodMap;
+            }
+            listChanged = true;
           }
+          return item;
+        }).toList();
+        if (listChanged) {
+          held[listKey] = nextItems;
           heldModified = true;
         }
-        return item;
-      }).toList();
+      }
 
       if (heldModified) {
-        held['cart_items'] = nextItems;
         heldList[i] = held;
         changed = true;
       }
@@ -330,9 +337,13 @@ extension OfflineDatabaseSyncQueuesExt on OfflineDatabase {
       unsynced = await _sqlite.getUnsyncedLocalExpenses();
     }
     if (unsynced.isEmpty) {
-      unsynced = getLocalExpenses().where((e) {
-        return !(e['is_synced'] == true || (e['is_synced'] as num?)?.toInt() == 1);
-      }).toList();
+      unsynced = getLocalExpenses()
+          .where((e) {
+            return !(e['is_synced'] == true || (e['is_synced'] as num?)?.toInt() == 1);
+          })
+          .toList()
+          .reversed
+          .toList();
     }
     if (unsynced.isEmpty) return 0;
 
@@ -392,8 +403,8 @@ extension OfflineDatabaseSyncQueuesExt on OfflineDatabase {
         }
         final idx = allPrefsExpenses.indexWhere(
           (e) =>
-              (e['id'] as num?)?.toInt() == expId ||
-              (e['local_uuid']?.toString() == localUuid && localUuid.isNotEmpty),
+              (localUuid.isNotEmpty && e['local_uuid']?.toString() == localUuid) ||
+              (expId != 0 && (e['id'] as num?)?.toInt() == expId && (e['local_uuid']?.toString() ?? '').isEmpty),
         );
         if (idx >= 0) {
           final updated = Map<String, dynamic>.from(allPrefsExpenses[idx]);
@@ -426,7 +437,11 @@ extension OfflineDatabaseSyncQueuesExt on OfflineDatabase {
               retryCount: nextRetries,
             );
           }
-          final idx = allPrefsExpenses.indexWhere((e) => (e['id'] as num?)?.toInt() == expId);
+          final idx = allPrefsExpenses.indexWhere(
+            (e) =>
+                (localUuid.isNotEmpty && e['local_uuid']?.toString() == localUuid) ||
+                (expId != 0 && (e['id'] as num?)?.toInt() == expId),
+          );
           if (idx >= 0) {
             final updated = Map<String, dynamic>.from(allPrefsExpenses[idx]);
             updated['sync_status'] = 'dead_letter';
@@ -455,7 +470,11 @@ extension OfflineDatabaseSyncQueuesExt on OfflineDatabase {
             errorMessage: errMsg,
             retryCount: nextRetries,
           );
-          final idx = allPrefsExpenses.indexWhere((e) => (e['id'] as num?)?.toInt() == expId);
+          final idx = allPrefsExpenses.indexWhere(
+            (e) =>
+                (localUuid.isNotEmpty && e['local_uuid']?.toString() == localUuid) ||
+                (expId != 0 && (e['id'] as num?)?.toInt() == expId),
+          );
           if (idx >= 0) {
             final updated = Map<String, dynamic>.from(allPrefsExpenses[idx]);
             updated['retry_count'] = nextRetries;
