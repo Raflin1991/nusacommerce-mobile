@@ -599,7 +599,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
                       color: tokens.accentSoft,
                       borderRadius: BorderRadius.circular(12),
@@ -608,7 +608,6 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                       ),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
                           'Nilai Utama',
@@ -618,11 +617,17 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                             color: tokens.textSecondary,
                           ),
                         ),
-                        Text(
-                          item.primaryValue,
-                          style: AppTheme.moneyStyle(
-                            fontSize: 16,
-                            color: tokens.accent,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            item.primaryValue,
+                            textAlign: TextAlign.right,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTheme.moneyStyle(
+                              fontSize: 15.5,
+                              color: tokens.accent,
+                            ),
                           ),
                         ),
                       ],
@@ -1128,22 +1133,30 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
               if (payload.kpis.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
                     child: LayoutBuilder(
                       builder: (_, constraints) {
-                        final cols = constraints.maxWidth >= 700 ? 4 : 2;
+                        final isThree = payload.kpis.length == 3;
+                        final cols = constraints.maxWidth >= 720
+                            ? (isThree ? 3 : 4)
+                            : (isThree && constraints.maxWidth >= 310
+                                ? 3
+                                : (constraints.maxWidth < 310 ? 1 : 2));
+                        final ratio = cols == 3
+                            ? 1.55
+                            : (cols == 4 ? 2.1 : (constraints.maxWidth < 310 ? 2.8 : 2.2));
                         return GridView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: payload.kpis.length,
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: cols,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                            childAspectRatio: cols == 4 ? 2.1 : 1.95,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            childAspectRatio: ratio,
                           ),
                           itemBuilder: (_, idx) =>
-                              _buildKpiCard(tokens, payload.kpis[idx]),
+                              _buildKpiCard(tokens, payload.kpis[idx], isCompact: cols >= 3),
                         );
                       },
                     ),
@@ -1247,37 +1260,38 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
     );
   }
 
-  Widget _buildKpiCard(NusaThemeTokens tokens, MobileReportKpi kpi) {
+  Widget _buildKpiCard(NusaThemeTokens tokens, MobileReportKpi kpi, {bool isCompact = false}) {
     final toneCol = _toneColor(tokens, kpi.tone);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 12, vertical: isCompact ? 6 : 8),
       decoration: BoxDecoration(
         color: tokens.bgSurface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               Container(
-                width: 7,
-                height: 7,
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
                   color: toneCol,
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               Expanded(
                 child: Text(
                   kpi.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: isCompact ? 10 : 11,
                     fontWeight: FontWeight.w700,
                     color: tokens.textSecondary,
                   ),
@@ -1285,7 +1299,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -1293,7 +1307,8 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
               kpi.formatted,
               maxLines: 1,
               style: AppTheme.moneyStyle(
-                fontSize: 15.5,
+                fontSize: isCompact ? 16 : 17,
+                fontWeight: FontWeight.w800,
                 color: kpi.tone == 'neutral' ? tokens.textPrimary : toneCol,
               ),
             ),
@@ -1458,23 +1473,29 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
               ),
               const SizedBox(width: 8),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 132),
+                constraints: const BoxConstraints(maxWidth: 145),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (item.primaryValue.isNotEmpty)
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          item.primaryValue,
-                          maxLines: 1,
-                          style: AppTheme.moneyStyle(
-                            fontSize: 13.5,
-                            color: item.isTotal ? tokens.accent : tokens.textPrimary,
-                          ),
+                    if (item.primaryValue.isNotEmpty) () {
+                      Color valColor = item.isTotal ? tokens.accent : tokens.textPrimary;
+                      if (item.primaryValue.startsWith('+')) {
+                        valColor = AppColors.success;
+                      } else if (item.primaryValue.startsWith('-')) {
+                        valColor = AppColors.danger;
+                      }
+                      return Text(
+                        item.primaryValue,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: AppTheme.moneyStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: valColor,
                         ),
-                      ),
+                      );
+                    }(),
                     if (item.secondaryValue != null &&
                         item.secondaryValue!.isNotEmpty) ...[
                       const SizedBox(height: 2),
