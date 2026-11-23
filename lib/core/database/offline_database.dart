@@ -43,6 +43,7 @@ class OfflineDatabase {
   static const String _keyCachedCustomerGroups = 'nusa_local_customer_groups_v4';
   static const String _keyLocalStockMovements = 'nusa_local_stock_movements_v4';
   static const String _keyLocalPurchases = 'nusa_local_purchases_v4';
+  static const String _keyLocalPurchaseReceipts = 'nusa_local_purchase_receipts_v4';
   static const String _keyLocalPurchaseReturns = 'nusa_local_purchase_returns_v4';
   static const String _keyLocalQuotations = 'nusa_local_quotations_v4';
   static const String _keyLocalCashLedger = 'nusa_local_cash_ledger_v4';

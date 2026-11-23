@@ -432,6 +432,10 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
   Future<Map<String, dynamic>?> receiveLocalPurchase({
     required int purchaseId,
     String? poNumber,
+    String? deliveryNoteNumber,
+    String? receivedDate,
+    String? notes,
+    List<Map<String, dynamic>>? items,
   }) async {
     final purchases = _readPrefsList(OfflineDatabase._keyLocalPurchases);
     final idx = purchases.indexWhere(
@@ -442,33 +446,61 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
     if (idx < 0) return null;
 
     final po = Map<String, dynamic>.from(purchases[idx]);
-    if (po['status'] == 'received' || po['status'] == 'paid' || po['status'] == 'partially_paid') {
+    final curStatus = (po['status'] ?? '').toString().toLowerCase();
+    if (po['can_receive'] == false && (curStatus == 'received' || curStatus == 'paid' || curStatus == 'cancelled')) {
       return po;
     }
 
     final rawItems = po['items'] as List<dynamic>? ?? [];
-    double totalReturnable = 0.0;
+    double newlyReceivedValue = 0.0;
     final updatedItems = <Map<String, dynamic>>[];
     for (final raw in rawItems) {
       if (raw is! Map) continue;
       final rawMap = Map<String, dynamic>.from(raw);
       final pid = (rawMap['product_id'] as num?)?.toInt();
-      final qty = (rawMap['quantity'] as num?)?.toDouble() ?? 0.0;
+      final itemId = (rawMap['id'] as num?)?.toInt();
+      final orderedQty = (rawMap['quantity'] as num?)?.toDouble() ?? 0.0;
+      final prevReceived = (rawMap['received_quantity'] as num?)?.toDouble() ?? 0.0;
+      final remUnreceived = (orderedQty - prevReceived).clamp(0.0, double.infinity);
       final unitCost = (rawMap['unit_cost'] as num?)?.toDouble() ?? 0.0;
-      rawMap['received_quantity'] = qty;
-      rawMap['returnable_quantity'] = qty;
-      rawMap['returned_quantity'] = 0.0;
-      totalReturnable += qty;
+
+      double receiveNow = 0.0;
+      if (items != null && items.isNotEmpty) {
+        final match = items.firstWhere(
+          (m) =>
+              (m['purchase_item_id'] as num?)?.toInt() == itemId ||
+              (m['id'] as num?)?.toInt() == itemId ||
+              (m['product_id'] as num?)?.toInt() == pid,
+          orElse: () => {},
+        );
+        if (match.isNotEmpty) {
+          final requestedQty = (match['quantity'] as num?)?.toDouble() ?? (match['quantity_received'] as num?)?.toDouble() ?? 0.0;
+          receiveNow = requestedQty.clamp(0.0, remUnreceived);
+        }
+      } else {
+        receiveNow = remUnreceived;
+      }
+
+      final nextReceivedQty = prevReceived + receiveNow;
+      final prevReturned = (rawMap['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+      final nextReturnable = (nextReceivedQty - prevReturned).clamp(0.0, double.infinity);
+      final nextUnreceived = (orderedQty - nextReceivedQty).clamp(0.0, double.infinity);
+
+      rawMap['received_quantity'] = nextReceivedQty;
+      rawMap['returnable_quantity'] = nextReturnable;
+      rawMap['unreceived_quantity'] = nextUnreceived;
       updatedItems.add(rawMap);
 
-      if (pid == null || qty <= 0) continue;
+      if (receiveNow <= 0 || pid == null) continue;
+
+      newlyReceivedValue += receiveNow * unitCost;
 
       final products = getCachedProducts();
       final pIdx = products.indexWhere((p) => (p['id'] as num?)?.toInt() == pid);
       if (pIdx >= 0) {
         final p = Map<String, dynamic>.from(products[pIdx]);
         final oldStock = (p['stock'] as num?)?.toDouble() ?? 0.0;
-        final nextStock = oldStock + qty;
+        final nextStock = oldStock + receiveNow;
         p['stock'] = nextStock;
         if (unitCost > 0) p['cost_price'] = unitCost;
         p['is_low_stock'] = nextStock <= ((p['reorder_level'] as num?)?.toDouble() ?? 5.0);
@@ -479,33 +511,71 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
           sku: (p['sku'] ?? '-').toString(),
           unitCode: (p['unit_code'] ?? 'pcs').toString(),
           type: 'purchase',
-          quantityDelta: qty,
+          quantityDelta: receiveNow,
           quantityAfter: nextStock,
           unitCost: unitCost,
-          notes: 'Penerimaan Barang ${po['number']} (${po['supplier_name']})',
+          notes: 'Penerimaan GRN ${po['number']} • SJ: ${deliveryNoteNumber ?? "-"} (${po['supplier_name']})',
         );
       }
     }
 
+    double totalUnreceivedLeft = 0.0;
+    double totalReturnableLeft = 0.0;
+    for (final it in updatedItems) {
+      totalUnreceivedLeft += (it['unreceived_quantity'] as num?)?.toDouble() ?? 0.0;
+      totalReturnableLeft += (it['returnable_quantity'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    final isAllReceived = totalUnreceivedLeft <= 0.0001;
     final grandTotal = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
     final paidTotal = (po['paid_total'] as num?)?.toDouble() ?? 0.0;
-    final balanceDue = (grandTotal - paidTotal).clamp(0.0, grandTotal);
+
+    final curBalance = (po['balance_due'] as num?)?.toDouble() ?? 0.0;
+    final nextBalance = isAllReceived
+        ? (grandTotal - paidTotal).clamp(0.0, grandTotal)
+        : (curBalance + newlyReceivedValue).clamp(0.0, grandTotal);
 
     po['items'] = updatedItems;
-    po['status'] = balanceDue <= 0.5 ? 'paid' : 'received';
-    po['status_label'] = balanceDue <= 0.5 ? 'LUNAS' : 'TEMPO / HUTANG';
+    po['status'] = isAllReceived
+        ? (nextBalance <= 0.5 ? 'paid' : 'received')
+        : 'partially_received';
+    po['status_label'] = isAllReceived
+        ? (nextBalance <= 0.5 ? 'LUNAS' : 'DITERIMA LENGKAP')
+        : 'DITERIMA SEBAGIAN';
     po['is_received'] = true;
-    po['can_receive'] = false;
-    po['is_returnable'] = true;
+    po['can_receive'] = !isAllReceived;
+    po['is_received_in_full'] = isAllReceived;
+    po['is_returnable'] = totalReturnableLeft > 0.0001;
     po['is_fully_returned'] = false;
-    po['total_returnable_qty'] = totalReturnable;
-    po['balance_due'] = balanceDue;
-    po['received_at'] = DateTime.now().toIso8601String();
+    po['total_unreceived_qty'] = totalUnreceivedLeft;
+    po['total_returnable_qty'] = totalReturnableLeft;
+    po['balance_due'] = nextBalance;
+    po['delivery_note_number'] = deliveryNoteNumber;
+    po['received_at'] = receivedDate ?? DateTime.now().toIso8601String().split('T').first;
+    if (notes != null && notes.isNotEmpty) {
+      po['receive_notes'] = notes;
+    }
+
+    final now = DateTime.now();
+    final grnNumber = 'GRN-${now.year}${now.month.toString().padLeft(2, '0')}-${(now.millisecondsSinceEpoch % 10000).toString().padLeft(4, '0')}';
+    final receiptRecord = {
+      'id': now.millisecondsSinceEpoch,
+      'purchase_id': (po['id'] as num?)?.toInt() ?? purchaseId,
+      'purchase_number': po['number'] ?? po['purchase_number'],
+      'grn_number': grnNumber,
+      'delivery_note_number': deliveryNoteNumber,
+      'received_at': po['received_at'],
+      'notes': notes,
+      'items': updatedItems,
+    };
+    final receipts = _readPrefsList(OfflineDatabase._keyLocalPurchaseReceipts);
+    receipts.insert(0, receiptRecord);
+    await _prefs.setString(OfflineDatabase._keyLocalPurchaseReceipts, jsonEncode(receipts));
 
     purchases[idx] = po;
     await _prefs.setString(OfflineDatabase._keyLocalPurchases, jsonEncode(purchases));
 
-    if (balanceDue > 0.5) {
+    if (nextBalance > 0.5) {
       await addLocalPayable(
         purchaseId: (po['id'] as num?)?.toInt() ?? purchaseId,
         supplierId: (po['supplier_id'] as num?)?.toInt() ?? 0,
@@ -514,8 +584,8 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
         totalAmount: grandTotal,
         paidAmount: paidTotal,
         dueDate: (po['due_date'] ?? DateTime.now().add(const Duration(days: 14)).toIso8601String().split('T').first).toString(),
-        invoiceNumber: (po['supplier_invoice_number'] ?? po['number'] ?? '').toString(),
-        notes: po['notes']?.toString(),
+        invoiceNumber: (po['supplier_invoice_number'] ?? deliveryNoteNumber ?? po['number'] ?? '').toString(),
+        notes: notes ?? po['notes']?.toString(),
       );
     }
 

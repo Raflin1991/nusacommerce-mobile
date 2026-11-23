@@ -890,87 +890,499 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     );
   }
 
-  Future<void> _confirmReceivePurchase(Map<String, dynamic> po) async {
-    final poNumber = (po['number'] ?? po['purchase_number'] ?? '-').toString();
+  void _openReceivePurchaseModal(Map<String, dynamic> po) {
+    final tokens = NusaThemeTokens.of(context);
     final purchaseId = (po['id'] as num?)?.toInt() ?? 0;
+    final poNumber = (po['number'] ?? po['purchase_number'] ?? '-').toString();
     final supplierName = (po['supplier_name'] ?? 'Pemasok').toString();
-    final total = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
+    final items = (po['items'] as List<dynamic>? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-    final confirmed = await showDialog<bool>(
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.danger,
+          content: Text('Rincian barang dalam pesanan pembelian ini tidak ditemukan.'),
+        ),
+      );
+      return;
+    }
+
+    final maxReceivableQtys = <int, double>{};
+    final receiveQtys = <int, double>{};
+
+    for (int i = 0; i < items.length; i++) {
+      final it = items[i];
+      final origQty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+      final alreadyRec = (it['received_quantity'] as num?)?.toDouble() ?? 0.0;
+      final rem = (it['unreceived_quantity'] as num?)?.toDouble() ?? (origQty - alreadyRec).clamp(0.0, double.infinity);
+      maxReceivableQtys[i] = rem;
+      receiveQtys[i] = rem;
+    }
+
+    final suratJalanCtrl = TextEditingController(
+      text: (po['delivery_note_number'] ?? po['supplier_invoice_number'] ?? '').toString(),
+    );
+    final notesCtrl = TextEditingController();
+    DateTime receivedDate = DateTime.now();
+    bool saving = false;
+    String? modalError;
+
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.inventory_rounded, color: AppColors.primary),
-            SizedBox(width: 10),
-            Text('Terima Barang (GRN)', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800)),
-          ],
-        ),
-        content: Text(
-          'Konfirmasi bahwa fisik barang pesanan $poNumber dari $supplierName senilai ${IdrCurrencyFormatter.format(total)} telah tiba dan selesai diperiksa di toko?\n\n'
-          'Stok produk akan bertambah ke sistem dan status dokumen berubah menjadi Diterima.',
-          style: const TextStyle(fontSize: 13.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Ya, Terima Barang'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: tokens.bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          final totalReceivingNow = receiveQtys.values.fold<double>(0.0, (sum, q) => sum + q);
+          final totalRemainingMax = maxReceivableQtys.values.fold<double>(0.0, (sum, q) => sum + q);
+          final isFullReceipt = totalReceivingNow >= totalRemainingMax - 0.0001 && totalRemainingMax > 0.0001;
+          final isPartialReceipt = totalReceivingNow > 0.0001 && totalReceivingNow < totalRemainingMax - 0.0001;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 44,
+                      height: 4.5,
+                      decoration: BoxDecoration(
+                        color: tokens.borderDefault,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.successSoft,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.inventory_rounded, color: AppColors.success, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Penerimaan Barang (GRN)',
+                              style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                            ),
+                            Text(
+                              '$poNumber • $supplierName',
+                              style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Surat Jalan & Tanggal Card
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: tokens.bgPage,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: tokens.borderDefault),
+                    ),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: suratJalanCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Nomor Surat Jalan / DO Supplier',
+                            hintText: 'Contoh: SJ-202611-0982',
+                            prefixIcon: Icon(Icons.local_shipping_outlined, size: 20),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: receivedDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now().add(const Duration(days: 30)),
+                            );
+                            if (picked != null) {
+                              setModal(() => receivedDate = picked);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                            decoration: BoxDecoration(
+                              color: tokens.bgSurface,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: tokens.borderDefault),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                                const SizedBox(width: 10),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Tanggal Diterima Fisik',
+                                      style: TextStyle(fontSize: 11, color: tokens.textSecondary),
+                                    ),
+                                    Text(
+                                      '${receivedDate.day.toString().padLeft(2, '0')}-${receivedDate.month.toString().padLeft(2, '0')}-${receivedDate.year}',
+                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                                    ),
+                                  ],
+                                ),
+                                const Spacer(),
+                                const Icon(Icons.arrow_drop_down, color: AppColors.slate400),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: notesCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Catatan Penerimaan (Opsional)',
+                            hintText: 'Nama supir, kondisi fisik barang, kardus aman, dsb.',
+                            prefixIcon: Icon(Icons.notes_rounded, size: 20),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Rincian Kuantitas Diterima',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                      ),
+                      Row(
+                        children: [
+                          TextButton(
+                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                            onPressed: () => setModal(() {
+                              for (int i = 0; i < items.length; i++) {
+                                receiveQtys[i] = maxReceivableQtys[i] ?? 0.0;
+                              }
+                            }),
+                            child: const Text('Terima Semua', style: TextStyle(fontSize: 11.5)),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                            onPressed: () => setModal(() {
+                              for (int i = 0; i < items.length; i++) {
+                                receiveQtys[i] = 0.0;
+                              }
+                            }),
+                            child: const Text('Reset 0', style: TextStyle(fontSize: 11.5, color: AppColors.slate500)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Items list
+                  ...List.generate(items.length, (i) {
+                    final it = items[i];
+                    final maxQty = maxReceivableQtys[i] ?? 0.0;
+                    final curQty = receiveQtys[i] ?? 0.0;
+                    final origQty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+                    final alreadyRec = (it['received_quantity'] as num?)?.toDouble() ?? 0.0;
+                    final isExhausted = maxQty <= 0.0001;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isExhausted ? tokens.bgPage : tokens.bgSurface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isExhausted ? tokens.borderDefault : (curQty > 0 ? AppColors.success.withOpacity(0.5) : tokens.borderDefault),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      it['product_name']?.toString() ?? 'Produk',
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: isExhausted ? tokens.textSecondary : null,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'SKU: ${it['sku'] ?? '-'} • Dipesan: ${IdrCurrencyFormatter.formatQty(origQty)}'
+                                      '${alreadyRec > 0 ? " • Sudah Diterima: ${IdrCurrencyFormatter.formatQty(alreadyRec)}" : ""}',
+                                      style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isExhausted)
+                                const NusaBadge(label: 'Sudah Lengkap', variant: NusaBadgeVariant.success)
+                              else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.warningSoft,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Sisa: ${IdrCurrencyFormatter.formatQty(maxQty)}',
+                                    style: const TextStyle(fontSize: 11, color: AppColors.warningDark, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (!isExhausted) ...[
+                            const SizedBox(height: 10),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Diterima sekarang:',
+                                  style: TextStyle(fontSize: 12, color: tokens.textSecondary),
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      iconSize: 22,
+                                      onPressed: curQty > 0
+                                          ? () => setModal(() => receiveQtys[i] = (curQty - 1).clamp(0.0, maxQty))
+                                          : null,
+                                      icon: const Icon(Icons.remove_circle_outline),
+                                    ),
+                                    Container(
+                                      width: 52,
+                                      padding: const EdgeInsets.symmetric(vertical: 4),
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: tokens.bgPage,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: tokens.borderDefault),
+                                      ),
+                                      child: Text(
+                                        IdrCurrencyFormatter.formatQty(curQty),
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      iconSize: 22,
+                                      onPressed: curQty < maxQty
+                                          ? () => setModal(() => receiveQtys[i] = (curQty + 1).clamp(0.0, maxQty))
+                                          : null,
+                                      icon: const Icon(Icons.add_circle_outline),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    OutlinedButton(
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        minimumSize: const Size(0, 30),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      onPressed: () => setModal(() => receiveQtys[i] = maxQty),
+                                      child: const Text('Maks', style: TextStyle(fontSize: 11)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                  // Summary Status Badge
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isFullReceipt ? AppColors.successSoft : (isPartialReceipt ? AppColors.warningSoft : tokens.bgPage),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isFullReceipt ? AppColors.success.withOpacity(0.4) : (isPartialReceipt ? AppColors.warning.withOpacity(0.4) : tokens.borderDefault),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          isFullReceipt
+                              ? 'Status: Penerimaan Lengkap'
+                              : (isPartialReceipt ? 'Status: Penerimaan Sebagian' : 'Pilih kuantitas barang'),
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : tokens.textSecondary),
+                          ),
+                        ),
+                        Text(
+                          'Total Terima: ${IdrCurrencyFormatter.formatQty(totalReceivingNow)} unit',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : null),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (modalError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        modalError!,
+                        style: const TextStyle(fontSize: 12, color: AppColors.dangerDark, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  NusaButton(
+                    label: isFullReceipt
+                        ? 'Konfirmasi Terima Lengkap (GRN)'
+                        : (isPartialReceipt ? 'Simpan Penerimaan Sebagian (GRN)' : 'Pilih Jumlah Diterima'),
+                    variant: NusaButtonVariant.primary,
+                    icon: Icons.inventory_rounded,
+                    isLoading: saving,
+                    onPressed: (saving || totalReceivingNow <= 0.0001)
+                        ? null
+                        : () async {
+                            setModal(() {
+                              saving = true;
+                              modalError = null;
+                            });
+
+                            final receiveLines = <Map<String, dynamic>>[];
+                            for (int i = 0; i < items.length; i++) {
+                              final q = receiveQtys[i] ?? 0.0;
+                              if (q > 0.0001) {
+                                final it = items[i];
+                                receiveLines.add({
+                                  'id': it['id'],
+                                  'purchase_item_id': it['id'] ?? it['purchase_item_id'],
+                                  'product_id': it['product_id'],
+                                  'quantity': q,
+                                });
+                              }
+                            }
+
+                            final sjNumber = suratJalanCtrl.text.trim();
+                            final dateStr = '${receivedDate.year}-${receivedDate.month.toString().padLeft(2, '0')}-${receivedDate.day.toString().padLeft(2, '0')}';
+                            final noteStr = notesCtrl.text.trim();
+
+                            try {
+                              final isOnline = !_isLocalStandalone && (await _connectivity.checkOnline());
+                              bool cloudSuccess = false;
+
+                              if (isOnline && purchaseId > 0 && po['is_local'] != true) {
+                                try {
+                                  await _api.dio.post(
+                                    ApiEndpoints.receivePurchase(purchaseId),
+                                    data: {
+                                      if (sjNumber.isNotEmpty) 'delivery_note_number': sjNumber,
+                                      'received_date': dateStr,
+                                      if (noteStr.isNotEmpty) 'notes': noteStr,
+                                      'items': receiveLines,
+                                    },
+                                  );
+                                  cloudSuccess = true;
+                                } catch (e) {
+                                  if (!ApiClient.isNetworkOfflineError(e)) {
+                                    final errMsg = ApiClient.extractErrorMessage(e);
+                                    setModal(() {
+                                      saving = false;
+                                      modalError = errMsg;
+                                    });
+                                    return;
+                                  }
+                                }
+                              }
+
+                              if (!cloudSuccess) {
+                                await _offlineDb.receiveLocalPurchase(
+                                  purchaseId: purchaseId,
+                                  poNumber: poNumber,
+                                  deliveryNoteNumber: sjNumber.isNotEmpty ? sjNumber : null,
+                                  receivedDate: dateStr,
+                                  notes: noteStr.isNotEmpty ? noteStr : null,
+                                  items: receiveLines,
+                                );
+                              }
+
+                              if (!ctx.mounted) return;
+                              Navigator.pop(ctx);
+                              await _loadData();
+
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: AppColors.success,
+                                    content: Text(
+                                      isFullReceipt
+                                          ? 'Penerimaan fisik barang $poNumber selesai (Lengkap). Stok bertambah!'
+                                          : 'Penerimaan sebagian $poNumber (${IdrCurrencyFormatter.formatQty(totalReceivingNow)} unit) berhasil dicatat.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setModal(() {
+                                saving = false;
+                                modalError = e.toString();
+                              });
+                            }
+                          },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
-
-    if (confirmed != true) return;
-
-    setState(() => _loading = true);
-    try {
-      final isOnline = !_isLocalStandalone && (await _connectivity.checkOnline());
-      bool cloudSuccess = false;
-
-      if (isOnline && purchaseId > 0 && po['is_local'] != true) {
-        try {
-          await _api.dio.post(ApiEndpoints.receivePurchase(purchaseId));
-          cloudSuccess = true;
-        } catch (e) {
-          if (!ApiClient.isNetworkOfflineError(e)) {
-            final errMsg = ApiClient.extractErrorMessage(e);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(backgroundColor: AppColors.danger, content: Text(errMsg)),
-              );
-            }
-            setState(() => _loading = false);
-            return;
-          }
-        }
-      }
-
-      if (!cloudSuccess) {
-        await _offlineDb.receiveLocalPurchase(purchaseId: purchaseId, poNumber: poNumber);
-      }
-
-      await _loadData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.success,
-            content: Text('Penerimaan fisik barang $poNumber berhasil dikonfirmasi! Stok toko telah bertambah.'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: AppColors.danger, content: Text(e.toString())),
-        );
-      }
-      setState(() => _loading = false);
-    }
   }
 
   void _openPurchaseDetailModal(Map<String, dynamic> po) {
@@ -995,6 +1407,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     if (isDraft) {
       detailBadgeLabel = status == 'draft' ? 'DRAF PO (BELUM DITERIMA)' : 'DIPESAN (MENUNGGU KIRIM)';
       detailBadgeVariant = NusaBadgeVariant.neutral;
+    } else if (status == 'partially_received') {
+      detailBadgeLabel = 'DITERIMA SEBAGIAN (PARSIAL)';
+      detailBadgeVariant = NusaBadgeVariant.warning;
     } else if (status == 'cancelled') {
       detailBadgeLabel = 'DIBATALKAN';
       detailBadgeVariant = NusaBadgeVariant.danger;
@@ -1170,6 +1585,10 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       const SizedBox(height: 6),
                       _buildDetailRow('No. Faktur Pemasok', invoiceNumber),
                     ],
+                    if ((po['delivery_note_number'] ?? '').toString().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _buildDetailRow('No. Surat Jalan (DO)', po['delivery_note_number'].toString()),
+                    ],
                     if (notes.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       _buildDetailRow('Catatan', notes),
@@ -1216,6 +1635,8 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   final lineTotal = (it['line_total'] as num?)?.toDouble() ?? (qty * cost);
                   final qtyStr = qty.truncateToDouble() == qty ? qty.toInt().toString() : qty.toStringAsFixed(1);
                   final retQty = (it['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+                  final recQty = (it['received_quantity'] as num?)?.toDouble() ?? (isReceived && status != 'partially_received' ? qty : 0.0);
+                  final unrecQty = (it['unreceived_quantity'] as num?)?.toDouble() ?? (qty - recQty).clamp(0.0, double.infinity);
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
@@ -1237,7 +1658,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'SKU: $sku • $qtyStr unit x ${IdrCurrencyFormatter.format(cost)}'
+                                'SKU: $sku • Dipesan: $qtyStr unit x ${IdrCurrencyFormatter.format(cost)}'
+                                '${isReceived ? " • Diterima: ${IdrCurrencyFormatter.formatQty(recQty)}" : ""}'
+                                '${unrecQty > 0.0001 && isReceived ? " • Sisa Belum: ${IdrCurrencyFormatter.formatQty(unrecQty)}" : ""}'
                                 '${retQty > 0 ? " • Diretur: ${IdrCurrencyFormatter.formatQty(retQty)}" : ""}',
                                 style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
                               ),
@@ -1254,14 +1677,16 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                 }),
               const SizedBox(height: 20),
               // Action Buttons di Detail Modal
-              if (isDraft) ...[
+              if (po['can_receive'] == true || isDraft || status == 'partially_received') ...[
                 NusaButton(
-                  label: 'Konfirmasi Penerimaan Barang (GRN)',
+                  label: status == 'partially_received'
+                      ? 'Terima Sisa Barang (GRN)'
+                      : 'Konfirmasi Penerimaan Barang (GRN)',
                   icon: Icons.inventory_rounded,
                   variant: NusaButtonVariant.primary,
                   onPressed: () {
                     Navigator.pop(ctx);
-                    _confirmReceivePurchase(po);
+                    _openReceivePurchaseModal(po);
                   },
                 ),
                 const SizedBox(height: 10),
@@ -1668,12 +2093,16 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           final isDraft = status == 'draft' || status == 'submitted' || status == 'approved';
                           final isReceived = status == 'received' || status == 'partially_received' || status == 'partially_paid' || status == 'paid';
                           final isFullyReturned = po['is_fully_returned'] == true || (isReceived && ((po['total_returnable_qty'] as num?)?.toDouble() ?? 1.0) <= 0.0001 && po['is_returnable'] == false);
+                          final canReceive = po['can_receive'] == true || isDraft || status == 'partially_received';
 
                           String badgeLabel;
                           NusaBadgeVariant badgeVariant;
                           if (isDraft) {
                             badgeLabel = status == 'draft' ? 'DRAF (BELUM TERIMA)' : 'DIPESAN';
                             badgeVariant = NusaBadgeVariant.neutral;
+                          } else if (status == 'partially_received') {
+                            badgeLabel = 'DITERIMA SEBAGIAN';
+                            badgeVariant = NusaBadgeVariant.warning;
                           } else if (status == 'cancelled') {
                             badgeLabel = 'BATAL';
                             badgeVariant = NusaBadgeVariant.danger;
@@ -1752,9 +2181,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        if (isDraft) ...[
+                                        if (canReceive) ...[
                                           ElevatedButton.icon(
-                                            onPressed: () => _confirmReceivePurchase(po),
+                                            onPressed: () => _openReceivePurchaseModal(po),
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor: AppColors.success,
                                               foregroundColor: Colors.white,
@@ -1766,33 +2195,34 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                               elevation: 0,
                                             ),
                                             icon: const Icon(Icons.inventory_rounded, size: 14),
+                                            label: Text(
+                                              status == 'partially_received' ? 'Terima Sisa' : 'Terima Barang',
+                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        if (balance > 0.5 && !isDraft) ...[
+                                          ElevatedButton.icon(
+                                            onPressed: () => _openPayPurchaseModal(po),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: tokens.accent,
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              minimumSize: const Size(0, 32),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              elevation: 0,
+                                            ),
+                                            icon: const Icon(Icons.payment_rounded, size: 15),
                                             label: const Text(
-                                              'Terima Barang',
+                                              'Bayar PO',
                                               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                                             ),
                                           ),
-                                        ] else ...[
-                                          if (balance > 0.5) ...[
-                                            ElevatedButton.icon(
-                                              onPressed: () => _openPayPurchaseModal(po),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: tokens.accent,
-                                                foregroundColor: Colors.white,
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                                minimumSize: const Size(0, 32),
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                elevation: 0,
-                                              ),
-                                              icon: const Icon(Icons.payment_rounded, size: 15),
-                                              label: const Text(
-                                                'Bayar PO',
-                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                          ],
+                                          const SizedBox(width: 6),
+                                        ],
                                           if (isReceived && !isFullyReturned)
                                             TextButton.icon(
                                               onPressed: () => _openReturnPurchaseModal(po),
@@ -1817,8 +2247,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                               ),
                                             ),
                                         ],
-                                      ],
-                                    ),
+                                      ),
                                   ],
                                 ),
                               ],
