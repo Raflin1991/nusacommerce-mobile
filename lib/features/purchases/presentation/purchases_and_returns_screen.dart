@@ -1039,20 +1039,21 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                               children: [
                                 const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
                                 const SizedBox(width: 10),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Tanggal Diterima Fisik',
-                                      style: TextStyle(fontSize: 11, color: tokens.textSecondary),
-                                    ),
-                                    Text(
-                                      '${receivedDate.day.toString().padLeft(2, '0')}-${receivedDate.month.toString().padLeft(2, '0')}-${receivedDate.year}',
-                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                                    ),
-                                  ],
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Tanggal Diterima Fisik',
+                                        style: TextStyle(fontSize: 11, color: tokens.textSecondary),
+                                      ),
+                                      Text(
+                                        '${receivedDate.day.toString().padLeft(2, '0')}-${receivedDate.month.toString().padLeft(2, '0')}-${receivedDate.year}',
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const Spacer(),
                                 const Icon(Icons.arrow_drop_down, color: AppColors.slate400),
                               ],
                             ),
@@ -1074,33 +1075,42 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Rincian Kuantitas Diterima',
-                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                      const Expanded(
+                        child: Text(
+                          'Rincian Diterima',
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      Row(
-                        children: [
-                          TextButton(
-                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                            onPressed: () => setModal(() {
-                              for (int i = 0; i < items.length; i++) {
-                                receiveQtys[i] = maxReceivableQtys[i] ?? 0.0;
-                              }
-                            }),
-                            child: const Text('Terima Semua', style: TextStyle(fontSize: 11.5)),
-                          ),
-                          TextButton(
-                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                            onPressed: () => setModal(() {
-                              for (int i = 0; i < items.length; i++) {
-                                receiveQtys[i] = 0.0;
-                              }
-                            }),
-                            child: const Text('Reset 0', style: TextStyle(fontSize: 11.5, color: AppColors.slate500)),
-                          ),
-                        ],
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => setModal(() {
+                          for (int i = 0; i < items.length; i++) {
+                            receiveQtys[i] = maxReceivableQtys[i] ?? 0.0;
+                          }
+                        }),
+                        child: const Text('Terima Semua', style: TextStyle(fontSize: 11.5)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => setModal(() {
+                          for (int i = 0; i < items.length; i++) {
+                            receiveQtys[i] = 0.0;
+                          }
+                        }),
+                        child: const Text('Reset 0', style: TextStyle(fontSize: 11.5, color: AppColors.slate500)),
                       ),
                     ],
                   ),
@@ -1170,56 +1180,58 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           if (!isExhausted) ...[
                             const SizedBox(height: 10),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  'Diterima sekarang:',
-                                  style: TextStyle(fontSize: 12, color: tokens.textSecondary),
+                                Expanded(
+                                  child: Text(
+                                    'Diterima:',
+                                    style: TextStyle(fontSize: 12, color: tokens.textSecondary, fontWeight: FontWeight.w600),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      iconSize: 22,
-                                      onPressed: curQty > 0
-                                          ? () => setModal(() => receiveQtys[i] = (curQty - 1).clamp(0.0, maxQty))
-                                          : null,
-                                      icon: const Icon(Icons.remove_circle_outline),
-                                    ),
-                                    Container(
-                                      width: 52,
-                                      padding: const EdgeInsets.symmetric(vertical: 4),
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color: tokens.bgPage,
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: tokens.borderDefault),
-                                      ),
-                                      child: Text(
-                                        IdrCurrencyFormatter.formatQty(curQty),
-                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      iconSize: 22,
-                                      onPressed: curQty < maxQty
-                                          ? () => setModal(() => receiveQtys[i] = (curQty + 1).clamp(0.0, maxQty))
-                                          : null,
-                                      icon: const Icon(Icons.add_circle_outline),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    OutlinedButton(
-                                      style: OutlinedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        minimumSize: const Size(0, 30),
-                                        visualDensity: VisualDensity.compact,
-                                      ),
-                                      onPressed: () => setModal(() => receiveQtys[i] = maxQty),
-                                      child: const Text('Maks', style: TextStyle(fontSize: 11)),
-                                    ),
-                                  ],
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  iconSize: 22,
+                                  onPressed: curQty > 0
+                                      ? () => setModal(() => receiveQtys[i] = (curQty - 1).clamp(0.0, maxQty))
+                                      : null,
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                ),
+                                Container(
+                                  width: 44,
+                                  padding: const EdgeInsets.symmetric(vertical: 3),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: tokens.bgPage,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: tokens.borderDefault),
+                                  ),
+                                  child: Text(
+                                    IdrCurrencyFormatter.formatQty(curQty),
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  iconSize: 22,
+                                  onPressed: curQty < maxQty
+                                      ? () => setModal(() => receiveQtys[i] = (curQty + 1).clamp(0.0, maxQty))
+                                      : null,
+                                  icon: const Icon(Icons.add_circle_outline),
+                                ),
+                                const SizedBox(width: 4),
+                                OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    minimumSize: const Size(36, 28),
+                                    visualDensity: VisualDensity.compact,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: () => setModal(() => receiveQtys[i] = maxQty),
+                                  child: const Text('Maks', style: TextStyle(fontSize: 10.5)),
                                 ),
                               ],
                             ),
@@ -1232,7 +1244,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   // Summary Status Badge
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: isFullReceipt ? AppColors.successSoft : (isPartialReceipt ? AppColors.warningSoft : tokens.bgPage),
                       borderRadius: BorderRadius.circular(10),
@@ -1241,20 +1253,36 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       ),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          isFullReceipt
-                              ? 'Status: Penerimaan Lengkap'
-                              : (isPartialReceipt ? 'Status: Penerimaan Sebagian' : 'Pilih kuantitas barang'),
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : tokens.textSecondary),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                isFullReceipt
+                                    ? 'Penerimaan Lengkap'
+                                    : (isPartialReceipt ? 'Penerimaan Sebagian' : 'Pilih kuantitas barang'),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : tokens.textSecondary),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (isPartialReceipt)
+                                const Text(
+                                  'Sisa barang dapat diterima pada GRN berikutnya',
+                                  style: TextStyle(fontSize: 10, color: AppColors.warningDark),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Text(
-                          'Total Terima: ${IdrCurrencyFormatter.formatQty(totalReceivingNow)} unit',
+                          '${IdrCurrencyFormatter.formatQty(totalReceivingNow)} unit',
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
