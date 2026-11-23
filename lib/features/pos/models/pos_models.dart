@@ -244,6 +244,8 @@ class ProductModel extends Equatable {
   final List<WarehouseStockModel> warehouseStocks;
   final double multiWarehouseStock;
   final double otherWarehousesStock;
+  final bool isLocalOnly;
+  final String? localUuid;
 
   const ProductModel({
     required this.id,
@@ -280,6 +282,8 @@ class ProductModel extends Equatable {
     this.warehouseStocks = const [],
     this.multiWarehouseStock = 0.0,
     this.otherWarehousesStock = 0.0,
+    this.isLocalOnly = false,
+    this.localUuid,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -392,8 +396,9 @@ class ProductModel extends Equatable {
     final otherStock = (json['other_warehouses_stock'] as num?)?.toDouble() ??
         (multiStock - stockVal).clamp(0.0, double.infinity);
 
+    final parsedId = (json['id'] as num?)?.toInt() ?? 1;
     return ProductModel(
-      id: (json['id'] as num?)?.toInt() ?? 1,
+      id: parsedId,
       name: name,
       sku: (json['sku'] ?? 'SKU-01').toString(),
       barcode: (json['barcode'] ?? '').toString(),
@@ -441,6 +446,8 @@ class ProductModel extends Equatable {
       warehouseStocks: warehouseStocksList,
       multiWarehouseStock: multiStock,
       otherWarehousesStock: otherStock,
+      isLocalOnly: json['is_local_only'] == true || json['is_local_only'] == 1 || parsedId < 0,
+      localUuid: json['local_uuid']?.toString(),
     );
   }
 
@@ -485,6 +492,8 @@ class ProductModel extends Equatable {
         'warehouse_stocks': warehouseStocks.map((w) => w.toJson()).toList(),
         'multi_warehouse_stock': multiWarehouseStock,
         'other_warehouses_stock': otherWarehousesStock,
+        if (isLocalOnly) 'is_local_only': true,
+        if (localUuid != null && localUuid!.isNotEmpty) 'local_uuid': localUuid,
       };
 
   /// Phase 2.4: Resolve wholesale/tiered unit price based on cart quantity.
@@ -605,6 +614,7 @@ class CartItemModel extends Equatable {
   CartItemModel copyWith({
     int? saleItemId,
     bool? isExchangeReturn,
+    ProductModel? product,
     double? quantity,
     double? unitPrice,
     double? discountAmount,
@@ -618,7 +628,7 @@ class CartItemModel extends Equatable {
     return CartItemModel(
       saleItemId: saleItemId ?? this.saleItemId,
       isExchangeReturn: isExchangeReturn ?? this.isExchangeReturn,
-      product: product,
+      product: product ?? this.product,
       variant: variant,
       batch: batch ?? this.batch,
       quantity: quantity ?? this.quantity,
@@ -629,6 +639,74 @@ class CartItemModel extends Equatable {
       stylistName: stylistName ?? this.stylistName,
       selectedUnitCode: selectedUnitCode ?? this.selectedUnitCode,
       multiplier: multiplier ?? this.multiplier,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (saleItemId != null) 'sale_item_id': saleItemId,
+        'is_exchange_return': isExchangeReturn,
+        'product': product.toJson(),
+        'product_id': product.id,
+        'product_name': product.name,
+        if (variant != null) 'variant': variant!.toJson(),
+        if (variant != null) 'variant_id': variant!.id,
+        if (batch != null) 'batch': batch!.toJson(),
+        if (batch != null) 'batch_id': batch!.id,
+        'quantity': quantity,
+        'unit_price': unitPrice,
+        'discount_amount': discountAmount,
+        if (notes != null) 'notes': notes,
+        if (digitalTargetValue != null) 'digital_target_value': digitalTargetValue,
+        if (stylistName != null) 'stylist_name': stylistName,
+        'selected_unit_code': selectedUnitCode,
+        'multiplier': multiplier,
+      };
+
+  factory CartItemModel.fromJson(
+    Map<String, dynamic> json, {
+    List<ProductModel>? catalogProducts,
+  }) {
+    ProductModel resolvedProduct;
+    if (json['product'] is Map) {
+      resolvedProduct = ProductModel.fromJson(
+        Map<String, dynamic>.from(json['product'] as Map),
+      );
+    } else {
+      final pid = (json['product_id'] as num?)?.toInt() ?? 0;
+      final matched = catalogProducts?.where((p) => p.id == pid).toList() ?? const [];
+      resolvedProduct = matched.isNotEmpty
+          ? matched.first
+          : ProductModel(
+              id: pid,
+              name: (json['product_name'] ?? 'Produk').toString(),
+              sku: (json['sku'] ?? 'SKU').toString(),
+              barcode: '',
+              sellingPrice: (json['unit_price'] as num?)?.toDouble() ?? 0.0,
+              stock: 99,
+            );
+    }
+
+    final variant = json['variant'] is Map
+        ? ProductVariantModel.fromJson(Map<String, dynamic>.from(json['variant'] as Map))
+        : null;
+    final batch = json['batch'] is Map
+        ? ProductBatchModel.fromJson(Map<String, dynamic>.from(json['batch'] as Map))
+        : null;
+
+    return CartItemModel(
+      saleItemId: (json['sale_item_id'] as num?)?.toInt(),
+      isExchangeReturn: json['is_exchange_return'] == true,
+      product: resolvedProduct,
+      variant: variant,
+      batch: batch,
+      quantity: (json['quantity'] as num?)?.toDouble() ?? 1.0,
+      unitPrice: (json['unit_price'] as num?)?.toDouble() ?? resolvedProduct.sellingPrice,
+      discountAmount: (json['discount_amount'] as num?)?.toDouble() ?? 0.0,
+      notes: json['notes']?.toString(),
+      digitalTargetValue: json['digital_target_value']?.toString(),
+      stylistName: json['stylist_name']?.toString(),
+      selectedUnitCode: (json['selected_unit_code'] ?? resolvedProduct.unitCode).toString(),
+      multiplier: (json['multiplier'] as num?)?.toDouble() ?? 1.0,
     );
   }
 

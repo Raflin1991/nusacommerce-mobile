@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:uuid/uuid.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
@@ -13,6 +14,7 @@ import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_skeleton.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../pos/bloc/pos_cubit.dart';
 
 /// MODUL SHIFT KASIR, STRICT BLIND DROP & REKONSILIASI Z-REPORT (`PRD-07` / Gelombang 5)
 /// - Strict Blind Drop: server menyembunyikan `expected_cash` bagi kasir non-supervisor
@@ -89,6 +91,13 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
 
   bool get _isLocalStandalone =>
       context.read<AuthCubit>().state.session.isLocalTrial;
+
+  void _refreshPosPendingBadge() {
+    if (!mounted) return;
+    try {
+      context.read<PosCubit>().refreshOfflinePendingState();
+    } catch (_) {}
+  }
 
   void _updateDenom(int denom, int delta) {
     if (_isBlindCountLocked) return;
@@ -190,6 +199,13 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
     }
 
     try {
+      // BUG 6 FIX: Flush any queued offline shift closures (and preceding offline sales)
+      // BEFORE querying Cloud shift status so Cloud closes the old shift automatically.
+      if (_offlineDb.pendingShiftClosuresCount > 0) {
+        await _offlineDb.syncOfflineQueue(_api);
+        _refreshPosPendingBadge();
+      }
+
       final res = await _api.dio.get(ApiEndpoints.currentShift);
       final data = Map<String, dynamic>.from((res.data['data'] as Map?) ?? {});
       final hasShift = data['has_open_shift'] == true && data['shift'] != null;
@@ -264,7 +280,13 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
         });
         return;
       }
-      _applyLocalShiftState(_offlineDb.getCurrentLocalShift());
+      final localShift = _offlineDb.getCurrentLocalShift();
+      final localId = (localShift?['id'] as num?)?.toInt();
+      if (_offlineDb.hasPendingClosureForShift(localId ?? _shiftId)) {
+        _applyLocalShiftState(null);
+      } else {
+        _applyLocalShiftState(localShift);
+      }
     }
   }
 
@@ -364,6 +386,24 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                   context.read<AuthCubit>().state.session.userName,
                             );
                           } else {
+                            // BUG 6 FIX: Automatically flush pending offline shift closures
+                            // (and preceding offline sales) to Cloud BEFORE opening a new shift!
+                            if (_offlineDb.pendingShiftClosuresCount > 0) {
+                              await _offlineDb.syncOfflineQueue(_api);
+                              _refreshPosPendingBadge();
+                              final rejectedClosure = _offlineDb
+                                  .getDeadLetterItems()
+                                  .where((d) => d['entity_type'] == 'shift_closure')
+                                  .firstOrNull;
+                              if (rejectedClosure != null) {
+                                setModalState(() {
+                                  saving = false;
+                                  modalError =
+                                      'Penutupan shift sebelumnya ditolak server (${rejectedClosure['error_message'] ?? 'butuh alasan selisih'}). Selesaikan di Antrean Sinkronisasi / Notifikasi terlebih dahulu.';
+                                });
+                                return;
+                              }
+                            }
                             await _api.dio.post(
                               ApiEndpoints.openShift,
                               data: {
@@ -371,6 +411,11 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                                 if (selectedTerminalId != null)
                                   'terminal_id': selectedTerminalId,
                               },
+                              options: Options(
+                                headers: {
+                                  'X-Idempotency-Key': const Uuid().v4(),
+                                },
+                              ),
                             );
                           }
                           if (ctx.mounted) Navigator.pop(ctx);
@@ -795,6 +840,7 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
           'cash_overage': diff > 0 ? diff : 0.0,
         };
       } else {
+        final closeIdempotencyKey = const Uuid().v4();
         try {
           // Strict Blind Drop: send ONLY counted physical cash & denominations;
           // server computes authoritative expected_cash & variance.
@@ -811,6 +857,11 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
               if (_varianceNotesCtrl.text.trim().isNotEmpty)
                 'variance_notes': _varianceNotesCtrl.text.trim(),
             },
+            options: Options(
+              headers: {
+                'X-Idempotency-Key': closeIdempotencyKey,
+              },
+            ),
           );
           final body = res.data is Map
               ? Map<String, dynamic>.from(res.data as Map)
@@ -870,23 +921,63 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
             }
             return;
           }
-          await _offlineDb.closeLocalShift(actualClosingCash: counted);
+          // BUG 6 FIX: Queue shift closure for Cloud sync so Cloud closes the shift
+          // cleanly upon reconnect before opening the next day's shift!
+          await _offlineDb.enqueuePendingShiftClosure(
+            shiftId: _shiftId,
+            closingCashCounted: counted,
+            closingDenominations:
+                _denomCounts.map((k, v) => MapEntry(k.toString(), v)),
+            varianceReason: _selectedVarianceReason,
+            varianceNotes: _varianceNotesCtrl.text.trim().isNotEmpty
+                ? _varianceNotesCtrl.text.trim()
+                : null,
+            idempotencyKey: closeIdempotencyKey,
+          );
+          _refreshPosPendingBadge();
+          final exp = _expectedCash ?? (_openingCash + (_cashSales ?? 0) + _payIns - _payOuts);
+          final diff = counted - exp;
+          closedZReport = {
+            'shift_id': _shiftId ?? 0,
+            'status': 'closed_offline_pending',
+            'is_offline_pending': true,
+            'variance_status':
+                diff == 0 ? 'balanced' : (diff > 0 ? 'overage' : 'shortage'),
+            'opening_cash': _openingCash,
+            'cash_sales': _cashSales ?? 0,
+            'sales_total': _cashSales ?? 0,
+            'pay_ins': _payIns,
+            'pay_outs': _payOuts,
+            'expected_cash': exp,
+            'counted_cash': counted,
+            'cash_variance': diff,
+            'cash_shortage': diff < 0 ? diff.abs() : 0.0,
+            'cash_overage': diff > 0 ? diff : 0.0,
+          };
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: NusaThemeTokens.of(context).warning,
+                content: const Text(
+                  'Shift ditutup offline & masuk antrean sinkronisasi Cloud. Akan otomatis dikirim saat online.',
+                ),
+              ),
+            );
+          }
         }
       }
 
-      if (closedZReport != null) {
-        final ownerPhone = session.activeStore.phone?.trim() ?? '';
-        if (ownerPhone.isNotEmpty && ownerPhone != '-') {
-          await WhatsAppService.sendShiftZReportToOwner(
-            ownerPhone: ownerPhone,
-            storeName: session.activeStore.name,
-            cashierName: session.userName,
-            openingCash: (closedZReport['opening_cash'] as num?)?.toDouble() ?? _openingCash,
-            salesTotal: (closedZReport['cash_sales'] as num?)?.toDouble() ?? 0,
-            expectedCash: (closedZReport['expected_cash'] as num?)?.toDouble() ?? 0,
-            countedCash: (closedZReport['counted_cash'] as num?)?.toDouble() ?? counted,
-          );
-        }
+      final ownerPhone = session.activeStore.phone?.trim() ?? '';
+      if (ownerPhone.isNotEmpty && ownerPhone != '-') {
+        await WhatsAppService.sendShiftZReportToOwner(
+          ownerPhone: ownerPhone,
+          storeName: session.activeStore.name,
+          cashierName: session.userName,
+          openingCash: (closedZReport['opening_cash'] as num?)?.toDouble() ?? _openingCash,
+          salesTotal: (closedZReport['cash_sales'] as num?)?.toDouble() ?? 0,
+          expectedCash: (closedZReport['expected_cash'] as num?)?.toDouble() ?? 0,
+          countedCash: (closedZReport['counted_cash'] as num?)?.toDouble() ?? counted,
+        );
       }
 
       if (mounted) {
@@ -972,6 +1063,40 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 0a. Pending Offline Shift Closures Banner (BUG 6)
+                      if (!_isLocalStandalone && _offlineDb.pendingShiftClosuresCount > 0) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: tokens.warningSoft,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: tokens.warning, width: tokens.borderWidth),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.cloud_upload_outlined, color: tokens.warning, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '${_offlineDb.pendingShiftClosuresCount} penutupan shift offline menunggu sinkronisasi Cloud.',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: tokens.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _loadCurrentShift,
+                                child: const Text('Sinkronkan'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
                       // 0. Authoritative Server-Verified Z-Report Summary (shown after shift close)
                       if (_lastClosedZReport != null) ...[
                         _buildClosedZReportCard(tokens, _lastClosedZReport!),

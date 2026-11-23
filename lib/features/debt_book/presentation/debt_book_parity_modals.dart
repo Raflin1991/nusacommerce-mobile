@@ -179,6 +179,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
     int? selectedMethodId =
         _paymentMethods.isNotEmpty ? (_paymentMethods.first['id'] as num?)?.toInt() : 1;
     bool saving = false;
+    String? modalError;
 
     showModalBottomSheet(
       context: context,
@@ -263,6 +264,35 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                       NusaPriceTag(amount: totalSelected, fontSize: 17, color: AppColors.successDark),
                     ],
                   ),
+                  if (modalError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              modalError!,
+                              style: const TextStyle(
+                                color: AppColors.dangerDark,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   NusaButton(
                     label: 'Lunasi ${selectedIds.length} Nota Terpilih',
@@ -271,7 +301,10 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                     onPressed: (saving || selectedIds.isEmpty)
                         ? null
                         : () async {
-                            setModal(() => saving = true);
+                            setModal(() {
+                              saving = true;
+                              modalError = null;
+                            });
                             final methodName = _methodNameById(selectedMethodId);
                             bool cloudOk = false;
                             if (!_isLocalStandalone && (await _connectivity.checkOnline())) {
@@ -310,20 +343,37 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                                     (s, r) => s + ((r['balance_due'] as num?)?.toDouble() ?? 0.0),
                                   );
                                   if (groupTotal <= 0) continue;
-                                  await _api.dio.post(endpoint, data: {
-                                    if (isReceivable) 'customer_id': entry.key else 'supplier_id': entry.key,
-                                    'payment_method_id': selectedMethodId ?? 1,
-                                    'amount': groupTotal,
-                                    'allocations': rows.map((e) {
-                                      final due = (e['balance_due'] as num?)?.toDouble() ?? 0.0;
-                                      return isReceivable
-                                          ? {'sale_id': e['sale_id'] ?? e['id'], 'amount': due}
-                                          : {'purchase_id': e['purchase_id'] ?? e['id'], 'amount': due};
-                                    }).toList(),
-                                  });
+                                  await _api.dio.post(
+                                    endpoint,
+                                    data: {
+                                      if (isReceivable) 'customer_id': entry.key else 'supplier_id': entry.key,
+                                      'payment_method_id': selectedMethodId ?? 1,
+                                      'amount': groupTotal,
+                                      'allocations': rows.map((e) {
+                                        final due = (e['balance_due'] as num?)?.toDouble() ?? 0.0;
+                                        return isReceivable
+                                            ? {'sale_id': e['sale_id'] ?? e['id'], 'amount': due}
+                                            : {'purchase_id': e['purchase_id'] ?? e['id'], 'amount': due};
+                                      }).toList(),
+                                    },
+                                    options: Options(
+                                      headers: {
+                                        'X-Idempotency-Key': const Uuid().v4(),
+                                      },
+                                    ),
+                                  );
                                 }
                                 cloudOk = grouped.keys.any((k) => k > 0);
-                              } catch (_) {}
+                              } catch (e) {
+                                if (!ApiClient.isNetworkOfflineError(e)) {
+                                  if (!ctx.mounted) return;
+                                  setModal(() {
+                                    saving = false;
+                                    modalError = ApiClient.extractErrorMessage(e);
+                                  });
+                                  return;
+                                }
+                              }
                             }
                             if (!cloudOk) {
                               for (final id in selectedIds) {
@@ -336,10 +386,22 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                                 final due = (match?['balance_due'] as num?)?.toDouble() ?? 0.0;
                                 if (due > 0) {
                                   if (isReceivable) {
+                                    final custId =
+                                        ((match?['customer'] is Map ? match!['customer']['id'] : null) ??
+                                                match?['customer_id']) as num?;
                                     await _offlineDb.payLocalReceivable(
                                       saleId: id,
+                                      saleLocalUuid: match?['local_uuid']?.toString(),
                                       amount: due,
                                       paymentMethod: methodName,
+                                      paymentMethodId: selectedMethodId ?? 1,
+                                      invoiceNumber: match?['number']?.toString(),
+                                      customerName: (match?['customer']?['name'] ??
+                                              match?['customer_name'] ??
+                                              'Pelanggan')
+                                          .toString(),
+                                      customerId: custId?.toInt(),
+                                      enqueueForCloudSync: !_isLocalStandalone,
                                     );
                                   } else {
                                     await _offlineDb.payLocalPayable(
@@ -350,6 +412,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                                   }
                                 }
                               }
+                              _refreshPosPendingBadge();
                             }
                             if (!ctx.mounted) return;
                             Navigator.pop(ctx);

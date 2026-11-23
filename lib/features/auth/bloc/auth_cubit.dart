@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/security/secure_license_vault.dart';
 import '../models/auth_session_model.dart';
 
 class AuthState extends Equatable {
@@ -51,22 +54,65 @@ class AuthState extends Equatable {
 class AuthCubit extends Cubit<AuthState> {
   final ApiClient _apiClient;
   final OfflineDatabase _offlineDb;
+  final SecureLicenseVault _licenseVault;
 
   AuthCubit({
     required ApiClient apiClient,
     required OfflineDatabase offlineDb,
+    SecureLicenseVault? licenseVault,
   })  : _apiClient = apiClient,
         _offlineDb = offlineDb,
+        _licenseVault = licenseVault ??
+            SecureLicenseVault(
+              secureStorage: apiClient.secureStorage,
+              prefs: offlineDb.prefs,
+            ),
         super(AuthState(
           session: AuthSessionModel.empty(),
         ));
 
+  OfflineDatabase get offlineDb => _offlineDb;
+  SecureLicenseVault get licenseVault => _licenseVault;
+
+  bool get hasStandalonePin {
+    final profile = _offlineDb.getSavedStoreProfile();
+    final hash = (profile?['cashier_pin_hash'] ?? '').toString().trim();
+    return hash.isNotEmpty;
+  }
+
+  static String _hashPin(String pin) {
+    final digest = SecureLicenseVault.sha256(
+      Uint8List.fromList(utf8.encode('OXO.ID::OFFLINE_PIN::${pin.trim()}')),
+    );
+    return digest.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Configure or remove optional 4-6 digit Offline Cashier PIN stored as SHA-256 hash.
+  Future<void> setStandaloneCashierPin(String? pin) async {
+    final existing = _offlineDb.getStoreProfile();
+    final cleaned = (pin ?? '').trim();
+    if (cleaned.isEmpty) {
+      existing.remove('cashier_pin_hash');
+    } else {
+      existing['cashier_pin_hash'] = _hashPin(cleaned);
+    }
+    await _offlineDb.saveStoreProfile(existing);
+  }
+
   /// Check existing session on startup without ever forcing auto-logout on transient/expired responses.
-  /// When [awaitRemoteRefresh] is `false` and a valid cached session exists, emits immediately
-  /// (zero offline cold-start freeze) and refreshes `/auth/me` silently in the background.
+  /// Enforces cryptographic PRO/Enterprise entitlement verification via [SecureLicenseVault].
   Future<void> checkExistingSession({bool awaitRemoteRefresh = true}) async {
     final cachedMap = _offlineDb.getCachedAuthSession();
-    final cachedSession = cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
+    AuthSessionModel? cachedSession =
+        cachedMap != null ? AuthSessionModel.fromJson(cachedMap) : null;
+
+    if (cachedSession != null) {
+      final verified = await _licenseVault.verifyAndEnforce(cachedSession);
+      cachedSession = verified.session;
+      if (verified.tampered) {
+        await _offlineDb.saveAuthSession(cachedSession.toJson());
+      }
+    }
 
     if (cachedSession != null && cachedSession.isLocalTrial) {
       final vertical = cachedSession.activeStore.preferredVerticalRaw ??
@@ -167,6 +213,7 @@ class AuthCubit extends Cubit<AuthState> {
             (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
           await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
         }
+        await _licenseVault.sealSessionEntitlements(session);
         await _offlineDb.saveAuthSession(session.toJson());
         if (data['numbering_formats'] is Map) {
           await _offlineDb.cacheNumberingFormats(
@@ -195,6 +242,7 @@ class AuthCubit extends Cubit<AuthState> {
     final existing = _offlineDb.getStoreProfile();
     await _offlineDb.saveStoreProfile({
       ...existing,
+      'is_standalone': session.isLocalTrial,
       'name': session.tenantName.isNotEmpty ? session.tenantName : 'OXO.ID POS',
       'code': session.activeStore.code.isNotEmpty ? session.activeStore.code : 'MAIN',
       'branch': session.activeStore.name,
@@ -264,6 +312,7 @@ class AuthCubit extends Cubit<AuthState> {
           (_offlineDb.getSavedBusinessVertical() ?? '').trim().isEmpty) {
         await _offlineDb.setSavedBusinessVertical(session.activeStore.preferredVerticalRaw!);
       }
+      await _licenseVault.sealSessionEntitlements(session);
       await _offlineDb.saveAuthSession(session.toJson());
       if (data['numbering_formats'] is Map) {
         await _offlineDb.cacheNumberingFormats(
@@ -298,6 +347,7 @@ class AuthCubit extends Cubit<AuthState> {
     required String storeName,
     required String businessVertical,
     double openingCash = 100000,
+    String? cashierPin,
   }) async {
     emit(state.copyWith(isLoading: true, errorMessage: null));
 
@@ -321,10 +371,14 @@ class AuthCubit extends Cubit<AuthState> {
 
     await _apiClient.setActiveStoreId(session.activeStore.id);
     await _apiClient.setTenantSlug(session.tenantSubdomain);
+    await _licenseVault.sealSessionEntitlements(session);
     await _offlineDb.saveAuthSession(session.toJson());
     await _offlineDb.setSavedBusinessVertical(normalizedVertical);
 
+    final cleanPin = (cashierPin ?? '').trim();
     await _offlineDb.saveStoreProfile({
+      'is_standalone': true,
+      'business_vertical': normalizedVertical,
       'name': session.tenantName,
       'code': session.activeStore.code.isNotEmpty ? session.activeStore.code : 'TRIAL',
       'branch': session.activeStore.name,
@@ -332,6 +386,7 @@ class AuthCubit extends Cubit<AuthState> {
       'phone': '-',
       'paper_size': '58mm',
       'receipt_footer': 'Terima kasih telah berbelanja di ${session.tenantName}!',
+      if (cleanPin.isNotEmpty) 'cashier_pin_hash': _hashPin(cleanPin),
     });
 
     await _offlineDb.seedVerticalSampleProductsIfEmpty(normalizedVertical);
@@ -352,6 +407,78 @@ class AuthCubit extends Cubit<AuthState> {
     ));
   }
 
+  /// Bug 1 Fix: Resume an already-configured Offline Mandiri store after logout
+  /// WITHOUT wiping SQLite products, customers, held bills, shifts, or sales history!
+  Future<bool> resumeLocalTrialSession({String? pin}) async {
+    final savedProfile = _offlineDb.getSavedStoreProfile();
+    if (savedProfile == null) {
+      emit(state.copyWith(
+        isLoading: false,
+        errorMessage: 'Profil toko offline tidak ditemukan. Silakan buat toko baru.',
+      ));
+      return false;
+    }
+
+    final expectedPinHash = (savedProfile['cashier_pin_hash'] ?? '').toString().trim();
+    if (expectedPinHash.isNotEmpty) {
+      final provided = (pin ?? '').trim();
+      if (provided.isEmpty || _hashPin(provided) != expectedPinHash) {
+        emit(state.copyWith(
+          isLoading: false,
+          errorMessage: 'PIN kasir salah. Silakan periksa kembali PIN Anda.',
+        ));
+        return false;
+      }
+    }
+
+    emit(state.copyWith(isLoading: true, errorMessage: null));
+
+    final storeName = (savedProfile['name'] ?? 'Toko Saya').toString().trim();
+    final savedVertical = (savedProfile['business_vertical'] ??
+            _offlineDb.getSavedBusinessVertical() ??
+            'retail')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final normalizedVertical = savedVertical.isEmpty ? 'retail' : savedVertical;
+
+    // Never forceClear! Only align tenant identity so existing SQLite rows stay 100% intact.
+    await _offlineDb.setActiveTenantIdentity('local-trial:$normalizedVertical');
+    await _offlineDb.setSavedBusinessVertical(normalizedVertical);
+
+    final baseSession = AuthSessionModel.createLocalTrialSession(
+      storeName: storeName,
+      businessVertical: normalizedVertical,
+    );
+    final restoredStore = StoreBranchModel(
+      id: baseSession.activeStore.id,
+      name: (savedProfile['branch'] ?? storeName).toString(),
+      code: (savedProfile['code'] ?? 'LOKAL-01').toString(),
+      city: 'Offline Lokal',
+      address: savedProfile['address']?.toString() ?? baseSession.activeStore.address,
+      phone: savedProfile['phone']?.toString() ?? '-',
+      businessType: normalizedVertical,
+      posMode: normalizedVertical,
+    );
+    final session = baseSession.copyWith(
+      activeStore: restoredStore,
+      tenantName: storeName,
+    );
+
+    await _apiClient.setActiveStoreId(session.activeStore.id);
+    await _apiClient.setTenantSlug(session.tenantSubdomain);
+    await _licenseVault.sealSessionEntitlements(session);
+    await _offlineDb.saveAuthSession(session.toJson());
+
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: true,
+      session: session,
+      sessionRevision: state.sessionRevision + 1,
+    ));
+    return true;
+  }
+
   /// Switch active Store Branch (POST /api/v1/auth/switch-store)
   Future<void> switchStoreBranch(StoreBranchModel branch) async {
     await _apiClient.setActiveStoreId(branch.id);
@@ -360,6 +487,7 @@ class AuthCubit extends Cubit<AuthState> {
       await _offlineDb.setSavedBusinessVertical(branch.preferredVerticalRaw!);
     }
     final updatedSession = state.session.copyWith(activeStore: branch);
+    await _licenseVault.sealSessionEntitlements(updatedSession);
     await _offlineDb.saveAuthSession(updatedSession.toJson());
     await _persistStoreProfileFromSession(updatedSession);
     emit(state.copyWith(
@@ -414,6 +542,7 @@ class AuthCubit extends Cubit<AuthState> {
           );
         }
 
+        await _licenseVault.sealSessionEntitlements(refreshed);
         await _offlineDb.saveAuthSession(refreshed.toJson());
         await _persistStoreProfileFromSession(refreshed);
         emit(state.copyWith(session: refreshed));
@@ -423,17 +552,59 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  /// Bug 1 Fix:
+  /// - In Offline Mandiri mode (`isLocalTrial == true`), ONLY clears active cashier session
+  ///   (`clearAuthSession()`). NEVER deletes SQLite tables or SharedPreferences store data!
+  /// - In Cloud mode, preserves unsynced offline queues if any pending offline mutations exist,
+  ///   otherwise purges foreign tenant cache for strict multi-tenant isolation.
   Future<void> logout() async {
+    final cached = _offlineDb.getCachedAuthSession();
+    final isStandaloneSession = state.session.isLocalTrial ||
+        cached?['is_local_trial'] == true ||
+        (_offlineDb.hasExistingStandaloneStore &&
+            (state.session.tenantSubdomain.isEmpty ||
+                state.session.tenantSubdomain == 'local-trial'));
+
+    if (isStandaloneSession) {
+      await _offlineDb.clearAuthSession();
+      emit(AuthState(
+        isLoading: false,
+        isAuthenticated: false,
+        session: AuthSessionModel.empty(),
+        sessionRevision: state.sessionRevision,
+      ));
+      return;
+    }
+
     try {
       await _apiClient.dio.post(ApiEndpoints.logout);
     } catch (_) {}
     await _apiClient.clearSession();
-    await _offlineDb.clearTenantCache();
     await _offlineDb.clearAuthSession();
+    if (!_offlineDb.hasAnyPendingSyncItems) {
+      await _offlineDb.clearTenantCache();
+      await _licenseVault.clearVault();
+    }
     emit(AuthState(
       isLoading: false,
       isAuthenticated: false,
       session: AuthSessionModel.empty(),
+      sessionRevision: state.sessionRevision,
+    ));
+  }
+
+  /// Explicit Factory Reset ("Reset Pabrik / Hapus Seluruh Database") from Settings.
+  /// Permanently wipes SQLite (`_sqlite.clearAll()`), SharedPreferences store data,
+  /// license vault, and active session.
+  Future<void> factoryResetLocalDatabase() async {
+    await _apiClient.clearSession();
+    await _offlineDb.factoryResetAll();
+    await _licenseVault.clearVault();
+    emit(AuthState(
+      isLoading: false,
+      isAuthenticated: false,
+      session: AuthSessionModel.empty(),
+      sessionRevision: state.sessionRevision + 1,
     ));
   }
 }

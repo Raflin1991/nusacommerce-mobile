@@ -122,6 +122,8 @@ class ApiClient {
   }
 
   String get baseUrl => dio.options.baseUrl;
+  FlutterSecureStorage get secureStorage => _secureStorage;
+  SharedPreferences get prefs => _prefs;
 
   Future<void> setBaseUrl(String url) async {
     final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');

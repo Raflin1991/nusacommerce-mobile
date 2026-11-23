@@ -1108,12 +1108,512 @@ class _SettingsScreenState extends State<SettingsScreen> {
           backgroundColor: AppColors.successDark,
           content: Text(
             syncedCount > 0
-                ? '$syncedCount transaksi offline berhasil disinkronkan ke Cloud!'
+                ? '$syncedCount item offline berhasil disinkronkan ke Cloud!'
                 : 'Seluruh data usaha sudah 100% tersinkronisasi dengan OXO Cloud.',
           ),
         ),
       );
     }
+  }
+
+  void _showOfflinePinModal(BuildContext context) {
+    final authCubit = context.read<AuthCubit>();
+    final hasPin = authCubit.hasStandalonePin;
+    final pinCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    String? inlineError;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (mCtx, setModalState) {
+          final tokens = NusaThemeTokens.of(mCtx);
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                MediaQuery.of(mCtx).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hasPin ? 'Ubah / Hapus PIN Kasir Offline' : 'Atur PIN Kasir Offline (Opsional)',
+                    style: TextStyle(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w800,
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'PIN melindungi akses masuk kembali ke toko offline Anda setelah kasir keluar sesi (logout).',
+                    style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: pinCtrl,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    onChanged: (_) => setModalState(() => inlineError = null),
+                    decoration: const InputDecoration(
+                      labelText: 'PIN Baru (4 - 6 digit)',
+                      prefixIcon: Icon(Icons.pin_outlined),
+                      counterText: '',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: confirmCtrl,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    onChanged: (_) => setModalState(() => inlineError = null),
+                    decoration: const InputDecoration(
+                      labelText: 'Konfirmasi PIN Baru',
+                      prefixIcon: Icon(Icons.lock_outline_rounded),
+                      counterText: '',
+                    ),
+                  ),
+                  if (inlineError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: tokens.dangerSoft,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: tokens.danger),
+                      ),
+                      child: Text(
+                        inlineError!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: tokens.danger,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      if (hasPin) ...[
+                        Expanded(
+                          child: NusaButton(
+                            label: 'Hapus PIN',
+                            variant: NusaButtonVariant.outline,
+                            minHeight: 46,
+                            onPressed: () async {
+                              await authCubit.setStandaloneCashierPin(null);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (mounted) {
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('PIN Kasir Offline dihapus.')),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
+                      Expanded(
+                        child: NusaButton(
+                          label: 'Simpan PIN',
+                          icon: Icons.verified_user_outlined,
+                          minHeight: 46,
+                          onPressed: () async {
+                            final pin = pinCtrl.text.trim();
+                            final confirm = confirmCtrl.text.trim();
+                            if (pin.length < 4) {
+                              setModalState(() => inlineError = 'PIN minimal 4 digit angka.');
+                              return;
+                            }
+                            if (pin != confirm) {
+                              setModalState(() => inlineError = 'Konfirmasi PIN tidak cocok.');
+                              return;
+                            }
+                            await authCubit.setStandaloneCashierPin(pin);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              setState(() {});
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.successDark,
+                                  content: Text('PIN Kasir Offline berhasil disimpan.'),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeadLetterQueueModal(BuildContext context) {
+    final processingIds = <String>{};
+    String? inlineError;
+    String? inlineSuccess;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (mCtx, setModalState) {
+          final tokens = NusaThemeTokens.of(mCtx);
+          final items = mCtx.watch<PosCubit>().state.deadLetterItems;
+          return SafeArea(
+            top: false,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(mCtx).size.height * 0.82,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.report_problem_outlined, color: tokens.warning, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Dead-Letter Queue (${items.length})',
+                            style: TextStyle(
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w800,
+                              color: tokens.textPrimary,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'Payload offline yang ditolak server dikarantina di sini agar antrean kasir lain tetap lancar sinkron ke Cloud.',
+                      style: TextStyle(fontSize: 12, color: tokens.textSecondary),
+                    ),
+                    const SizedBox(height: 10),
+                    if (inlineError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: tokens.dangerSoft,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: tokens.danger),
+                        ),
+                        child: Text(
+                          inlineError!,
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.danger),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (inlineSuccess != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: tokens.positiveSoft,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: tokens.positive),
+                        ),
+                        child: Text(
+                          inlineSuccess!,
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.positive),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (items.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 28),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(Icons.check_circle_outline_rounded, size: 42, color: tokens.positive),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Antrean Bersih! Tidak ada payload yang ditolak server.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: tokens.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (_, idx) {
+                            final item = items[idx];
+                            final id = (item['id'] ?? '').toString();
+                            final title = (item['reference_label'] ?? item['title'] ?? item['entity_type'] ?? 'Payload Offline').toString();
+                            final entityType = (item['entity_type'] ?? '').toString();
+                            final errCode = (item['error_code'] ?? '').toString();
+                            final errMsg = (item['error_message'] ?? 'Ditolak oleh server').toString();
+                            final httpStatus = (item['http_status'] as num?)?.toInt() ?? 0;
+                            final busy = processingIds.contains(id);
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: tokens.bgElevated,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: tokens.borderSubtle),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          title,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            color: tokens.textPrimary,
+                                          ),
+                                        ),
+                                      ),
+                                      NusaBadge(
+                                        label: httpStatus > 0 ? 'HTTP $httpStatus' : entityType.toUpperCase(),
+                                        variant: NusaBadgeVariant.danger,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    errMsg,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: tokens.danger,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: busy
+                                              ? null
+                                              : () async {
+                                                  setModalState(() {
+                                                    processingIds.add(id);
+                                                    inlineError = null;
+                                                    inlineSuccess = null;
+                                                  });
+                                                  await mCtx.read<PosCubit>().discardDeadLetterItem(id);
+                                                  if (!mCtx.mounted) return;
+                                                  setModalState(() {
+                                                    processingIds.remove(id);
+                                                    inlineSuccess = 'Item "$title" dihapus dari antrean.';
+                                                  });
+                                                },
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: tokens.danger,
+                                            side: BorderSide(color: tokens.danger),
+                                          ),
+                                          child: const Text('Hapus'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: ElevatedButton(
+                                          onPressed: busy
+                                              ? null
+                                              : () async {
+                                                  setModalState(() {
+                                                    processingIds.add(id);
+                                                    inlineError = null;
+                                                    inlineSuccess = null;
+                                                  });
+                                                  Map<String, dynamic>? overrides;
+                                                  if (entityType == 'shift_closure' &&
+                                                      errCode == 'VarianceReasonRequired') {
+                                                    overrides = {
+                                                      'variance_reason': 'miscount',
+                                                      'variance_notes': 'Rekonsiliasi selisih shift offline',
+                                                    };
+                                                  }
+                                                  final res = await mCtx.read<PosCubit>().retryDeadLetterItem(
+                                                        id,
+                                                        payloadOverrides: overrides,
+                                                      );
+                                                  if (!mCtx.mounted) return;
+                                                  setModalState(() {
+                                                    processingIds.remove(id);
+                                                    if (res.success) {
+                                                      inlineSuccess =
+                                                          'Item "$title" berhasil dikirim ulang ke Cloud!';
+                                                    } else {
+                                                      inlineError = res.errorMessage ?? 'Masih ditolak server.';
+                                                    }
+                                                  });
+                                                },
+                                          child: Text(busy ? 'Mengirim...' : 'Kirim Ulang'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFactoryResetDialog(BuildContext context) async {
+    final confirmCtrl = TextEditingController();
+    final productCount = _offlineDb.getCachedProducts().length;
+    final salesCount = _offlineDb.getLocalSalesHistory().length;
+    final heldCount = _offlineDb.getHeldSales().length;
+    final pendingCount = _offlineDb.totalOfflineQueueBadgeCount;
+    bool resetting = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !resetting,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dCtx, setDialogState) {
+          final tokens = NusaThemeTokens.of(dCtx);
+          final canReset = confirmCtrl.text.trim().toUpperCase() == 'RESET' && !resetting;
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.delete_forever_rounded, color: tokens.danger),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Reset Pabrik / Hapus Database',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: tokens.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: tokens.danger),
+                    ),
+                    child: Text(
+                      'TINDAKAN PERMANEN! Seluruh data lokal di perangkat ini akan dihapus bersih:\n'
+                      '• $productCount Produk & Stok\n'
+                      '• $salesCount Riwayat Transaksi Kasir\n'
+                      '• $heldCount Nota Tahan (Hold Bill)\n'
+                      '• $pendingCount Antrean Sinkronisasi & Profil Toko',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: tokens.danger,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Ketik kata RESET di bawah ini untuk mengonfirmasi penghapusan seluruh database lokal:',
+                    style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: confirmCtrl,
+                    enabled: !resetting,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Ketik RESET',
+                      prefixIcon: Icon(Icons.warning_amber_rounded),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: resetting ? null : () => Navigator.pop(ctx),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: tokens.danger,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: !canReset
+                    ? null
+                    : () async {
+                        setDialogState(() => resetting = true);
+                        final authCubit = context.read<AuthCubit>();
+                        final posCubit = context.read<PosCubit>();
+                        await authCubit.factoryResetLocalDatabase();
+                        await posCubit.resetForLogout();
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          context.go('/login');
+                        }
+                      },
+                child: Text(resetting ? 'Menghapus...' : 'Hapus Permanen'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   ThemeCubit? _maybeThemeCubit(BuildContext context) {
@@ -1426,10 +1926,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.cloud_upload_outlined,
                     title: 'Sinkronisasi Data & Backup Offline',
                     subtitle: offlinePending > 0
-                        ? '$offlinePending transaksi menunggu sinkronisasi Cloud'
-                        : 'Seluruh transaksi dan katalog sinkron dengan Cloud',
+                        ? '$offlinePending item offline menunggu sinkronisasi Cloud'
+                        : 'Seluruh transaksi, piutang, biaya & shift sinkron dengan Cloud',
                     onTap: () => _handleSyncData(context),
                   ),
+                  Divider(height: 1, indent: 56, color: tokens.borderSubtle),
+                  _buildSettingsTile(
+                    tokens,
+                    icon: Icons.report_problem_outlined,
+                    title: 'Dead-Letter Queue (Gagal Sinkron)',
+                    subtitle: posState.deadLetterItems.isNotEmpty
+                        ? '${posState.deadLetterItems.length} payload ditolak server perlu ditinjau'
+                        : 'Antrean bersih • Tidak ada payload ditolak server',
+                    onTap: () => _showDeadLetterQueueModal(context),
+                  ),
+                  if (session.isLocalTrial) ...[
+                    Divider(height: 1, indent: 56, color: tokens.borderSubtle),
+                    _buildSettingsTile(
+                      tokens,
+                      icon: Icons.pin_outlined,
+                      title: 'PIN Kasir Offline (Opsional)',
+                      subtitle: context.read<AuthCubit>().hasStandalonePin
+                          ? 'PIN Aktif • Diminta saat masuk kembali ke toko offline'
+                          : 'Belum diatur • Klik untuk kunci akses kasir offline dengan PIN',
+                      onTap: () => _showOfflinePinModal(context),
+                    ),
+                  ],
                   Divider(height: 1, indent: 56, color: tokens.borderSubtle),
                   _buildSettingsTile(
                     tokens,
@@ -1464,11 +1986,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 16),
 
-            // 4. Outlined Red Logout Button (>= 48dp)
+            // 3b. Danger Zone — Explicit Factory Reset (BUG 1 Guard: ONLY place wiping SQLite!)
+            NusaCard(
+              padding: EdgeInsets.zero,
+              borderColor: tokens.danger.withOpacity(0.35),
+              child: ListTile(
+                key: const Key('factory_reset_database_tile'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: tokens.dangerSoft,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.delete_forever_rounded, color: tokens.danger, size: 22),
+                ),
+                title: Text(
+                  'Reset Pabrik / Hapus Seluruh Database',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: tokens.danger,
+                  ),
+                ),
+                subtitle: Text(
+                  'Hapus permanen seluruh produk, nota tahan, transaksi & profil toko lokal dari perangkat ini.',
+                  style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
+                ),
+                trailing: Icon(Icons.chevron_right_rounded, color: tokens.danger),
+                onTap: () => _showFactoryResetDialog(context),
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // 4. Outlined Red Logout Button (>= 48dp) — Safe Session Lock (NEVER wipes offline data!)
             NusaButton(
-              label: 'Keluar Sesi (Logout)',
+              label: session.isLocalTrial
+                  ? 'Keluar Sesi Kasir (Data Toko Tetap Aman)'
+                  : 'Keluar Sesi (Logout)',
               icon: Icons.logout_rounded,
               variant: NusaButtonVariant.danger,
               minHeight: 50,

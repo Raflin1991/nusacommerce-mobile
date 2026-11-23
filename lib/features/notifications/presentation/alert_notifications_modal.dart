@@ -259,10 +259,14 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
         .toList();
     final List<Map<String, dynamic>> mergedOfflineConflicts =
         _mergeOfflineConflicts(posState.localSyncConflicts);
+    final List<Map<String, dynamic>> nonSaleDeadLetters = posState.deadLetterItems
+        .where((d) => (d['entity_type'] ?? '').toString() != 'sale')
+        .toList();
 
     final int totalAlerts = _approvals.length +
         widget.tasks.length +
         mergedOfflineConflicts.length +
+        nonSaleDeadLetters.length +
         widget.pendingOnlineOrdersCount +
         voidOrLargeDiscounts.length +
         widget.voidCountFromServer +
@@ -362,6 +366,10 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     ],
                     if (mergedOfflineConflicts.isNotEmpty) ...[
                       _buildOfflineConflictsSection(mergedOfflineConflicts),
+                      const SizedBox(height: 12),
+                    ],
+                    if (nonSaleDeadLetters.isNotEmpty) ...[
+                      _buildDeadLetterSection(nonSaleDeadLetters),
                       const SizedBox(height: 12),
                     ],
                     _buildVoidAndDiscountSection(voidOrLargeDiscounts),
@@ -846,6 +854,201 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
             ),
           );
         }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeadLetterSection(List<Map<String, dynamic>> items) {
+    return _buildSectionCard(
+      title: 'Dead-Letter Queue / Gagal Sinkron (${items.length})',
+      subtitle: 'Payload piutang, biaya, produk, atau tutup shift yang ditolak server dikarantina agar antrean lain tidak macet',
+      icon: Icons.report_problem_outlined,
+      accentColor: AppColors.warningDark,
+      softBgColor: AppColors.warningSoft,
+      child: Column(
+        children: [
+          if (_conflictInlineError != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+              ),
+              child: Text(
+                _conflictInlineError!,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.dangerDark,
+                ),
+              ),
+            ),
+          if (_conflictInlineSuccess != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.successDark.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.successDark.withOpacity(0.35)),
+              ),
+              child: Text(
+                _conflictInlineSuccess!,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.successDark,
+                ),
+              ),
+            ),
+          ...items.take(10).map((item) {
+            final id = (item['id'] ?? '').toString();
+            final title = (item['reference_label'] ?? item['title'] ?? item['entity_type'] ?? 'Payload Offline').toString();
+            final entityType = (item['entity_type'] ?? '').toString();
+            final errCode = (item['error_code'] ?? '').toString();
+            final errMsg = (item['error_message'] ?? 'Ditolak oleh server').toString();
+            final httpStatus = (item['http_status'] as num?)?.toInt() ?? 0;
+            final busy = _processingConflictUuids.contains('dlq-$id');
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.warningDark.withOpacity(0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.warningDark.withOpacity(0.14),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          httpStatus > 0 ? 'HTTP $httpStatus' : entityType.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.warningDark,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    errMsg,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.dangerDark,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            foregroundColor: AppColors.dangerDark,
+                            side: BorderSide(color: AppColors.danger.withOpacity(0.45)),
+                          ),
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  setState(() {
+                                    _processingConflictUuids.add('dlq-$id');
+                                    _conflictInlineError = null;
+                                    _conflictInlineSuccess = null;
+                                  });
+                                  await context.read<PosCubit>().discardDeadLetterItem(id);
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _processingConflictUuids.remove('dlq-$id');
+                                    _conflictInlineSuccess = 'Item "$title" dibuang dari antrean.';
+                                  });
+                                },
+                          child: const Text(
+                            'Hapus dari Antrean',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  setState(() {
+                                    _processingConflictUuids.add('dlq-$id');
+                                    _conflictInlineError = null;
+                                    _conflictInlineSuccess = null;
+                                  });
+                                  Map<String, dynamic>? overrides;
+                                  if (entityType == 'shift_closure' &&
+                                      errCode == 'VarianceReasonRequired') {
+                                    overrides = {
+                                      'variance_reason': 'miscount',
+                                      'variance_notes': 'Rekonsiliasi selisih shift offline',
+                                    };
+                                  }
+                                  final res = await context.read<PosCubit>().retryDeadLetterItem(
+                                        id,
+                                        payloadOverrides: overrides,
+                                      );
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _processingConflictUuids.remove('dlq-$id');
+                                    if (res.success) {
+                                      _conflictInlineSuccess =
+                                          'Item "$title" berhasil dikirim ulang ke Cloud.';
+                                    } else {
+                                      _conflictInlineError =
+                                          res.errorMessage ?? 'Masih ditolak server.';
+                                    }
+                                  });
+                                },
+                          child: Text(
+                            busy ? 'Mengirim...' : 'Coba Kirim Ulang',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );

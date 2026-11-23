@@ -1,8 +1,10 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
@@ -86,15 +88,38 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     return (found['name'] ?? 'Tunai').toString();
   }
 
+  void _refreshPosPendingBadge() {
+    if (!mounted) return;
+    try {
+      context.read<PosCubit>().refreshOfflinePendingState();
+    } catch (_) {}
+  }
+
   void _applyLocalDebtBookData() {
     final localRec = _offlineDb.getLocalReceivables();
+    final cachedCloudRec = _offlineDb
+        .getCachedCloudReceivables()
+        .where((r) => ((r['balance_due'] as num?)?.toDouble() ?? 0.0) > 0.5)
+        .toList();
+    final mergedRec = <Map<String, dynamic>>[...localRec];
+    final existingKeys = mergedRec
+        .map((r) => '${r['sale_id'] ?? r['id'] ?? ''}|${r['number'] ?? ''}')
+        .toSet();
+    for (final cloudItem in cachedCloudRec) {
+      final key = '${cloudItem['sale_id'] ?? cloudItem['id'] ?? ''}|${cloudItem['number'] ?? ''}';
+      if (!existingKeys.contains(key)) {
+        mergedRec.add(cloudItem);
+        existingKeys.add(key);
+      }
+    }
+
     final localPay = _offlineDb
         .getLocalPayables()
         .where((p) => ((p['balance_due'] as num?)?.toDouble() ?? 0.0) > 0.5)
         .toList();
     final localExp = _offlineDb.getLocalExpenses();
 
-    final recTotal = localRec.fold<double>(
+    final recTotal = mergedRec.fold<double>(
       0.0,
       (sum, item) => sum + ((item['balance_due'] as num?)?.toDouble() ?? 0.0),
     );
@@ -106,7 +131,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     if (!mounted) return;
     setState(() {
       _totalReceivables = recTotal;
-      _receivables = localRec;
+      _receivables = mergedRec;
       _totalPayables = payTotal;
       _payables = localPay;
       _expenses = localExp;
@@ -147,6 +172,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
 
+      // Cache authoritative Cloud receivables locally so offline installment payments stay available
+      await _offlineDb.cacheCloudReceivables(invoices);
+
       final payData = Map<String, dynamic>.from((results[1].data['data'] as Map?) ?? {});
       final paySummary = Map<String, dynamic>.from((payData['summary'] as Map?) ?? {});
       final payInvoices = (payData['invoices'] as List<dynamic>? ?? [])
@@ -160,6 +188,16 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
       final cats = (expData['categories'] as List<dynamic>? ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
+      if (cats.isNotEmpty) {
+        await _offlineDb.cacheExpenseCategories(cats);
+      }
+
+      // Include any unsynced local expenses at the top until Cloud sync completes
+      final unsyncedLocalExps = _offlineDb.getUnsyncedLocalExpenses();
+      final mergedExps = <Map<String, dynamic>>[
+        ...unsyncedLocalExps,
+        ...exps,
+      ];
 
       final methods = (results[3].data['data'] as List<dynamic>? ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -171,7 +209,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
         _receivables = invoices;
         _totalPayables = (paySummary['total_payables'] as num?)?.toDouble() ?? 0;
         _payables = payInvoices;
-        _expenses = exps;
+        _expenses = mergedExps;
         _expenseCategories = cats;
         _paymentMethods = methods;
         _loading = false;
@@ -179,6 +217,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     } catch (e) {
       if (_isLocalStandalone ||
           _offlineDb.getLocalSalesHistory().isNotEmpty ||
+          _offlineDb.getCachedCloudReceivables().isNotEmpty ||
           _offlineDb.getLocalPayables().isNotEmpty ||
           _offlineDb.getLocalExpenses().isNotEmpty) {
         _applyLocalDebtBookData();
@@ -196,10 +235,16 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     final item = _receivables[index];
     final currentDue = (item['balance_due'] as num?)?.toDouble() ?? 0;
     final customerName = (item['customer']?['name'] ?? item['customer_name'] ?? 'Pelanggan').toString();
+    final customerId = ((item['customer'] is Map ? item['customer']['id'] : null) ??
+            item['customer_id']) as num?;
     final saleId = (item['sale_id'] as num?)?.toInt() ?? (item['id'] as num?)?.toInt() ?? 0;
-    final isLocalItem = _isLocalStandalone || item['is_local'] == true;
+    final saleLocalUuid = item['local_uuid']?.toString();
+    final isLocalOnlySale = _isLocalStandalone || item['is_local'] == true || saleId > 1000000000;
     final amountCtrl = TextEditingController(text: currentDue.toStringAsFixed(0));
     int? selectedMethodId = _paymentMethods.isNotEmpty ? (_paymentMethods.first['id'] as num?)?.toInt() : 1;
+    bool isSaving = false;
+    String? modalError;
+    final idempotencyKey = const Uuid().v4();
 
     showModalBottomSheet(
       context: context,
@@ -240,76 +285,157 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                             child: Text((pm['name'] ?? 'Tunai').toString()),
                           ))
                       .toList(),
-                  onChanged: (v) => setModalState(() => selectedMethodId = v),
+                  onChanged: isSaving ? null : (v) => setModalState(() => selectedMethodId = v),
                 ),
               const SizedBox(height: 12),
               TextField(
                 controller: amountCtrl,
+                enabled: !isSaving,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: 'Nominal Dibayar (Rp)',
                   prefixIcon: Icon(Icons.payments_rounded, color: AppColors.success),
                 ),
               ),
+              if (modalError != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.dangerSoft,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          modalError!,
+                          style: const TextStyle(
+                            color: AppColors.dangerDark,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
-                  onPressed: () async {
-                    final paid = IdrCurrencyFormatter.parse(amountCtrl.text);
-                    if (paid <= 0 || selectedMethodId == null) return;
-                    final methodName = _methodNameById(selectedMethodId);
-                    Navigator.pop(ctx);
-                    try {
-                      final invNo = (item['number'] ?? 'BON-$saleId').toString();
-                      final custPhone = (item['customer']?['phone'] ?? item['customer_phone'] ?? '').toString();
-                      final remain = (currentDue - paid).clamp(0.0, double.infinity);
-                      if (isLocalItem || !(await _connectivity.checkOnline())) {
-                        await _offlineDb.payLocalReceivable(
-                          saleId: saleId,
-                          amount: paid,
-                          paymentMethod: methodName,
-                        );
-                        await _loadData();
-                        if (!mounted) return;
-                        _showSettlementReceiptDialog(
-                          isReceivable: true,
-                          partyName: customerName,
-                          phone: custPhone,
-                          invoiceNumber: invNo,
-                          paidAmount: paid,
-                          remainingBalance: remain,
-                          paymentMethod: methodName,
-                        );
-                        return;
-                      }
-                      await _api.dio.post(
-                        ApiEndpoints.payReceivable(saleId),
-                        data: {
-                          'payment_method_id': selectedMethodId,
-                          'amount': paid,
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final paid = IdrCurrencyFormatter.parse(amountCtrl.text);
+                          if (paid <= 0 || selectedMethodId == null) {
+                            setModalState(() => modalError = 'Masukkan nominal pembayaran yang valid (> 0).');
+                            return;
+                          }
+                          setModalState(() {
+                            isSaving = true;
+                            modalError = null;
+                          });
+
+                          final methodName = _methodNameById(selectedMethodId);
+                          final invNo = (item['number'] ?? 'BON-$saleId').toString();
+                          final custPhone =
+                              (item['customer']?['phone'] ?? item['customer_phone'] ?? '').toString();
+                          final remain = (currentDue - paid).clamp(0.0, double.infinity);
+
+                          Future<void> saveOfflineAndFinish() async {
+                            await _offlineDb.payLocalReceivable(
+                              saleId: saleId,
+                              saleLocalUuid: saleLocalUuid,
+                              amount: paid,
+                              paymentMethod: methodName,
+                              paymentMethodId: selectedMethodId ?? 1,
+                              invoiceNumber: invNo,
+                              customerName: customerName,
+                              customerId: customerId?.toInt(),
+                              enqueueForCloudSync: !_isLocalStandalone,
+                              idempotencyKey: idempotencyKey,
+                            );
+                            _refreshPosPendingBadge();
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            await _loadData();
+                            if (!mounted) return;
+                            if (!_isLocalStandalone) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.warningDark,
+                                  content: Text(
+                                    'Pelunasan piutang disimpan offline & masuk antrean sinkronisasi Cloud.',
+                                  ),
+                                ),
+                              );
+                            }
+                            _showSettlementReceiptDialog(
+                              isReceivable: true,
+                              partyName: customerName,
+                              phone: custPhone,
+                              invoiceNumber: invNo,
+                              paidAmount: paid,
+                              remainingBalance: remain,
+                              paymentMethod: methodName,
+                            );
+                          }
+
+                          try {
+                            if (isLocalOnlySale || !(await _connectivity.checkOnline())) {
+                              await saveOfflineAndFinish();
+                              return;
+                            }
+                            await _api.dio.post(
+                              ApiEndpoints.payReceivable(saleId),
+                              data: {
+                                'payment_method_id': selectedMethodId,
+                                'amount': paid,
+                              },
+                              options: Options(
+                                headers: {
+                                  'X-Idempotency-Key': idempotencyKey,
+                                },
+                              ),
+                            );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            await _loadData();
+                            if (!mounted) return;
+                            _showSettlementReceiptDialog(
+                              isReceivable: true,
+                              partyName: customerName,
+                              phone: custPhone,
+                              invoiceNumber: invNo,
+                              paidAmount: paid,
+                              remainingBalance: remain,
+                              paymentMethod: methodName,
+                            );
+                          } catch (e) {
+                            if (ApiClient.isNetworkOfflineError(e)) {
+                              await saveOfflineAndFinish();
+                              return;
+                            }
+                            if (!ctx.mounted) return;
+                            setModalState(() {
+                              isSaving = false;
+                              modalError = ApiClient.extractErrorMessage(e);
+                            });
+                          }
                         },
-                      );
-                      await _loadData();
-                      if (!mounted) return;
-                      _showSettlementReceiptDialog(
-                        isReceivable: true,
-                        partyName: customerName,
-                        phone: custPhone,
-                        invoiceNumber: invNo,
-                        paidAmount: paid,
-                        remainingBalance: remain,
-                        paymentMethod: methodName,
-                      );
-                    } catch (e) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                      );
-                    }
-                  },
-                  child: const Text('Simpan Pembayaran Piutang'),
+                  child: isSaving
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Simpan Pembayaran Piutang'),
                 ),
               ),
             ],
@@ -497,6 +623,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
     final descCtrl = TextEditingController();
     final amtCtrl = TextEditingController();
     int? selectedCatId = _expenseCategories.isNotEmpty ? (_expenseCategories.first['id'] as num?)?.toInt() : null;
+    bool isSaving = false;
+    String? modalError;
+    final idempotencyKey = const Uuid().v4();
     const presetLabels = [
       'Listrik',
       'Air',
@@ -545,6 +674,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                       label: preset,
                       selected: descCtrl.text.trim() == preset,
                       onTap: () {
+                        if (isSaving) return;
                         descCtrl.text = preset;
                         setModalState(() {});
                       },
@@ -562,12 +692,13 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                               child: Text((c['name'] ?? 'Operasional').toString()),
                             ))
                         .toList(),
-                    onChanged: (v) => setModalState(() => selectedCatId = v),
+                    onChanged: isSaving ? null : (v) => setModalState(() => selectedCatId = v),
                   ),
                   const SizedBox(height: 10),
                 ],
                 TextField(
                   controller: descCtrl,
+                  enabled: !isSaving,
                   decoration: const InputDecoration(
                     labelText: 'Keterangan Biaya / Pengeluaran *',
                     prefixIcon: Icon(Icons.description_outlined),
@@ -576,58 +707,132 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                 const SizedBox(height: 10),
                 TextField(
                   controller: amtCtrl,
+                  enabled: !isSaving,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: 'Nominal Pengeluaran (Rp) *',
                     prefixIcon: Icon(Icons.payments_outlined),
                   ),
                 ),
+                if (modalError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            modalError!,
+                            style: const TextStyle(
+                              color: AppColors.dangerDark,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () async {
-                      final amt = IdrCurrencyFormatter.parse(amtCtrl.text);
-                      if (amt <= 0 || descCtrl.text.trim().isEmpty) return;
-                      final chosenCatName = _expenseCategories
-                          .firstWhere(
-                            (c) => (c['id'] as num?)?.toInt() == selectedCatId,
-                            orElse: () => {'name': 'Operasional Toko'},
-                          )['name']
-                          .toString();
-                      Navigator.pop(ctx);
-                      try {
-                        if (_isLocalStandalone || !(await _connectivity.checkOnline())) {
-                          await _offlineDb.addLocalExpense(
-                            category: chosenCatName,
-                            amount: amt,
-                            description: descCtrl.text.trim(),
-                            paymentMethod: 'Tunai',
-                          );
-                          await _loadData();
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Biaya operasional dicatat secara lokal!')),
-                          );
-                          return;
-                        }
-                        await _api.dio.post(
-                          ApiEndpoints.expenses,
-                          data: {
-                            'category_id': selectedCatId,
-                            'amount': amt,
-                            'description': descCtrl.text.trim(),
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            final amt = IdrCurrencyFormatter.parse(amtCtrl.text);
+                            final desc = descCtrl.text.trim();
+                            if (amt <= 0 || desc.isEmpty) {
+                              setModalState(() => modalError = 'Lengkapi keterangan dan nominal (> 0).');
+                              return;
+                            }
+                            setModalState(() {
+                              isSaving = true;
+                              modalError = null;
+                            });
+                            final chosenCatName = _expenseCategories
+                                .firstWhere(
+                                  (c) => (c['id'] as num?)?.toInt() == selectedCatId,
+                                  orElse: () => {'name': 'Operasional Toko'},
+                                )['name']
+                                .toString();
+
+                            Future<void> saveOfflineExpenseAndFinish() async {
+                              await _offlineDb.addLocalExpense(
+                                category: chosenCatName,
+                                categoryId: selectedCatId,
+                                amount: amt,
+                                description: desc,
+                                paymentMethod: 'Tunai',
+                                localUuid: idempotencyKey,
+                                isSynced: false,
+                              );
+                              _refreshPosPendingBadge();
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              await _loadData();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor:
+                                      _isLocalStandalone ? AppColors.successDark : AppColors.warningDark,
+                                  content: Text(
+                                    _isLocalStandalone
+                                        ? 'Biaya operasional dicatat secara lokal!'
+                                        : 'Biaya disimpan offline & akan otomatis disinkronkan ke Cloud saat online.',
+                                  ),
+                                ),
+                              );
+                            }
+
+                            try {
+                              if (_isLocalStandalone || !(await _connectivity.checkOnline())) {
+                                await saveOfflineExpenseAndFinish();
+                                return;
+                              }
+                              await _api.dio.post(
+                                ApiEndpoints.expenses,
+                                data: {
+                                  'category_id': selectedCatId,
+                                  'amount': amt,
+                                  'description': desc,
+                                },
+                                options: Options(
+                                  headers: {
+                                    'X-Idempotency-Key': idempotencyKey,
+                                  },
+                                ),
+                              );
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              await _loadData();
+                            } catch (e) {
+                              if (ApiClient.isNetworkOfflineError(e)) {
+                                await saveOfflineExpenseAndFinish();
+                                return;
+                              }
+                              if (!ctx.mounted) return;
+                              setModalState(() {
+                                isSaving = false;
+                                modalError = ApiClient.extractErrorMessage(e);
+                              });
+                            }
                           },
-                        );
-                        await _loadData();
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                        );
-                      }
-                    },
-                    child: const Text('Simpan Biaya Operasional'),
+                    child: isSaving
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Simpan Biaya Operasional'),
                   ),
                 ),
               ],

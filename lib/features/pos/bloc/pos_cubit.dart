@@ -70,6 +70,7 @@ class PosState extends Equatable {
   final List<Map<String, dynamic>> expenseCategories;
   final List<Map<String, dynamic>> customerGroups;
   final List<Map<String, dynamic>> localSyncConflicts;
+  final List<Map<String, dynamic>> deadLetterItems;
   final int? activeHeldSaleId;
   final Map<String, dynamic>? exchangeSourceSale;
   final int offlinePendingCount;
@@ -110,6 +111,7 @@ class PosState extends Equatable {
     this.expenseCategories = const [],
     this.customerGroups = const [],
     this.localSyncConflicts = const [],
+    this.deadLetterItems = const [],
     this.activeHeldSaleId,
     this.exchangeSourceSale,
     this.offlinePendingCount = 0,
@@ -294,6 +296,7 @@ class PosState extends Equatable {
     List<Map<String, dynamic>>? expenseCategories,
     List<Map<String, dynamic>>? customerGroups,
     List<Map<String, dynamic>>? localSyncConflicts,
+    List<Map<String, dynamic>>? deadLetterItems,
     int? activeHeldSaleId,
     bool clearActiveHeldSaleId = false,
     Map<String, dynamic>? exchangeSourceSale,
@@ -336,6 +339,7 @@ class PosState extends Equatable {
       expenseCategories: expenseCategories ?? this.expenseCategories,
       customerGroups: customerGroups ?? this.customerGroups,
       localSyncConflicts: localSyncConflicts ?? this.localSyncConflicts,
+      deadLetterItems: deadLetterItems ?? this.deadLetterItems,
       activeHeldSaleId: clearActiveHeldSaleId ? null : (activeHeldSaleId ?? this.activeHeldSaleId),
       exchangeSourceSale: clearExchangeSourceSale ? null : (exchangeSourceSale ?? this.exchangeSourceSale),
       offlinePendingCount: offlinePendingCount ?? this.offlinePendingCount,
@@ -379,6 +383,7 @@ class PosState extends Equatable {
         expenseCategories,
         customerGroups,
         localSyncConflicts,
+        deadLetterItems,
         activeHeldSaleId,
         exchangeSourceSale,
         offlinePendingCount,
@@ -446,14 +451,83 @@ class PosCubit extends Cubit<PosState> {
     return parsed.isAvailable ? parsed : BusinessVertical.retail;
   }
 
+  static Map<String, dynamic> _serializeHeldEntry(Map<String, dynamic> held) {
+    final copy = Map<String, dynamic>.from(held);
+    final rawItems = copy['cart_items'];
+    if (rawItems is List<CartItemModel>) {
+      copy['cart_items'] = rawItems.map((c) => c.toJson()).toList();
+    } else if (rawItems is List) {
+      copy['cart_items'] = rawItems.map((e) {
+        if (e is CartItemModel) return e.toJson();
+        if (e is Map) return Map<String, dynamic>.from(e);
+        return e;
+      }).toList();
+    }
+    return copy;
+  }
+
+  static List<Map<String, dynamic>> _hydrateHeldCarts(
+    List<Map<String, dynamic>> rawList, {
+    List<ProductModel>? catalogProducts,
+  }) {
+    return rawList.map((raw) {
+      final copy = Map<String, dynamic>.from(raw);
+      final rawItems = copy['cart_items'];
+      if (rawItems is List<CartItemModel>) {
+        copy['cart_items'] = rawItems;
+      } else if (rawItems is List) {
+        final hydrated = <CartItemModel>[];
+        for (final item in rawItems) {
+          if (item is CartItemModel) {
+            hydrated.add(item);
+          } else if (item is Map) {
+            hydrated.add(
+              CartItemModel.fromJson(
+                Map<String, dynamic>.from(item),
+                catalogProducts: catalogProducts,
+              ),
+            );
+          }
+        }
+        copy['cart_items'] = hydrated;
+      } else {
+        copy['cart_items'] = <CartItemModel>[];
+      }
+      return copy;
+    }).toList();
+  }
+
   static PosState _buildInitialState(OfflineDatabase offlineDb) {
     final vertical = _resolveInitialVertical(offlineDb);
     final caps = VerticalConfig.getCapabilities(vertical);
+    final cachedProds = offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
     return PosState(
       currentVertical: vertical,
       posMode: vertical == BusinessVertical.restaurant ? 'restaurant' : 'retail',
       orderType: caps.hasDineInTakeawayOrderType ? 'dine_in' : 'retail',
+      heldCarts: _hydrateHeldCarts(offlineDb.getHeldSales(), catalogProducts: cachedProds),
+      deadLetterItems: offlineDb.getDeadLetterItems(),
+      localSyncConflicts: offlineDb.getOfflineSyncConflicts(),
     );
+  }
+
+  int _computePendingBadgeCount() => _isLocalStandalone
+      ? _offlineDb.getOfflineSalesQueue().length
+      : _offlineDb.totalOfflineQueueBadgeCount;
+
+  int _computePendingRetryCount() =>
+      _isLocalStandalone ? 0 : _offlineDb.totalPendingNonConflictSyncCount;
+
+  /// Refresh offline pending count, conflict & dead-letter badges after mutations
+  /// performed by other screens (e.g. DebtBookScreen receivable/expense or ShiftManagementScreen).
+  void refreshOfflinePendingState() {
+    if (isClosed) return;
+    emit(state.copyWith(
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
+    ));
+    _scheduleBackoffSyncIfNeeded();
   }
 
   @override
@@ -552,9 +626,11 @@ class PosCubit extends Cubit<PosState> {
       expenseCategories: _offlineDb.getCachedExpenseCategories(),
       customerGroups: _offlineDb.getCachedCustomerGroups(),
       cart: initialCart,
+      heldCarts: _hydrateHeldCarts(_offlineDb.getHeldSales(), catalogProducts: localProducts),
       salesHistory: localHistory,
       localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
     ));
 
     // Start reactive connectivity listener (Offline -> Online auto-drain & refresh)
@@ -587,20 +663,20 @@ class PosCubit extends Cubit<PosState> {
       _backoffAttempt = 0;
       emit(state.copyWith(isOnline: true));
 
-      if (transitionedFromOffline || _offlineDb.pendingNonConflictOfflineSalesCount > 0) {
+      if (transitionedFromOffline || _computePendingRetryCount() > 0) {
         await _triggerReactiveAutoSync();
       }
     });
   }
 
   /// Lightweight exponential-backoff retry timer (15s -> 30s -> 60s -> 120s) that runs ONLY
-  /// when unsynced non-conflict offline sales exist (cancels immediately when queue == 0).
+  /// when unsynced non-conflict offline items exist (cancels immediately when queue == 0).
   /// Guarantees automatic recovery when branch Wi-Fi stays up while ISP WAN drops and recovers.
   void _scheduleBackoffSyncIfNeeded() {
     _backoffRetryTimer?.cancel();
     _backoffRetryTimer = null;
     if (_isLocalStandalone || isClosed) return;
-    if (_offlineDb.pendingNonConflictOfflineSalesCount <= 0) {
+    if (_computePendingRetryCount() <= 0) {
       _backoffAttempt = 0;
       return;
     }
@@ -622,8 +698,8 @@ class PosCubit extends Cubit<PosState> {
 
   /// Non-blocking reactive background sync when internet returns:
   /// 1) Probe best tier (LAN Edge -> Cloud Master) if Edge URL configured
-  /// 2) Push local offline products first (remap temp negative IDs)
-  /// 3) Drain idempotent offline sales queue
+  /// 2) Push local offline products first (remap temp IDs)
+  /// 3) Drain idempotent offline queues (sales -> receivables -> expenses -> shift closures)
   /// 4) Refresh catalog & balances silently without blocking active cashier cart/UI
   Future<void> _triggerReactiveAutoSync() async {
     if (_isAutoSyncRunning || isClosed || _isLocalStandalone) return;
@@ -636,11 +712,11 @@ class PosCubit extends Cubit<PosState> {
       if (_apiClient.edgeDiscovery.getEdgeBaseUrl() != null) {
         await _apiClient.switchToBestEndpoint();
       }
-      await _syncPendingLocalProductsToCloud();
-      final synced = await _offlineDb.syncOfflineQueue(_apiClient);
+      final uploadedProducts = await _syncPendingLocalProductsToCloud();
+      final synced = uploadedProducts + await _offlineDb.syncOfflineQueue(_apiClient);
       if (synced > 0) {
         _backoffAttempt = 0;
-      } else if (_offlineDb.pendingNonConflictOfflineSalesCount > 0) {
+      } else if (_computePendingRetryCount() > 0) {
         _backoffAttempt = (_backoffAttempt + 1).clamp(0, 3);
       }
       await syncWithCloud(force: false, preserveActiveCart: true, silent: true);
@@ -653,7 +729,8 @@ class PosCubit extends Cubit<PosState> {
           isSyncingOfflineQueue: false,
           salesHistory: _offlineDb.getLocalSalesHistory(),
           localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-          offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+          deadLetterItems: _offlineDb.getDeadLetterItems(),
+          offlinePendingCount: _computePendingBadgeCount(),
         ));
         _scheduleBackoffSyncIfNeeded();
       }
@@ -740,6 +817,7 @@ class PosCubit extends Cubit<PosState> {
     if (_isLocalStandalone) {
       final resolvedVertical = _resolveInitialVertical(_offlineDb);
       final resolvedCaps = VerticalConfig.getCapabilities(resolvedVertical);
+      final localProds = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
       emit(state.copyWith(
         isLoading: false,
         isInitialRestoring: false,
@@ -751,7 +829,7 @@ class PosCubit extends Cubit<PosState> {
         orderType: resolvedCaps.hasDineInTakeawayOrderType
             ? (state.orderType == 'retail' ? 'dine_in' : state.orderType)
             : 'retail',
-        allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
+        allProducts: localProds,
         categories: _offlineDb.getCachedCategories(),
         customers: _offlineDb.getCachedCustomers(),
         suppliers: _offlineDb.getCachedSuppliers(),
@@ -761,9 +839,11 @@ class PosCubit extends Cubit<PosState> {
         returnReasons: _offlineDb.getCachedReturnReasons(),
         expenseCategories: _offlineDb.getCachedExpenseCategories(),
         customerGroups: _offlineDb.getCachedCustomerGroups(),
+        heldCarts: _hydrateHeldCarts(_offlineDb.getHeldSales(), catalogProducts: localProds),
         salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       return;
     }
@@ -780,7 +860,8 @@ class PosCubit extends Cubit<PosState> {
         clearInitialRestoreStep: true,
         isSyncingOfflineQueue: false,
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       _scheduleBackoffSyncIfNeeded();
       return;
@@ -811,7 +892,8 @@ class PosCubit extends Cubit<PosState> {
         productsFetchedFromServer = true;
         final stillPendingLocal = _offlineDb.getCachedProducts().where((p) {
           final id = (p['id'] as num?)?.toInt() ?? 0;
-          if (id >= 0 && p['is_local_only'] != true) return false;
+          final isLocalCandidate = id < 0 || p['is_local_only'] == true || id > 1000000000;
+          if (!isLocalCandidate) return false;
           final localSku = (p['sku'] ?? '').toString().trim().toLowerCase();
           if (localSku.isNotEmpty &&
               mapped.any((srv) => (srv['sku'] ?? '').toString().trim().toLowerCase() == localSku)) {
@@ -921,7 +1003,13 @@ class PosCubit extends Cubit<PosState> {
       final catalogProducts = productsFetchedFromServer
           ? products
           : _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
-      List<Map<String, dynamic>> mergedHeldCarts = force ? [] : state.heldCarts;
+      final persistedLocalHeld = _hydrateHeldCarts(
+        _offlineDb.getHeldSales(),
+        catalogProducts: catalogProducts,
+      );
+      List<Map<String, dynamic>> mergedHeldCarts = persistedLocalHeld.isNotEmpty
+          ? persistedLocalHeld
+          : (force ? [] : state.heldCarts);
       try {
         final heldRes = await _apiClient.dio.get(ApiEndpoints.heldSales);
         final rawHeld = heldRes.data['data'] as List<dynamic>?;
@@ -969,18 +1057,20 @@ class PosCubit extends Cubit<PosState> {
                   (map['subtotal'] as num?)?.toDouble() ??
                   0.0,
               'held_at': (map['sale_datetime'] ?? '').toString(),
+              'is_synced': 1,
               'cart_items': cartItems,
             });
           }
-          if (force) {
-            mergedHeldCarts = serverHeld;
-          } else {
-            final serverIds = serverHeld.map((e) => e['id']).toSet();
-            final localOnly = state.heldCarts
-                .where((l) => !serverIds.contains(l['id']))
-                .toList();
-            mergedHeldCarts = [...serverHeld, ...localOnly];
-          }
+          final serverIds = serverHeld.map((e) => e['id']).toSet();
+          final localSource = persistedLocalHeld.isNotEmpty ? persistedLocalHeld : state.heldCarts;
+          // Always preserve unsynced local-only held carts so offline parked orders are never lost!
+          final localOnly = localSource
+              .where((l) => !serverIds.contains(l['id']) && l['is_synced'] != 1)
+              .toList();
+          mergedHeldCarts = [...serverHeld, ...localOnly];
+          await _offlineDb.replaceHeldSales(
+            mergedHeldCarts.map(_serializeHeldEntry).toList(),
+          );
         }
       } catch (_) {}
 
@@ -1057,7 +1147,8 @@ class PosCubit extends Cubit<PosState> {
         paymentMethods: paymentMethods,
         returnReasons: returnReasons,
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
         cart: (force && !preserveActiveCart) ? [] : state.cart,
       ));
       _scheduleBackoffSyncIfNeeded();
@@ -1073,7 +1164,8 @@ class PosCubit extends Cubit<PosState> {
         initialRestoreProgress: 0.0,
         clearInitialRestoreStep: true,
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       _scheduleBackoffSyncIfNeeded();
     }
@@ -1182,6 +1274,7 @@ class PosCubit extends Cubit<PosState> {
   void deleteHeldCart(int index) {
     if (index < 0 || index >= state.heldCarts.length) return;
     final remaining = List<Map<String, dynamic>>.from(state.heldCarts)..removeAt(index);
+    unawaited(_offlineDb.replaceHeldSales(remaining.map(_serializeHeldEntry).toList()));
     emit(state.copyWith(heldCarts: remaining));
   }
 
@@ -1610,7 +1703,8 @@ class PosCubit extends Cubit<PosState> {
     }).toList();
   }
 
-  /// Hold / Park current cart with complete customer, table, metadata & discount context
+  /// Bug 2 Fix: Hold / Park current cart persistently into SQLite (`held_sales`) & SharedPreferences
+  /// so parked table/queue orders survive force-close, battery drain, or app restart.
   Future<void> holdCurrentCart(String label) async {
     if (state.cart.isEmpty) return;
     final itemsToHold = List<CartItemModel>.from(state.cart);
@@ -1628,8 +1722,12 @@ class PosCubit extends Cubit<PosState> {
       docType: 'hold',
       nodeCode: holdNodeCode,
     );
-    final heldEntry = {
-      'id': DateTime.now().millisecondsSinceEpoch,
+    final now = DateTime.now();
+    final heldUuid = _uuid.v4();
+    final heldId = now.microsecondsSinceEpoch;
+    final heldEntry = <String, dynamic>{
+      'id': heldId,
+      'local_uuid': heldUuid,
       'number': holdNumber,
       'held_label': resolvedLabel,
       'table_name': state.selectedTable?['name'],
@@ -1646,12 +1744,17 @@ class PosCubit extends Cubit<PosState> {
       if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
         'notes': state.orderNotes!.trim(),
       'subtotal': state.grandTotal,
-      'held_at': DateFormat('HH:mm').format(DateTime.now()),
+      'held_at': DateFormat('HH:mm').format(now),
+      'created_at': now.toIso8601String(),
+      'is_synced': 0,
       'cart_items': itemsToHold,
     };
 
     final heldCustomerId = state.selectedCustomer?['id'];
     final heldTableId = state.selectedTable?['id'];
+
+    // Persist immediately to SQLite `held_sales` BEFORE clearing active cart
+    await _offlineDb.saveHeldSale(_serializeHeldEntry(heldEntry));
 
     final updatedHeld = [heldEntry, ...state.heldCarts];
     emit(state.copyWith(
@@ -1671,30 +1774,67 @@ class PosCubit extends Cubit<PosState> {
     if (!_isLocalStandalone && state.isOnline) {
       unawaited(() async {
         try {
-          await _apiClient.dio.post(ApiEndpoints.holdCart, data: {
-            'held_label': heldEntry['held_label'],
-            if (heldEntry['notes'] != null) 'notes': heldEntry['notes'],
-            if (heldCustomerId != null) 'customer_id': heldCustomerId,
-            if (heldTableId != null) 'table_id': heldTableId,
-            'items': itemsToHold
-                .map((c) => {
-                      'product_id': c.product.id,
-                      'variant_id': c.variant?.id,
-                      'quantity': c.quantity,
-                      'unit_price': c.unitPrice,
-                    })
-                .toList(),
-          });
+          final res = await _apiClient.dio.post(
+            ApiEndpoints.holdCart,
+            options: Options(headers: {'X-Idempotency-Key': heldUuid}),
+            data: {
+              'held_label': heldEntry['held_label'],
+              if (heldEntry['notes'] != null) 'notes': heldEntry['notes'],
+              if (heldCustomerId != null) 'customer_id': heldCustomerId,
+              if (heldTableId != null) 'table_id': heldTableId,
+              'items': itemsToHold
+                  .map((c) => {
+                        'product_id': c.product.id,
+                        'variant_id': c.variant?.id,
+                        'quantity': c.quantity,
+                        'unit_price': c.unitPrice,
+                      })
+                  .toList(),
+            },
+          );
+          final srvId = ((res.data is Map ? res.data['data'] : null) is Map)
+              ? (res.data['data']['id'] as num?)?.toInt()
+              : null;
+          if (!isClosed) {
+            final nextHeld = state.heldCarts.map((h) {
+              if (h['local_uuid']?.toString() != heldUuid) return h;
+              return {
+                ...h,
+                if (srvId != null && srvId > 0) 'server_id': srvId,
+                'is_synced': 1,
+              };
+            }).toList();
+            await _offlineDb.replaceHeldSales(nextHeld.map(_serializeHeldEntry).toList());
+            if (!isClosed) {
+              emit(state.copyWith(heldCarts: nextHeld));
+            }
+          }
         } catch (_) {}
       }());
     }
   }
 
-  /// B.1: Resume a held cart without destroying an active non-empty cart (auto-parks it instead)
+  /// Alias for [resumeHeldCart] for ergonomic recall of persisted held bills.
+  void recallHeldSale(int index, {bool autoParkActiveCart = true}) =>
+      resumeHeldCart(index, autoParkActiveCart: autoParkActiveCart);
+
+  /// B.1 & Bug 2 Fix: Resume a persisted held cart from SQLite without destroying
+  /// an active non-empty cart (auto-parks it persistently instead).
   void resumeHeldCart(int index, {bool autoParkActiveCart = true}) {
     if (index < 0 || index >= state.heldCarts.length) return;
     final held = state.heldCarts[index];
-    final items = List<CartItemModel>.from(held['cart_items'] as List<CartItemModel>? ?? []);
+    final rawItems = held['cart_items'];
+    final items = rawItems is List<CartItemModel>
+        ? List<CartItemModel>.from(rawItems)
+        : (rawItems is List
+            ? rawItems
+                .whereType<Map>()
+                .map((m) => CartItemModel.fromJson(
+                      Map<String, dynamic>.from(m),
+                      catalogProducts: state.allProducts,
+                    ))
+                .toList()
+            : <CartItemModel>[]);
     final notes = held['notes']?.toString();
     final heldId = (held['id'] as num?)?.toInt();
     final restoredCustomer =
@@ -1712,13 +1852,15 @@ class PosCubit extends Cubit<PosState> {
     final remainingHeld = List<Map<String, dynamic>>.from(state.heldCarts)..removeAt(index);
 
     if (autoParkActiveCart && state.cart.isNotEmpty) {
+      final now = DateTime.now();
       final activeItems = List<CartItemModel>.from(state.cart);
       final autoLabel = state.selectedCustomer?['name']?.toString() ??
           state.selectedTable?['name']?.toString() ??
-          'Antrean Aktif (${DateFormat('HH:mm').format(DateTime.now())})';
+          'Antrean Aktif (${DateFormat('HH:mm').format(now)})';
       remainingHeld.insert(0, {
-        'id': DateTime.now().millisecondsSinceEpoch,
-        'number': 'HOLD-${DateTime.now().minute}${DateTime.now().second.toString().padLeft(2, '0')}',
+        'id': now.microsecondsSinceEpoch,
+        'local_uuid': _uuid.v4(),
+        'number': 'HOLD-${now.minute}${now.second.toString().padLeft(2, '0')}',
         'held_label': autoLabel,
         'table_name': state.selectedTable?['name'],
         'selected_table': state.selectedTable,
@@ -1734,10 +1876,15 @@ class PosCubit extends Cubit<PosState> {
         if (state.orderNotes != null && state.orderNotes!.trim().isNotEmpty)
           'notes': state.orderNotes!.trim(),
         'subtotal': state.grandTotal,
-        'held_at': DateFormat('HH:mm').format(DateTime.now()),
+        'held_at': DateFormat('HH:mm').format(now),
+        'created_at': now.toIso8601String(),
+        'is_synced': 0,
         'cart_items': activeItems,
       });
     }
+
+    // Persist updated held bills list to SQLite + SharedPreferences
+    unawaited(_offlineDb.replaceHeldSales(remainingHeld.map(_serializeHeldEntry).toList()));
 
     emit(state.copyWith(
       cart: items,
@@ -2234,6 +2381,8 @@ class PosCubit extends Cubit<PosState> {
       }
     }
 
+    Map<String, dynamic>? pendingOfflineSaleApiBody;
+
     // Step 2: Submit Checkout when there are replacement / normal sale items
     if (positiveItemMaps.isNotEmpty) {
       final apiPayments = List<Map<String, dynamic>>.from(payments);
@@ -2287,8 +2436,7 @@ class PosCubit extends Cubit<PosState> {
       if (_isLocalStandalone || !hasLiveNetwork) {
         checkoutSyncedOnline = false;
         apiBody['synced_from_offline'] = true;
-        await _offlineDb.enqueueOfflineSale(apiBody);
-        _scheduleBackoffSyncIfNeeded();
+        pendingOfflineSaleApiBody = apiBody;
       } else {
         try {
           final res = await _apiClient.dio.post(
@@ -2326,15 +2474,15 @@ class PosCubit extends Cubit<PosState> {
           }
           checkoutSyncedOnline = false;
           apiBody['synced_from_offline'] = true;
-          await _offlineDb.enqueueOfflineSale(apiBody);
-          _scheduleBackoffSyncIfNeeded();
+          pendingOfflineSaleApiBody = apiBody;
         }
       }
     }
 
-    // Adjust local stock atomically ONLY after server accepted OR true offline fallback succeeded
+    // Prepare atomic ACID batch: offline sale queue + sales history + stock deduction +
+    // stock movements + customer balance + cash-in ledger/open shift + held sale cleanup.
     final stockUpdates = <int, double>{};
-    final movementWrites = <Future<void>>[];
+    final stockMovements = <Map<String, dynamic>>[];
     final updatedProducts = state.allProducts.map((p) {
       if (p.isServiceOrNonStockItem) return p;
       final soldBaseQty = positiveLines
@@ -2347,17 +2495,19 @@ class PosCubit extends Cubit<PosState> {
       if (netDelta.abs() > 0.0001) {
         final newStock = (p.stock + netDelta).clamp(0.0, double.infinity);
         stockUpdates[p.id] = newStock;
-        movementWrites.add(_offlineDb.recordLocalStockMovement(
-          productId: p.id,
-          productName: p.name,
-          sku: p.sku,
-          unitCode: p.unitCode,
-          type: netDelta < 0 ? 'sale' : 'return',
-          quantityDelta: netDelta,
-          quantityAfter: newStock,
-          unitCost: p.costPrice,
-          notes: 'Nota ${receiptPayload['number'] ?? invoiceNo}',
-        ));
+        stockMovements.add({
+          'id': '${nowTs.microsecondsSinceEpoch}-${p.id}',
+          'product_id': p.id,
+          'product_name': p.name,
+          'sku': p.sku,
+          'unit_code': p.unitCode,
+          'type': netDelta < 0 ? 'sale' : 'return',
+          'quantity_delta': netDelta,
+          'quantity_after': newStock,
+          'unit_cost': p.costPrice,
+          'notes': 'Nota ${receiptPayload['number'] ?? invoiceNo}',
+          'created_at': nowIso,
+        });
         return ProductModel.fromJson({
           ...p.toJson(),
           'stock': newStock,
@@ -2367,17 +2517,7 @@ class PosCubit extends Cubit<PosState> {
       return p;
     }).toList();
 
-    if (stockUpdates.isNotEmpty) {
-      await _offlineDb.batchUpdateLocalProductStocks(stockUpdates);
-    }
-    if (movementWrites.isNotEmpty) {
-      await Future.wait(movementWrites);
-    }
-
     receiptPayload['is_offline_pending'] = !checkoutSyncedOnline;
-
-    await _offlineDb.saveSaleToLocalHistory(receiptPayload);
-    final updatedHistory = _offlineDb.getLocalSalesHistory();
 
     final remainingCart = isPartialSplit
         ? [
@@ -2389,6 +2529,7 @@ class PosCubit extends Cubit<PosState> {
     // Sync local customer deposit / kasbon balances so offline checkout + void remain consistent
     List<Map<String, dynamic>> nextCustomers = state.customers;
     Map<String, dynamic>? nextSelectedCustomer = state.selectedCustomer;
+    Map<String, dynamic>? updatedCustomerMap;
     final checkoutCustomerId = (state.selectedCustomer?['id'] as num?)?.toInt();
     if (checkoutCustomerId != null &&
         checkoutCustomerId > 0 &&
@@ -2401,14 +2542,60 @@ class PosCubit extends Cubit<PosState> {
         updatedCust['store_credit_balance'] =
             (curDeposit - storeCreditAmount).clamp(0.0, double.infinity).roundToDouble();
         updatedCust['outstanding_balance'] = (curDebt + balanceDue).roundToDouble();
+        updatedCustomerMap = updatedCust;
         return updatedCust;
       }).toList();
-      await _offlineDb.cacheCustomers(nextCustomers);
       nextSelectedCustomer = nextCustomers.firstWhere(
         (c) => (c['id'] as num?)?.toInt() == checkoutCustomerId,
         orElse: () => nextSelectedCustomer!,
       );
     }
+
+    // Compute net cash received for atomic cash-in ledger & open shift tracking
+    double cashPaidGross = 0.0;
+    for (final p in payments) {
+      final methodId = (p['payment_method_id'] as num?)?.toInt();
+      final matched = state.paymentMethods
+          .where((m) => (m['id'] as num?)?.toInt() == methodId)
+          .firstOrNull;
+      final methodType = (matched?['type'] ?? '').toString().toLowerCase();
+      final methodName = (p['method_name'] ??
+              p['payment_method_name'] ??
+              matched?['name'] ??
+              '')
+          .toString()
+          .toLowerCase();
+      if (methodType == 'cash' ||
+          methodName.contains('tunai') ||
+          methodName.contains('cash')) {
+        cashPaidGross += (p['amount'] as num?)?.toDouble() ?? 0.0;
+      }
+    }
+    final double netCashIn =
+        cashPaidGross > 0 ? (cashPaidGross - changeReturned).clamp(0.0, double.infinity) : 0.0;
+
+    // Single ACID SQLite transaction — prevents stock deduction without saved receipt on crash!
+    await _offlineDb.commitOfflineCheckoutAtomic(
+      offlineSaleApiBody: pendingOfflineSaleApiBody,
+      receiptPayload: receiptPayload,
+      stockUpdates: stockUpdates,
+      stockMovements: stockMovements,
+      updatedCustomers: updatedCustomerMap != null ? nextCustomers : null,
+      updatedCustomer: updatedCustomerMap,
+      netCashIn: netCashIn,
+      completedHeldSaleId: effectiveHeldSaleId,
+    );
+
+    if (pendingOfflineSaleApiBody != null) {
+      _scheduleBackoffSyncIfNeeded();
+    }
+
+    final updatedHistory = _offlineDb.getLocalSalesHistory();
+    final updatedHeldCarts = (effectiveHeldSaleId != null && effectiveHeldSaleId != 0)
+        ? state.heldCarts
+            .where((h) => (h['id'] as num?)?.toInt() != effectiveHeldSaleId)
+            .toList()
+        : state.heldCarts;
 
     await PosFeedback.onCheckoutSuccess();
 
@@ -2418,6 +2605,7 @@ class PosCubit extends Cubit<PosState> {
       customers: nextCustomers,
       selectedCustomer: nextSelectedCustomer,
       cart: remainingCart,
+      heldCarts: updatedHeldCarts,
       cartDiscountAmount: remainingCart.isEmpty ? 0 : state.cartDiscountAmount,
       managerDiscountApproved: remainingCart.isEmpty ? false : state.managerDiscountApproved,
       redeemedLoyaltyPoints: remainingCart.isEmpty ? 0 : state.redeemedLoyaltyPoints,
@@ -2428,7 +2616,8 @@ class PosCubit extends Cubit<PosState> {
       clearVerticalMetadata: remainingCart.isEmpty,
       salesHistory: updatedHistory,
       localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
     ));
 
     return receiptPayload;
@@ -2653,51 +2842,126 @@ class PosCubit extends Cubit<PosState> {
   Future<int> _syncPendingLocalProductsToCloud({Map<int, int>? externalIdMap}) async {
     if (_isLocalStandalone) return 0;
     final cached = _offlineDb.getCachedProducts();
-    final pending = cached
-        .where((p) => ((p['id'] as num?)?.toInt() ?? 0) < 0 || p['is_local_only'] == true)
-        .toList();
+    final pending = cached.where((p) {
+      final id = (p['id'] as num?)?.toInt() ?? 0;
+      final status = (p['sync_status'] ?? 'pending').toString();
+      if (status == 'dead_letter') return false;
+      return id < 0 || p['is_local_only'] == true || id > 1000000000;
+    }).toList();
     if (pending.isEmpty) return 0;
 
     final productIdMap = <int, int>{};
+    final deadLetterProductIds = <int>{};
     int uploaded = 0;
+
     for (final p in pending) {
       final localId = (p['id'] as num?)?.toInt() ?? 0;
+      String idempotencyKey = (p['local_uuid'] ?? '').toString().trim();
+      if (idempotencyKey.isEmpty) {
+        idempotencyKey = const Uuid().v4();
+        final stamped = Map<String, dynamic>.from(p)
+          ..['local_uuid'] = idempotencyKey
+          ..['is_local_only'] = true;
+        await _offlineDb.addOrUpdateLocalProduct(stamped);
+      }
+
+      final payload = _buildProductCreatePayload(
+        name: (p['name'] ?? 'Produk').toString(),
+        sku: (p['sku'] ?? '').toString(),
+        barcode: (p['barcode'] ?? '').toString(),
+        sellingPrice: (p['selling_price'] as num?)?.toDouble() ?? 0.0,
+        costPrice: (p['cost_price'] as num?)?.toDouble() ?? 0.0,
+        initialStock: (p['stock'] as num?)?.toDouble() ?? 0.0,
+        categoryId: (p['category_id'] as num?)?.toInt(),
+        brandId: (p['brand_id'] as num?)?.toInt(),
+        unitId: (p['unit_id'] as num?)?.toInt(),
+        reorderLevel: (p['reorder_level'] as num?)?.toDouble() ?? 5.0,
+        trackStock: p['track_stock'] != false,
+        shelfLocation: p['shelf_location']?.toString(),
+        type: p['type']?.toString(),
+        soldByWeight: p['sold_by_weight'] == true,
+      );
+
       try {
         final res = await _apiClient.dio.post(
           ApiEndpoints.products,
-          data: _buildProductCreatePayload(
-            name: (p['name'] ?? 'Produk').toString(),
-            sku: (p['sku'] ?? '').toString(),
-            barcode: (p['barcode'] ?? '').toString(),
-            sellingPrice: (p['selling_price'] as num?)?.toDouble() ?? 0.0,
-            costPrice: (p['cost_price'] as num?)?.toDouble() ?? 0.0,
-            initialStock: (p['stock'] as num?)?.toDouble() ?? 0.0,
-            categoryId: (p['category_id'] as num?)?.toInt(),
-            brandId: (p['brand_id'] as num?)?.toInt(),
-            unitId: (p['unit_id'] as num?)?.toInt(),
-            reorderLevel: (p['reorder_level'] as num?)?.toDouble() ?? 5.0,
-            trackStock: p['track_stock'] != false,
-            shelfLocation: p['shelf_location']?.toString(),
-            type: p['type']?.toString(),
-            soldByWeight: p['sold_by_weight'] == true,
+          data: payload,
+          options: Options(
+            headers: {
+              'X-Idempotency-Key': idempotencyKey,
+            },
           ),
         );
-        final serverId = ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
+        final serverId =
+            ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
         if (serverId != null && localId != 0) {
           productIdMap[localId] = serverId;
           externalIdMap?[localId] = serverId;
         }
         uploaded++;
+      } on DioException catch (e) {
+        final status = e.response?.statusCode ?? 0;
+        if (status == 400 || status == 403 || status == 404 || status == 409 || status == 422) {
+          // Quarantine permanently rejected product to Dead-Letter Queue without blocking others
+          deadLetterProductIds.add(localId);
+          final data = e.response?.data;
+          final errCode = (data is Map && data['error_code'] != null)
+              ? data['error_code'].toString()
+              : 'HTTP_$status';
+          await _offlineDb.enqueueDeadLetterItem(
+            id: idempotencyKey,
+            entityType: 'product',
+            endpoint: ApiEndpoints.products,
+            idempotencyKey: idempotencyKey,
+            referenceLabel: 'Produk Baru "${p['name'] ?? 'Tanpa Nama'}"',
+            payload: {
+              ...payload,
+              '_local_product_id': localId,
+            },
+            httpStatus: status,
+            errorCode: errCode,
+            errorMessage: ApiClient.extractErrorMessage(e),
+            retryCount: 1,
+          );
+        } else if (ApiClient.isNetworkOfflineError(e) || status == 401) {
+          break;
+        }
       } catch (_) {}
     }
 
-    if (productIdMap.isNotEmpty) {
-      await _offlineDb.remapOfflineSalesIds(productIdMap, const <int, int>{});
-      final remaining = _offlineDb.getCachedProducts().where((p) {
-        final id = (p['id'] as num?)?.toInt() ?? 0;
-        return !productIdMap.containsKey(id);
-      }).toList();
-      await _offlineDb.cacheProducts(remaining);
+    if (productIdMap.isNotEmpty || deadLetterProductIds.isNotEmpty) {
+      if (productIdMap.isNotEmpty) {
+        await _offlineDb.remapOfflineSalesIds(productIdMap, const <int, int>{});
+        await _offlineDb.remapHeldSalesProductIds(productIdMap);
+      }
+
+      final current = _offlineDb.getCachedProducts();
+      final existingIds = current
+          .map((p) => (p['id'] as num?)?.toInt() ?? 0)
+          .where((id) => !productIdMap.containsKey(id))
+          .toSet();
+
+      final updatedList = <Map<String, dynamic>>[];
+      for (final raw in current) {
+        final item = Map<String, dynamic>.from(raw);
+        final id = (item['id'] as num?)?.toInt() ?? 0;
+        if (productIdMap.containsKey(id)) {
+          final serverId = productIdMap[id]!;
+          if (!existingIds.contains(serverId)) {
+            item['id'] = serverId;
+            item['is_local_only'] = false;
+            item.remove('sync_status');
+            updatedList.add(item);
+            existingIds.add(serverId);
+          }
+        } else if (deadLetterProductIds.contains(id)) {
+          item['sync_status'] = 'dead_letter';
+          updatedList.add(item);
+        } else {
+          updatedList.add(item);
+        }
+      }
+      await _offlineDb.cacheProducts(updatedList);
     }
     return uploaded;
   }
@@ -2708,7 +2972,12 @@ class PosCubit extends Cubit<PosState> {
     bool isNew = false,
     String notes = 'Stock Opname via OXO.ID Mobile POS',
   }) async {
-    final bool isBrandNew = isNew || product.id <= 0 || product.id > 1000000000;
+    final bool isBrandNew =
+        isNew || product.isLocalOnly || product.id <= 0 || product.id > 1000000000;
+    final String localUuid =
+        (product.localUuid != null && product.localUuid!.trim().isNotEmpty)
+            ? product.localUuid!.trim()
+            : const Uuid().v4();
 
     if (!_isLocalStandalone) {
       try {
@@ -2731,11 +3000,18 @@ class PosCubit extends Cubit<PosState> {
               type: product.type,
               soldByWeight: product.soldByWeight,
             ),
+            options: Options(
+              headers: {
+                'X-Idempotency-Key': localUuid,
+              },
+            ),
           );
-          final serverId = ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
-          if (product.id < 0) {
-            if (serverId != null) {
+          final serverId =
+              ((res.data is Map ? (res.data['data'] as Map?) : null)?['id'] as num?)?.toInt();
+          if (product.id < 0 || product.isLocalOnly || product.id > 1000000000) {
+            if (serverId != null && product.id != 0) {
               await _offlineDb.remapOfflineSalesIds({product.id: serverId}, const <int, int>{});
+              await _offlineDb.remapHeldSalesProductIds({product.id: serverId});
             }
             final remaining = _offlineDb.getCachedProducts().where((p) {
               return ((p['id'] as num?)?.toInt() ?? 0) != product.id;
@@ -2790,6 +3066,7 @@ class PosCubit extends Cubit<PosState> {
     final map = <String, dynamic>{
       ...product.toJson(),
       'id': localId,
+      'local_uuid': localUuid,
       if (isBrandNew || localId < 0) 'is_local_only': true,
     };
     await _offlineDb.addOrUpdateLocalProduct(map);
@@ -2810,7 +3087,14 @@ class PosCubit extends Cubit<PosState> {
       }
     }
     final updated = _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList();
-    emit(state.copyWith(allProducts: updated));
+    emit(state.copyWith(
+      allProducts: updated,
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
+    ));
+    if (!_isLocalStandalone) {
+      _scheduleBackoffSyncIfNeeded();
+    }
     return (ok: true, syncedToCloud: false, errorMessage: null);
   }
 
@@ -3011,9 +3295,16 @@ class PosCubit extends Cubit<PosState> {
     // 3. Migrate local-only products & map old negative IDs -> new server IDs
     uploadedProducts = await _syncPendingLocalProductsToCloud(externalIdMap: productIdMap);
 
-    // 4. Remap IDs inside offline sales queue & push to Cloud
+    // 4. Remap IDs inside offline sales & held sales, then push sales + receivables + expenses + shift closures
     await _offlineDb.remapOfflineSalesIds(productIdMap, customerIdMap);
+    await _offlineDb.remapHeldSalesProductIds(productIdMap);
+    final pendingReceivablesBefore = _offlineDb.pendingReceivablePaymentsCount;
+    final pendingExpensesBefore = _offlineDb.pendingLocalExpensesCount;
     syncedSales = await _offlineDb.syncOfflineQueue(_apiClient);
+    final syncedReceivables =
+        (pendingReceivablesBefore - _offlineDb.pendingReceivablePaymentsCount).clamp(0, pendingReceivablesBefore);
+    final syncedExpenses =
+        (pendingExpensesBefore - _offlineDb.pendingLocalExpensesCount).clamp(0, pendingExpensesBefore);
 
     final cachedAuth = _offlineDb.getCachedAuthSession();
     final sub = (cachedAuth?['tenant_subdomain'] ?? '').toString().trim().toLowerCase();
@@ -3029,7 +3320,45 @@ class PosCubit extends Cubit<PosState> {
       'customers': uploadedCustomers,
       'suppliers': uploadedSuppliers,
       'sales': syncedSales,
+      'receivables': syncedReceivables,
+      'expenses': syncedExpenses,
     };
+  }
+
+  /// Retry a quarantined Dead-Letter Queue item (optionally supplying override fields
+  /// such as `variance_reason` for a shift closure or adjusted SKU for a product).
+  Future<({bool success, String? errorMessage})> retryDeadLetterItem(
+    String id, {
+    Map<String, dynamic>? payloadOverrides,
+  }) async {
+    final result = await _offlineDb.retryDeadLetterItem(
+      id,
+      _apiClient,
+      payloadOverrides: payloadOverrides,
+    );
+    if (result.success) {
+      await syncWithCloud(force: false, preserveActiveCart: true, silent: true);
+    }
+    emit(state.copyWith(
+      allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
+      salesHistory: _offlineDb.getLocalSalesHistory(),
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
+    ));
+    return result;
+  }
+
+  /// Discard a permanently rejected Dead-Letter Queue item cleanly.
+  Future<void> discardDeadLetterItem(String id) async {
+    await _offlineDb.discardDeadLetterItem(id);
+    emit(state.copyWith(
+      allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
+      salesHistory: _offlineDb.getLocalSalesHistory(),
+      localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
+    ));
   }
 
   /// Retry syncing a non-stock offline conflict (e.g., ShiftRequired after opening a cashier shift).
@@ -3041,7 +3370,8 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(
       salesHistory: _offlineDb.getLocalSalesHistory(),
       localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
     ));
     return ok;
   }
@@ -3065,7 +3395,8 @@ class PosCubit extends Cubit<PosState> {
     emit(state.copyWith(
       salesHistory: _offlineDb.getLocalSalesHistory(),
       localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-      offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+      deadLetterItems: _offlineDb.getDeadLetterItems(),
+      offlinePendingCount: _computePendingBadgeCount(),
     ));
     return ok;
   }
@@ -3096,19 +3427,22 @@ class PosCubit extends Cubit<PosState> {
     }
   }
 
-  /// Sync pending offline transactions manually (FIFO: local products -> offline sales -> refresh)
+  /// Sync pending offline transactions manually in strict FIFO dependency order:
+  /// (1) Local new products -> (2) Offline sales -> (3) Receivable payments ->
+  /// (4) Petty cash expenses -> (5) Shift closures -> (6) Catalog refresh
   Future<int> syncOfflineTransactions() async {
     if (_isLocalStandalone) {
       emit(state.copyWith(
         isSyncingOfflineQueue: false,
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       return 0;
     }
     emit(state.copyWith(isSyncingOfflineQueue: true));
     try {
-      await _syncPendingLocalProductsToCloud();
+      final uploadedProducts = await _syncPendingLocalProductsToCloud();
       final synced = await _offlineDb.syncOfflineQueue(_apiClient);
       final online = await _connectivityService.checkOnline();
       if (online) {
@@ -3117,18 +3451,21 @@ class PosCubit extends Cubit<PosState> {
       emit(state.copyWith(
         isOnline: online,
         isSyncingOfflineQueue: false,
+        allProducts: _offlineDb.getCachedProducts().map(ProductModel.fromJson).toList(),
         salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       _scheduleBackoffSyncIfNeeded();
-      return synced;
+      return uploadedProducts + synced;
     } catch (_) {
       emit(state.copyWith(
         isSyncingOfflineQueue: false,
         salesHistory: _offlineDb.getLocalSalesHistory(),
         localSyncConflicts: _offlineDb.getOfflineSyncConflicts(),
-        offlinePendingCount: _offlineDb.getOfflineSalesQueue().length,
+        deadLetterItems: _offlineDb.getDeadLetterItems(),
+        offlinePendingCount: _computePendingBadgeCount(),
       ));
       _scheduleBackoffSyncIfNeeded();
       return 0;

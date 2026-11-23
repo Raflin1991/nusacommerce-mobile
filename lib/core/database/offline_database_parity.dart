@@ -176,6 +176,7 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
   Future<void> deleteLocalExpense(int id) async {
     final list = _readPrefsList(OfflineDatabase._keyLocalExpenses);
     list.removeWhere((e) => (e['id'] as num?)?.toInt() == id);
+    await _sqlite.deleteLocalExpense(id);
     await _prefs.setString(OfflineDatabase._keyLocalExpenses, jsonEncode(list));
   }
 
@@ -185,10 +186,11 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
     if (idx >= 0) {
       final item = Map<String, dynamic>.from(list[idx]);
       item['category_name'] = category;
-      item['category'] = {'id': 1, 'name': category};
+      item['category'] = {'id': item['category_id'] ?? 1, 'name': category};
       item['amount'] = amount;
       item['description'] = description;
       list[idx] = item;
+      await _sqlite.upsertLocalExpense(item);
       await _prefs.setString(OfflineDatabase._keyLocalExpenses, jsonEncode(list));
     }
   }

@@ -7,6 +7,7 @@ import '../network/api_client.dart';
 import 'sqlite_database.dart';
 
 part 'offline_database_parity.dart';
+part 'offline_database_sync_queues.dart';
 
 /// Offline-First Local Database Engine backed by indexed SQLite (`nusacommerce_local.db`)
 /// with seamless SharedPreferences fallback & automatic one-time migration.
@@ -48,14 +49,25 @@ class OfflineDatabase {
   static const String _keyLocalCustomerDepositLogs = 'nusa_local_deposit_logs_v4';
   static const String _keyCachedPaymentMethods = 'nusa_local_payment_methods_v4';
   static const String _keyNumberingFormats = 'nusa_numbering_formats_v1';
+  static const String _keyHeldSales = 'nusa_local_held_sales_v5';
+  static const String _keyPendingReceivablePayments = 'nusa_pending_receivable_payments_v5';
+  static const String _keyCachedCloudReceivables = 'nusa_cached_cloud_receivables_v5';
+  static const String _keyPendingShiftClosures = 'nusa_pending_shift_closures_v5';
+  static const String _keyDeadLetterQueue = 'nusa_dead_letter_queue_v5';
 
   List<Map<String, dynamic>>? _memProducts;
   List<Map<String, dynamic>>? _memCustomers;
   List<Map<String, dynamic>>? _memSuppliers;
   List<Map<String, dynamic>>? _memOfflineSales;
+  List<Map<String, dynamic>>? _memHeldSales;
+  List<Map<String, dynamic>>? _memPendingReceivablePayments;
+  List<Map<String, dynamic>>? _memPendingShiftClosures;
+  List<Map<String, dynamic>>? _memDeadLetterQueue;
   Future<int>? _activeQueueSyncFuture;
 
   OfflineDatabase(this._prefs);
+
+  SharedPreferences get prefs => _prefs;
 
   /// Initialize SQLite engine and migrate legacy SharedPreferences data once.
   Future<void> initialize() async {
@@ -101,6 +113,18 @@ class OfflineDatabase {
 
         final sqlOfflineSales = await _sqlite.getUnsyncedOfflineSales();
         if (sqlOfflineSales.isNotEmpty) _memOfflineSales = sqlOfflineSales;
+
+        final sqlHeldSales = await _sqlite.getAllHeldSales();
+        if (sqlHeldSales.isNotEmpty) _memHeldSales = sqlHeldSales;
+
+        final sqlRecPayments = await _sqlite.getUnsyncedReceivablePayments();
+        if (sqlRecPayments.isNotEmpty) _memPendingReceivablePayments = sqlRecPayments;
+
+        final sqlShiftClosures = await _sqlite.getUnsyncedShiftClosures();
+        if (sqlShiftClosures.isNotEmpty) _memPendingShiftClosures = sqlShiftClosures;
+
+        final sqlDeadLetters = await _sqlite.getQuarantinedDeadLetters();
+        if (sqlDeadLetters.isNotEmpty) _memDeadLetterQueue = sqlDeadLetters;
       }
     } catch (_) {
       // Safe fallback to SharedPreferences cache
@@ -181,9 +205,11 @@ class OfflineDatabase {
     final cachedProducts = getCachedProducts();
     final bool hasForeignProducts;
     if (normalized.startsWith('local-trial')) {
-      hasForeignProducts = cachedProducts.any(
-        (p) => p['is_local_only'] != true && ((p['id'] as num?)?.toInt() ?? 0) > 0,
-      );
+      hasForeignProducts = current != normalized &&
+          cachedProducts.any((p) {
+            final id = (p['id'] as num?)?.toInt() ?? 0;
+            return p['is_local_only'] != true && id > 0 && id < 1000000000;
+          });
     } else if (normalized.startsWith('cloud:')) {
       hasForeignProducts = (current == null || current != normalized) &&
           cachedProducts.any(
@@ -204,6 +230,10 @@ class OfflineDatabase {
     _memCustomers = [];
     _memSuppliers = [];
     _memOfflineSales = [];
+    _memHeldSales = [];
+    _memPendingReceivablePayments = [];
+    _memPendingShiftClosures = [];
+    _memDeadLetterQueue = [];
     await _sqlite.clearAll();
     await _prefs.remove(_keyActiveTenantIdentity);
     await _prefs.remove(_keyBusinessVerticalMode);
@@ -235,6 +265,19 @@ class OfflineDatabase {
     await _prefs.remove(_keyCachedPaymentMethods);
     await _prefs.remove(_keyNumberingFormats);
     await _prefs.remove(_keyLastCloudSyncAt);
+    await _prefs.remove(_keyHeldSales);
+    await _prefs.remove(_keyPendingReceivablePayments);
+    await _prefs.remove(_keyCachedCloudReceivables);
+    await _prefs.remove(_keyPendingShiftClosures);
+    await _prefs.remove(_keyDeadLetterQueue);
+  }
+
+  /// Explicit Factory Reset: permanently clears ALL local SQLite tables, SharedPreferences
+  /// store data, held bills, sync queues, and active session.
+  /// MUST ONLY be triggered when the user explicitly confirms "Reset Pabrik / Hapus Seluruh Database".
+  Future<void> factoryResetAll() async {
+    await clearTenantCache();
+    await clearAuthSession();
   }
 
   // ===========================================================================
@@ -464,7 +507,6 @@ class OfflineDatabase {
     if (queue.isEmpty) {
       queue = getOfflineSalesQueue();
     }
-    if (queue.isEmpty) return 0;
 
     final remaining = <Map<String, dynamic>>[];
     int syncedCount = 0;
@@ -475,7 +517,8 @@ class OfflineDatabase {
 
       // Do not automatically retry sales already flagged as compliance/validation conflict;
       // await owner/manager manual reconciliation.
-      if (payload['sync_status'] == 'sync_conflict') {
+      if (payload['sync_status'] == 'sync_conflict' ||
+          payload['sync_status'] == 'dead_letter') {
         remaining.add(payload);
         continue;
       }
@@ -485,6 +528,7 @@ class OfflineDatabase {
         ..remove('conflict_code')
         ..remove('conflict_reason')
         ..remove('conflict_detected_at')
+        ..remove('retry_count')
         ..['synced_from_offline'] = true;
       final nodeCode = (sendPayload['origin_node_code'] ??
               _prefs.getString('nusa_mobile_node_code') ??
@@ -505,12 +549,25 @@ class OfflineDatabase {
           ),
         );
         syncedCount++;
+        final respMap =
+            response.data is Map ? Map<String, dynamic>.from(response.data as Map) : null;
         if (id.isNotEmpty) {
           await _sqlite.markOfflineSaleSynced(id);
-          await _markLocalSaleHistorySynced(
-            id,
-            response.data is Map ? Map<String, dynamic>.from(response.data as Map) : null,
-          );
+          await _markLocalSaleHistorySynced(id, respMap);
+
+          // Remap any offline receivable payments targeting this newly synced credit sale!
+          final serverData = respMap?['data'] is Map
+              ? Map<String, dynamic>.from(respMap!['data'] as Map)
+              : null;
+          final newCloudSaleId = (serverData?['id'] as num?)?.toInt();
+          if (newCloudSaleId != null && newCloudSaleId > 0) {
+            final localSaleId = (payload['id'] as num?)?.toInt();
+            await remapPendingReceivableSaleId(
+              saleLocalUuid: id,
+              oldSaleId: localSaleId,
+              newCloudSaleId: newCloudSaleId,
+            );
+          }
         }
       } on DioException catch (e) {
         final statusCode = e.response?.statusCode;
@@ -519,6 +576,8 @@ class OfflineDatabase {
         final message = (data is Map ? data['message'] : null)?.toString() ??
             ApiClient.extractErrorMessage(e);
         final msgLower = message.toLowerCase();
+        final nextRetries = ((payload['retry_count'] as num?)?.toInt() ?? 0) + 1;
+        payload['retry_count'] = nextRetries;
 
         final isInsufficientStock = statusCode == 422 &&
             (errorCode == 'InsufficientStock' ||
@@ -527,12 +586,15 @@ class OfflineDatabase {
                 msgLower.contains('stok') ||
                 msgLower.contains('insufficient stock'));
 
-        final isRejectedBusinessRule = !ApiClient.isNetworkOfflineError(e) &&
+        final isOfflineErr = ApiClient.isNetworkOfflineError(e);
+        final isRejectedBusinessRule = !isOfflineErr &&
             statusCode != null &&
             (statusCode == 400 ||
                 statusCode == 403 ||
+                statusCode == 404 ||
                 statusCode == 409 ||
                 statusCode == 422);
+        final exceededTransientLimit = !isOfflineErr && nextRetries >= 5;
 
         if (isInsufficientStock) {
           payload['sync_status'] = 'sync_conflict';
@@ -542,14 +604,29 @@ class OfflineDatabase {
           if (id.isNotEmpty) {
             await _sqlite.updateOfflineSalePayload(id, payload, isSynced: 0);
           }
-        } else if (isRejectedBusinessRule) {
+        } else if (isRejectedBusinessRule || exceededTransientLimit) {
           payload['sync_status'] = 'sync_conflict';
-          payload['conflict_code'] = errorCode.isNotEmpty ? errorCode : 'ValidationError';
+          payload['conflict_code'] =
+              errorCode.isNotEmpty ? errorCode : (exceededTransientLimit ? 'ServerRetryExceeded' : 'ValidationError');
           payload['conflict_reason'] = message;
           payload['conflict_detected_at'] = DateTime.now().toIso8601String();
           if (id.isNotEmpty) {
             await _sqlite.updateOfflineSalePayload(id, payload, isSynced: 0);
+            await enqueueDeadLetterItem(
+              id: id,
+              entityType: 'sale',
+              endpoint: ApiEndpoints.checkout,
+              idempotencyKey: id,
+              referenceLabel: 'Nota Offline ${payload['number'] ?? id}',
+              payload: sendPayload,
+              httpStatus: statusCode,
+              errorCode: payload['conflict_code'].toString(),
+              errorMessage: message,
+              retryCount: nextRetries,
+            );
           }
+        } else if (id.isNotEmpty) {
+          await _sqlite.updateOfflineSalePayload(id, payload, isSynced: 0);
         }
         remaining.add(payload);
       } catch (_) {
@@ -557,8 +634,19 @@ class OfflineDatabase {
       }
     }
 
-    _memOfflineSales = remaining;
-    await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(remaining));
+    if (queue.isNotEmpty || (_memOfflineSales?.isNotEmpty ?? false)) {
+      _memOfflineSales = remaining;
+      await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(remaining));
+    }
+
+    // Strict FIFO Dependency Order after offline sales:
+    // 1) Offline Receivable Payments (Bug 3) -> POST /api/v1/debts/receivables/{saleId}/pay
+    syncedCount += await syncPendingReceivablePayments(apiClient);
+    // 2) Offline Petty-Cash Expenses (Bug 5) -> POST /api/v1/expenses
+    syncedCount += await syncPendingLocalExpenses(apiClient);
+    // 3) Offline Shift Closures (Bug 6) -> POST /api/v1/shifts/close (MUST run AFTER shift's sales)
+    syncedCount += await syncPendingShiftClosures(apiClient);
+
     return syncedCount;
   }
 
@@ -816,30 +904,44 @@ class OfflineDatabase {
   // ===========================================================================
   // 6. STORE PROFILE & PAIRED BLUETOOTH PRINTER (NAME + MAC ADDRESS)
   // ===========================================================================
-  Map<String, dynamic> getStoreProfile() {
+  /// Returns the explicitly saved store profile or `null` if no store has been configured yet.
+  Map<String, dynamic>? getSavedStoreProfile() {
     final raw = _prefs.getString(_keyStoreProfile);
-    if (raw == null || raw.isEmpty) {
-      return {
-        'name': 'OXO.ID POS',
-        'branch': 'Toko Utama',
-        'address': '-',
-        'phone': '-',
-        'receipt_footer': 'Terima kasih atas kunjungan Anda!',
-        'paper_size': '58mm',
-      };
-    }
+    if (raw == null || raw.isEmpty) return null;
     try {
-      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final map = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final name = (map['name'] ?? '').toString().trim();
+      if (name.isEmpty) return null;
+      return map;
     } catch (_) {
-      return {
-        'name': 'OXO.ID POS',
-        'branch': 'Toko Utama',
-        'address': '-',
-        'phone': '-',
-        'receipt_footer': 'Terima kasih atas kunjungan Anda!',
-        'paper_size': '58mm',
-      };
+      return null;
     }
+  }
+
+  bool get hasSavedStoreProfile => getSavedStoreProfile() != null;
+
+  /// True when an Offline Standalone store was previously created on this device
+  /// and its SQLite + SharedPreferences data persists safely across logouts.
+  bool get hasExistingStandaloneStore {
+    final saved = getSavedStoreProfile();
+    if (saved == null) return false;
+    final identity = getActiveTenantIdentity() ?? '';
+    if (identity.startsWith('local-trial')) return true;
+    if (saved['is_standalone'] == true) return true;
+    return false;
+  }
+
+  Map<String, dynamic> getStoreProfile() {
+    final saved = getSavedStoreProfile();
+    if (saved != null) return saved;
+    return {
+      'name': 'OXO.ID POS',
+      'branch': 'Toko Utama',
+      'address': '-',
+      'phone': '-',
+      'receipt_footer': 'Terima kasih atas kunjungan Anda!',
+      'paper_size': '58mm',
+    };
   }
 
   Future<void> saveStoreProfile(Map<String, dynamic> profile) async {
@@ -883,9 +985,10 @@ class OfflineDatabase {
     bool forceReseed = false,
   }) async {
     final existing = getCachedProducts();
-    final hasLeakedCloudProducts = existing.any(
-      (p) => p['is_local_only'] != true && ((p['id'] as num?)?.toInt() ?? 0) > 0,
-    );
+    final hasLeakedCloudProducts = existing.any((p) {
+      final id = (p['id'] as num?)?.toInt() ?? 0;
+      return p['is_local_only'] != true && id > 0 && id < 1000000000;
+    });
     if (!forceReseed && existing.isNotEmpty && !hasLeakedCloudProducts) {
       return existing;
     }
@@ -1804,68 +1907,221 @@ class OfflineDatabase {
     required int saleId,
     required double amount,
     String paymentMethod = 'Tunai',
+    int paymentMethodId = 1,
+    String? saleLocalUuid,
+    String? invoiceNumber,
+    String? customerName,
+    int? customerId,
+    String? reference,
     String? notes,
+    bool enqueueForCloudSync = true,
+    String? idempotencyKey,
   }) async {
     if (amount <= 0) return null;
     final history = getLocalSalesHistory();
     final idx = history.indexWhere((s) => (s['id'] as num?)?.toInt() == saleId);
-    if (idx < 0) return null;
 
-    final sale = Map<String, dynamic>.from(history[idx]);
-    final currentBalance = (sale['balance_due'] as num?)?.toDouble() ?? 0.0;
-    final currentPaid = (sale['paid_total'] as num?)?.toDouble() ?? 0.0;
-    final applied = amount > currentBalance ? currentBalance : amount;
-    final nextBalance = (currentBalance - applied).clamp(0.0, double.infinity);
+    Map<String, dynamic>? updatedSale;
+    String resolvedInvoiceNo = invoiceNumber ?? 'BON-$saleId';
+    String? resolvedSaleUuid = saleLocalUuid;
+    String resolvedCustomerName = customerName ?? 'Pelanggan Umum';
+    int? resolvedCustId = customerId;
+    double applied = amount;
+    double nextBalance = 0.0;
+    String paymentStatus = 'paid';
 
-    sale['paid_total'] = currentPaid + applied;
-    sale['balance_due'] = nextBalance;
-    sale['payment_status'] = nextBalance <= 0.5 ? 'paid' : 'partial';
+    if (idx >= 0) {
+      final sale = Map<String, dynamic>.from(history[idx]);
+      final currentBalance = (sale['balance_due'] as num?)?.toDouble() ?? 0.0;
+      final currentPaid = (sale['paid_total'] as num?)?.toDouble() ?? 0.0;
+      applied = currentBalance > 0 && amount > currentBalance ? currentBalance : amount;
+      nextBalance = (currentBalance - applied).clamp(0.0, double.infinity);
 
-    final payments = (sale['payments'] as List<dynamic>? ?? [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    payments.add({
-      'payment_method_name': paymentMethod,
-      'method_name': paymentMethod,
-      'amount': applied,
-      'notes': notes,
-      'paid_at': DateTime.now().toIso8601String(),
-    });
-    sale['payments'] = payments;
+      sale['paid_total'] = currentPaid + applied;
+      sale['balance_due'] = nextBalance;
+      paymentStatus = nextBalance <= 0.5 ? 'paid' : 'partial';
+      sale['payment_status'] = paymentStatus;
 
-    history[idx] = sale;
-    await _prefs.setString(_keyCompletedSalesHistory, jsonEncode(history));
+      final payments = (sale['payments'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      payments.add({
+        'payment_method_id': paymentMethodId,
+        'payment_method_name': paymentMethod,
+        'method_name': paymentMethod,
+        'amount': applied,
+        'notes': notes,
+        'paid_at': DateTime.now().toIso8601String(),
+      });
+      sale['payments'] = payments;
 
-    // Sync customer outstanding balance
-    final customerMap = sale['customer'] is Map ? Map<String, dynamic>.from(sale['customer'] as Map) : null;
-    final custId = (customerMap?['id'] as num?)?.toInt();
-    if (custId != null && custId != 0) {
+      history[idx] = sale;
+      updatedSale = sale;
+      resolvedInvoiceNo = (sale['number'] ?? resolvedInvoiceNo).toString();
+      resolvedSaleUuid ??= sale['local_uuid']?.toString();
+      final customerMap =
+          sale['customer'] is Map ? Map<String, dynamic>.from(sale['customer'] as Map) : null;
+      resolvedCustId ??= (customerMap?['id'] as num?)?.toInt();
+      if (customerMap?['name'] != null) {
+        resolvedCustomerName = customerMap!['name'].toString();
+      }
+    } else {
+      // Also update cached Cloud receivables when settling a Cloud invoice while offline!
+      final cachedRecs = getCachedCloudReceivables();
+      final rIdx = cachedRecs.indexWhere(
+        (r) =>
+            (r['sale_id'] as num?)?.toInt() == saleId ||
+            (r['id'] as num?)?.toInt() == saleId,
+      );
+      if (rIdx >= 0) {
+        final rec = Map<String, dynamic>.from(cachedRecs[rIdx]);
+        final currentBalance = (rec['balance_due'] as num?)?.toDouble() ?? amount;
+        final currentPaid = (rec['paid_total'] as num?)?.toDouble() ?? 0.0;
+        applied = currentBalance > 0 && amount > currentBalance ? currentBalance : amount;
+        nextBalance = (currentBalance - applied).clamp(0.0, double.infinity);
+        rec['paid_total'] = currentPaid + applied;
+        rec['balance_due'] = nextBalance;
+        paymentStatus = nextBalance <= 0.5 ? 'paid' : 'partial';
+        cachedRecs[rIdx] = rec;
+        await cacheCloudReceivables(cachedRecs);
+        resolvedInvoiceNo = (rec['number'] ?? rec['invoice_number'] ?? resolvedInvoiceNo).toString();
+        final cMap = rec['customer'] is Map ? Map<String, dynamic>.from(rec['customer'] as Map) : null;
+        resolvedCustId ??= (cMap?['id'] as num?)?.toInt() ?? (rec['customer_id'] as num?)?.toInt();
+        resolvedCustomerName = (cMap?['name'] ?? rec['customer_name'] ?? resolvedCustomerName).toString();
+      } else if (!enqueueForCloudSync) {
+        return null;
+      }
+    }
+
+    // Prepare customer balance update
+    Map<String, dynamic>? updatedCust;
+    if (resolvedCustId != null && resolvedCustId != 0) {
       final customers = getCachedCustomers();
-      final cIdx = customers.indexWhere((c) => (c['id'] as num?)?.toInt() == custId);
+      final cIdx = customers.indexWhere((c) => (c['id'] as num?)?.toInt() == resolvedCustId);
       if (cIdx >= 0) {
         final nextCust = Map<String, dynamic>.from(customers[cIdx]);
         final prevDebt = (nextCust['outstanding_balance'] as num?)?.toDouble() ?? 0.0;
         nextCust['outstanding_balance'] = (prevDebt - applied).clamp(0.0, double.infinity);
-        await addOrUpdateLocalCustomer(nextCust);
+        updatedCust = nextCust;
       }
     }
 
-    // Record cash-in on active local shift when paid in Cash/Tunai
+    // Prepare cash-in entry on active local shift when paid in Cash/Tunai
     final methodLower = paymentMethod.toLowerCase();
-    if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
-      await addLocalShiftCashEntry(
-        type: 'pay_in',
-        amount: applied,
-        reason: 'Pelunasan Kasbon ${sale['number'] ?? saleId}',
-      );
+    final isCashMethod = methodLower.contains('tunai') || methodLower.contains('cash');
+    final nowIso = DateTime.now().toIso8601String();
+    final paymentUuid = (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
+        ? idempotencyKey.trim()
+        : _uuid.v4();
+
+    Map<String, dynamic>? pendingPaymentRecord;
+    if (enqueueForCloudSync) {
+      pendingPaymentRecord = <String, dynamic>{
+        'id': paymentUuid,
+        'local_uuid': paymentUuid,
+        'sale_id': saleId,
+        if (resolvedSaleUuid != null && resolvedSaleUuid.isNotEmpty)
+          'sale_local_uuid': resolvedSaleUuid,
+        'invoice_number': resolvedInvoiceNo,
+        'customer_name': resolvedCustomerName,
+        'payment_method_id': paymentMethodId > 0 ? paymentMethodId : 1,
+        'payment_method_name': paymentMethod,
+        'amount': applied,
+        'reference': (reference != null && reference.trim().isNotEmpty)
+            ? reference.trim()
+            : paymentUuid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        'created_at': nowIso,
+        'sync_status': 'pending',
+        'retry_count': 0,
+        'is_synced': 0,
+      };
+    }
+
+    Map<String, dynamic>? cashLedgerEntry;
+    if (applied > 0) {
+      cashLedgerEntry = <String, dynamic>{
+        'id': 'rec-$paymentUuid',
+        'title': 'Pelunasan Kasbon $resolvedInvoiceNo ($resolvedCustomerName)',
+        'category': 'Pelunasan Piutang',
+        'direction': 'in',
+        'channel': isCashMethod ? 'cash' : 'non_cash',
+        'method_name': paymentMethod,
+        'amount': applied,
+        'notes': notes,
+        'occurred_at': nowIso,
+      };
+    }
+
+    Map<String, dynamic>? updatedShift;
+    List<Map<String, dynamic>>? updatedShiftsList;
+    if (isCashMethod) {
+      final shifts = getLocalShiftsHistory();
+      final sIdx = shifts.indexWhere((s) => (s['status'] ?? '').toString().toLowerCase() == 'open');
+      if (sIdx >= 0) {
+        final shift = Map<String, dynamic>.from(shifts[sIdx]);
+        final entries = (shift['entries'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        entries.insert(0, {
+          'id': DateTime.now().millisecondsSinceEpoch,
+          'type': 'pay_in',
+          'amount': applied,
+          'reason': 'Pelunasan Kasbon $resolvedInvoiceNo',
+          'created_at': nowIso,
+        });
+        shift['entries'] = entries;
+        shift['cash_in'] = ((shift['cash_in'] as num?)?.toDouble() ?? 0.0) + applied;
+        updatedShift = _enrichShiftTotals(shift);
+        shifts[sIdx] = updatedShift;
+        updatedShiftsList = shifts;
+      }
+    }
+
+    // ACID SQLite transaction wrapping pending payment + sale history + customer + shift + cash ledger
+    await _sqlite.commitReceivablePaymentAtomic(
+      pendingPayment: pendingPaymentRecord,
+      updatedSaleHistory: updatedSale,
+      updatedCustomer: updatedCust,
+      updatedShift: updatedShift,
+      cashLedgerEntry: cashLedgerEntry,
+    );
+
+    // Update SharedPreferences & in-memory mirrors after SQLite commit succeeds
+    if (updatedSale != null) {
+      await _prefs.setString(_keyCompletedSalesHistory, jsonEncode(history));
+    }
+    if (updatedCust != null) {
+      final customers = getCachedCustomers();
+      final cIdx = customers.indexWhere((c) => c['id'] == updatedCust!['id']);
+      if (cIdx >= 0) {
+        customers[cIdx] = updatedCust;
+      } else {
+        customers.insert(0, updatedCust);
+      }
+      _memCustomers = customers;
+      await _prefs.setString(_keyCachedCustomers, jsonEncode(customers));
+    }
+    if (updatedShiftsList != null) {
+      await _saveLocalShifts(updatedShiftsList);
+    }
+    if (pendingPaymentRecord != null) {
+      final queue = getPendingReceivablePayments();
+      queue.removeWhere((e) => e['id']?.toString() == paymentUuid);
+      queue.add(pendingPaymentRecord);
+      _memPendingReceivablePayments = queue;
+      await _prefs.setString(_keyPendingReceivablePayments, jsonEncode(queue));
     }
 
     return {
+      'id': paymentUuid,
+      'local_uuid': paymentUuid,
       'sale_id': saleId,
-      'invoice_number': sale['number'],
+      'invoice_number': resolvedInvoiceNo,
       'amount_paid': applied,
       'remaining_balance': nextBalance,
-      'payment_status': sale['payment_status'],
+      'payment_status': paymentStatus,
+      'queued_for_sync': pendingPaymentRecord != null,
     };
   }
 
@@ -2036,38 +2292,77 @@ class OfflineDatabase {
 
   Future<Map<String, dynamic>> addLocalExpense({
     required String category,
+    int? categoryId,
     required double amount,
     required String description,
     String paymentMethod = 'Tunai',
+    int? paymentMethodId,
     String? recordedBy,
+    String? localUuid,
+    bool isSynced = false,
   }) async {
     final now = DateTime.now();
+    final nowIso = now.toIso8601String();
     final catName = category.trim().isEmpty ? 'Operasional Toko' : category.trim();
+    final resolvedUuid =
+        (localUuid != null && localUuid.trim().isNotEmpty) ? localUuid.trim() : _uuid.v4();
     final record = <String, dynamic>{
       'id': now.millisecondsSinceEpoch,
+      'local_uuid': resolvedUuid,
+      if (categoryId != null && categoryId > 0) 'category_id': categoryId,
       'category_name': catName,
-      'category': {'id': 1, 'name': catName},
+      'category': {'id': categoryId ?? 1, 'name': catName},
       'amount': amount,
       'description': description.trim(),
+      if (paymentMethodId != null && paymentMethodId > 0) 'payment_method_id': paymentMethodId,
       'payment_method': paymentMethod,
       'recorded_by': recordedBy ?? 'Pemilik',
-      'expense_date': now.toIso8601String().split('T').first,
-      'created_at': now.toIso8601String(),
+      'expense_date': nowIso.split('T').first,
+      'created_at': nowIso,
       'is_local': true,
+      'is_synced': isSynced ? 1 : 0,
+      'sync_status': isSynced ? 'synced' : 'pending',
+      'retry_count': 0,
     };
+
+    // Prepare shift cash-out update atomically if paid in Cash/Tunai
+    final methodLower = paymentMethod.toLowerCase();
+    Map<String, dynamic>? updatedShift;
+    List<Map<String, dynamic>>? updatedShiftsList;
+    if (methodLower.contains('tunai') || methodLower.contains('cash')) {
+      final shifts = getLocalShiftsHistory();
+      final sIdx = shifts.indexWhere((s) => (s['status'] ?? '').toString().toLowerCase() == 'open');
+      if (sIdx >= 0) {
+        final shift = Map<String, dynamic>.from(shifts[sIdx]);
+        final entries = (shift['entries'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        entries.insert(0, {
+          'id': DateTime.now().millisecondsSinceEpoch,
+          'type': 'pay_out',
+          'amount': amount,
+          'reason': 'Biaya $catName: ${record['description']}',
+          'created_at': nowIso,
+        });
+        shift['entries'] = entries;
+        shift['cash_out'] = ((shift['cash_out'] as num?)?.toDouble() ?? 0.0) + amount;
+        updatedShift = _enrichShiftTotals(shift);
+        shifts[sIdx] = updatedShift;
+        updatedShiftsList = shifts;
+      }
+    }
+
+    // ACID SQLite transaction for expense + shift cash-out
+    await _sqlite.commitExpenseAtomic(
+      expense: record,
+      updatedShift: updatedShift,
+    );
 
     final list = _readPrefsList(_keyLocalExpenses);
     list.insert(0, record);
     await _prefs.setString(_keyLocalExpenses, jsonEncode(list));
-    await _sqlite.upsertLocalExpense(record);
-
-    final methodLower = paymentMethod.toLowerCase();
-    if ((methodLower.contains('tunai') || methodLower.contains('cash')) && getCurrentLocalShift() != null) {
-      await addLocalShiftCashEntry(
-        type: 'pay_out',
-        amount: amount,
-        reason: 'Biaya $catName: ${record['description']}',
-      );
+    if (updatedShiftsList != null) {
+      await _saveLocalShifts(updatedShiftsList);
     }
     return record;
   }

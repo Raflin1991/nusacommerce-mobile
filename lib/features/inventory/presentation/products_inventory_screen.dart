@@ -478,8 +478,9 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                               .where((b) => (b['id'] as num?)?.toInt() == selectedBrandId)
                               .firstOrNull;
 
+                          final isCreatingNew = existing == null;
                           final updated = ProductModel(
-                            id: existing?.id ?? DateTime.now().millisecondsSinceEpoch,
+                            id: existing?.id ?? -DateTime.now().millisecondsSinceEpoch,
                             name: name,
                             sku: skuCtrl.text.trim(),
                             barcode: barcodeCtrl.text.trim().isNotEmpty
@@ -503,6 +504,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                             imageUrl: existing?.imageUrl,
                             variants: existing?.variants ?? const [],
                             batches: existing?.batches ?? const [],
+                            isLocalOnly: existing?.isLocalOnly ?? isCreatingNew,
+                            localUuid: existing?.localUuid,
                           );
 
                           setModalState(() {
