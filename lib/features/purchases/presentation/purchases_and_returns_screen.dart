@@ -617,6 +617,28 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
   }
 
   void _openReturnPurchaseModal(Map<String, dynamic> purchase) {
+    final status = (purchase['status'] ?? '').toString().toLowerCase();
+    final isDraft = status == 'draft' || status == 'submitted' || status == 'approved';
+    if (isDraft) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.danger,
+          content: Text('PO ${purchase['number'] ?? '-'} masih berstatus draf/pesanan. Barang belum diterima secara fisik di toko sehingga belum dapat diretur.'),
+        ),
+      );
+      return;
+    }
+
+    if (purchase['is_fully_returned'] == true || purchase['is_returnable'] == false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.warning,
+          content: Text('Seluruh barang pada PO ${purchase['number'] ?? '-'} sudah habis diretur sebelumnya.'),
+        ),
+      );
+      return;
+    }
+
     final items = (purchase['items'] as List<dynamic>? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -626,10 +648,30 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
       );
       return;
     }
+
+    final Map<int, double> maxReturnableQtys = {};
+    final Map<int, double> returnQtys = {};
+    for (int i = 0; i < items.length; i++) {
+      final it = items[i];
+      final origQty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+      final recQty = (it['received_quantity'] as num?)?.toDouble() ?? origQty;
+      final retQty = (it['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+      final maxRem = (it['returnable_quantity'] as num?)?.toDouble() ?? (recQty - retQty).clamp(0.0, double.infinity);
+      maxReturnableQtys[i] = maxRem;
+      returnQtys[i] = maxRem > 0 ? maxRem : 0.0;
+    }
+
+    if (maxReturnableQtys.values.every((v) => v <= 0.0001)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.warning,
+          content: Text('Seluruh barang pada PO ${purchase['number'] ?? '-'} sudah habis diretur sebelumnya.'),
+        ),
+      );
+      return;
+    }
+
     final notesCtrl = TextEditingController(text: 'Barang rusak / tidak sesuai pesanan');
-    final Map<int, double> returnQtys = {
-      for (int i = 0; i < items.length; i++) i: (items[i]['quantity'] as num?)?.toDouble() ?? 1.0,
-    };
     bool returning = false;
     String? returnModalError;
 
@@ -657,27 +699,72 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
               const SizedBox(height: 10),
               ...List.generate(items.length, (i) {
                 final it = items[i];
-                final maxQty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+                final maxQty = maxReturnableQtys[i] ?? 0.0;
                 final curQty = returnQtys[i] ?? 0.0;
+                final origQty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+                final alreadyRet = (it['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+                final isExhausted = maxQty <= 0.0001;
+
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(it['product_name']?.toString() ?? 'Produk')),
-                      IconButton(
-                        onPressed: curQty > 0
-                            ? () => setModal(() => returnQtys[i] = (curQty - 1).clamp(0, maxQty))
-                            : null,
-                        icon: const Icon(Icons.remove_circle_outline),
-                      ),
-                      Text(IdrCurrencyFormatter.formatQty(curQty)),
-                      IconButton(
-                        onPressed: curQty < maxQty
-                            ? () => setModal(() => returnQtys[i] = (curQty + 1).clamp(0, maxQty))
-                            : null,
-                        icon: const Icon(Icons.add_circle_outline),
-                      ),
-                    ],
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isExhausted ? AppColors.slate100 : AppColors.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                it['product_name']?.toString() ?? 'Produk',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: isExhausted ? AppColors.slate400 : AppColors.navyDark,
+                                ),
+                              ),
+                            ),
+                            if (isExhausted)
+                              const NusaBadge(label: 'Habis Diretur', variant: NusaBadgeVariant.neutral)
+                            else
+                              Text(
+                                'Sisa retur: ${IdrCurrencyFormatter.formatQty(maxQty)}',
+                                style: const TextStyle(fontSize: 11.5, color: AppColors.primary, fontWeight: FontWeight.w600),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Dipesan: ${IdrCurrencyFormatter.formatQty(origQty)} • Sudah Diretur: ${IdrCurrencyFormatter.formatQty(alreadyRet)}',
+                          style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                        ),
+                        if (!isExhausted) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              IconButton(
+                                onPressed: curQty > 0
+                                    ? () => setModal(() => returnQtys[i] = (curQty - 1).clamp(0, maxQty))
+                                    : null,
+                                icon: const Icon(Icons.remove_circle_outline),
+                              ),
+                              Text(IdrCurrencyFormatter.formatQty(curQty), style: const TextStyle(fontWeight: FontWeight.w700)),
+                              IconButton(
+                                onPressed: curQty < maxQty
+                                    ? () => setModal(() => returnQtys[i] = (curQty + 1).clamp(0, maxQty))
+                                    : null,
+                                icon: const Icon(Icons.add_circle_outline),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 );
               }),
@@ -730,6 +817,11 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                         final selectedLines = <Map<String, dynamic>>[];
                         for (int i = 0; i < items.length; i++) {
                           final q = returnQtys[i] ?? 0.0;
+                          final maxAllowed = maxReturnableQtys[i] ?? 0.0;
+                          if (q > maxAllowed + 0.0001) {
+                            setModal(() => returnModalError = 'Jumlah retur untuk ${items[i]['product_name']} ($q unit) melebihi batas sisa yang dapat diretur ($maxAllowed unit).');
+                            return;
+                          }
                           if (q > 0) {
                             selectedLines.add({
                               ...items[i],
@@ -798,6 +890,89 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     );
   }
 
+  Future<void> _confirmReceivePurchase(Map<String, dynamic> po) async {
+    final poNumber = (po['number'] ?? po['purchase_number'] ?? '-').toString();
+    final purchaseId = (po['id'] as num?)?.toInt() ?? 0;
+    final supplierName = (po['supplier_name'] ?? 'Pemasok').toString();
+    final total = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.inventory_rounded, color: AppColors.primary),
+            SizedBox(width: 10),
+            Text('Terima Barang (GRN)', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        content: Text(
+          'Konfirmasi bahwa fisik barang pesanan $poNumber dari $supplierName senilai ${IdrCurrencyFormatter.format(total)} telah tiba dan selesai diperiksa di toko?\n\n'
+          'Stok produk akan bertambah ke sistem dan status dokumen berubah menjadi Diterima.',
+          style: const TextStyle(fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ya, Terima Barang'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _loading = true);
+    try {
+      final isOnline = !_isLocalStandalone && (await _connectivity.checkOnline());
+      bool cloudSuccess = false;
+
+      if (isOnline && purchaseId > 0 && po['is_local'] != true) {
+        try {
+          await _api.dio.post(ApiEndpoints.receivePurchase(purchaseId));
+          cloudSuccess = true;
+        } catch (e) {
+          if (!ApiClient.isNetworkOfflineError(e)) {
+            final errMsg = ApiClient.extractErrorMessage(e);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(backgroundColor: AppColors.danger, content: Text(errMsg)),
+              );
+            }
+            setState(() => _loading = false);
+            return;
+          }
+        }
+      }
+
+      if (!cloudSuccess) {
+        await _offlineDb.receiveLocalPurchase(purchaseId: purchaseId, poNumber: poNumber);
+      }
+
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.success,
+            content: Text('Penerimaan fisik barang $poNumber berhasil dikonfirmasi! Stok toko telah bertambah.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: AppColors.danger, content: Text(e.toString())),
+        );
+      }
+      setState(() => _loading = false);
+    }
+  }
+
   void _openPurchaseDetailModal(Map<String, dynamic> po) {
     final tokens = NusaThemeTokens.of(context);
     final total = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
@@ -810,6 +985,30 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     final dueDate = (po['due_date'] ?? '').toString().split('T').first;
     final invoiceNumber = (po['supplier_invoice_number'] ?? '').toString();
     final notes = (po['notes'] ?? '').toString();
+    final status = (po['status'] ?? '').toString().toLowerCase();
+    final isDraft = status == 'draft' || status == 'submitted' || status == 'approved';
+    final isReceived = status == 'received' || status == 'partially_received' || status == 'partially_paid' || status == 'paid';
+    final isFullyReturned = po['is_fully_returned'] == true || (isReceived && ((po['total_returnable_qty'] as num?)?.toDouble() ?? 1.0) <= 0.0001 && po['is_returnable'] == false);
+
+    String detailBadgeLabel;
+    NusaBadgeVariant detailBadgeVariant;
+    if (isDraft) {
+      detailBadgeLabel = status == 'draft' ? 'DRAF PO (BELUM DITERIMA)' : 'DIPESAN (MENUNGGU KIRIM)';
+      detailBadgeVariant = NusaBadgeVariant.neutral;
+    } else if (status == 'cancelled') {
+      detailBadgeLabel = 'DIBATALKAN';
+      detailBadgeVariant = NusaBadgeVariant.danger;
+    } else if (isFullyReturned) {
+      detailBadgeLabel = 'SEMUA BARANG DIRETUR';
+      detailBadgeVariant = NusaBadgeVariant.neutral;
+    } else if (isTempo) {
+      detailBadgeLabel = 'TEMPO / HUTANG';
+      detailBadgeVariant = NusaBadgeVariant.warning;
+    } else {
+      detailBadgeLabel = 'DITERIMA • LUNAS';
+      detailBadgeVariant = NusaBadgeVariant.success;
+    }
+
     final items = (po['items'] as List<dynamic>? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -862,8 +1061,8 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     ),
                   ),
                   NusaBadge(
-                    label: isTempo ? 'TEMPO / HUTANG' : 'LUNAS',
-                    variant: isTempo ? NusaBadgeVariant.warning : NusaBadgeVariant.success,
+                    label: detailBadgeLabel,
+                    variant: detailBadgeVariant,
                   ),
                 ],
               ),
@@ -872,12 +1071,16 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isTempo ? AppColors.warningSoft : AppColors.successSoft,
+                  color: isDraft
+                      ? tokens.bgPage
+                      : (isTempo ? AppColors.warningSoft : AppColors.successSoft),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: isTempo
-                        ? AppColors.warning.withOpacity(0.3)
-                        : AppColors.success.withOpacity(0.3),
+                    color: isDraft
+                        ? tokens.borderDefault
+                        : (isTempo
+                            ? AppColors.warning.withOpacity(0.3)
+                            : AppColors.success.withOpacity(0.3)),
                   ),
                 ),
                 child: Column(
@@ -912,19 +1115,27 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          isTempo ? 'Sisa Hutang Tempo' : 'Status Pelunasan',
+                          isDraft
+                              ? 'Status Tagihan'
+                              : (isTempo ? 'Sisa Hutang Tempo' : 'Status Pelunasan'),
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
-                            color: isTempo ? AppColors.danger : AppColors.success,
+                            color: isDraft
+                                ? tokens.textSecondary
+                                : (isTempo ? AppColors.danger : AppColors.success),
                           ),
                         ),
                         Text(
-                          isTempo ? IdrCurrencyFormatter.format(balance) : 'LUNAS',
+                          isDraft
+                              ? 'Belum Ditagihkan (Draft)'
+                              : (isTempo ? IdrCurrencyFormatter.format(balance) : 'LUNAS'),
                           style: AppTheme.moneyStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
-                            color: isTempo ? AppColors.danger : AppColors.success,
+                            color: isDraft
+                                ? tokens.textSecondary
+                                : (isTempo ? AppColors.danger : AppColors.success),
                           ),
                         ),
                       ],
@@ -943,6 +1154,13 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                 ),
                 child: Column(
                   children: [
+                    _buildDetailRow(
+                      'Status Barang',
+                      isDraft
+                          ? 'Belum Masuk Toko (Draft / Dipesan)'
+                          : 'Barang Fisik Diterima di Toko',
+                    ),
+                    const SizedBox(height: 6),
                     _buildDetailRow('Tanggal Pembelian', purchaseDate.isNotEmpty ? purchaseDate : '-'),
                     if (isTempo && dueDate.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -997,6 +1215,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   final cost = (it['unit_cost'] as num?)?.toDouble() ?? 0.0;
                   final lineTotal = (it['line_total'] as num?)?.toDouble() ?? (qty * cost);
                   final qtyStr = qty.truncateToDouble() == qty ? qty.toInt().toString() : qty.toStringAsFixed(1);
+                  final retQty = (it['returned_quantity'] as num?)?.toDouble() ?? 0.0;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
@@ -1018,7 +1237,8 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'SKU: $sku • $qtyStr unit x ${IdrCurrencyFormatter.format(cost)}',
+                                'SKU: $sku • $qtyStr unit x ${IdrCurrencyFormatter.format(cost)}'
+                                '${retQty > 0 ? " • Diretur: ${IdrCurrencyFormatter.formatQty(retQty)}" : ""}',
                                 style: TextStyle(fontSize: 11.5, color: tokens.textSecondary),
                               ),
                             ],
@@ -1034,7 +1254,19 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                 }),
               const SizedBox(height: 20),
               // Action Buttons di Detail Modal
-              if (isTempo) ...[
+              if (isDraft) ...[
+                NusaButton(
+                  label: 'Konfirmasi Penerimaan Barang (GRN)',
+                  icon: Icons.inventory_rounded,
+                  variant: NusaButtonVariant.primary,
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _confirmReceivePurchase(po);
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (isReceived && isTempo) ...[
                 NusaButton(
                   label: 'Bayar Tagihan PO (${IdrCurrencyFormatter.format(balance)})',
                   icon: Icons.payment_rounded,
@@ -1048,18 +1280,20 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
               ],
               Row(
                 children: [
-                  Expanded(
-                    child: NusaButton(
-                      label: 'Retur PO',
-                      icon: Icons.assignment_return_outlined,
-                      variant: NusaButtonVariant.outline,
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _openReturnPurchaseModal(po);
-                      },
+                  if (isReceived && !isFullyReturned) ...[
+                    Expanded(
+                      child: NusaButton(
+                        label: 'Retur PO',
+                        icon: Icons.assignment_return_outlined,
+                        variant: NusaButtonVariant.outline,
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _openReturnPurchaseModal(po);
+                        },
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
+                    const SizedBox(width: 10),
+                  ],
                   Expanded(
                     child: NusaButton(
                       label: 'Tutup',
@@ -1430,6 +1664,30 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           final po = _purchases[idx];
                           final total = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
                           final balance = (po['balance_due'] as num?)?.toDouble() ?? 0.0;
+                          final status = (po['status'] ?? '').toString().toLowerCase();
+                          final isDraft = status == 'draft' || status == 'submitted' || status == 'approved';
+                          final isReceived = status == 'received' || status == 'partially_received' || status == 'partially_paid' || status == 'paid';
+                          final isFullyReturned = po['is_fully_returned'] == true || (isReceived && ((po['total_returnable_qty'] as num?)?.toDouble() ?? 1.0) <= 0.0001 && po['is_returnable'] == false);
+
+                          String badgeLabel;
+                          NusaBadgeVariant badgeVariant;
+                          if (isDraft) {
+                            badgeLabel = status == 'draft' ? 'DRAF (BELUM TERIMA)' : 'DIPESAN';
+                            badgeVariant = NusaBadgeVariant.neutral;
+                          } else if (status == 'cancelled') {
+                            badgeLabel = 'BATAL';
+                            badgeVariant = NusaBadgeVariant.danger;
+                          } else if (isFullyReturned) {
+                            badgeLabel = 'SEMUA DIRETUR';
+                            badgeVariant = NusaBadgeVariant.neutral;
+                          } else if (balance > 0.5) {
+                            badgeLabel = 'TEMPO / HUTANG';
+                            badgeVariant = NusaBadgeVariant.warning;
+                          } else {
+                            badgeLabel = 'LUNAS';
+                            badgeVariant = NusaBadgeVariant.success;
+                          }
+
                           return NusaCard(
                             onTap: () => _openPurchaseDetailModal(po),
                             child: Column(
@@ -1438,23 +1696,29 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          (po['number'] ?? po['purchase_number'] ?? '-').toString(),
-                                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        const Icon(
-                                          Icons.visibility_outlined,
-                                          size: 15,
-                                          color: AppColors.slate400,
-                                        ),
-                                      ],
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              (po['number'] ?? po['purchase_number'] ?? '-').toString(),
+                                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          const Icon(
+                                            Icons.visibility_outlined,
+                                            size: 15,
+                                            color: AppColors.slate400,
+                                          ),
+                                        ],
+                                      ),
                                     ),
+                                    const SizedBox(width: 8),
                                     NusaBadge(
-                                      label: balance > 0.5 ? 'TEMPO / HUTANG' : 'LUNAS',
-                                      variant: balance > 0.5 ? NusaBadgeVariant.warning : NusaBadgeVariant.success,
+                                      label: badgeLabel,
+                                      variant: badgeVariant,
                                     ),
                                   ],
                                 ),
@@ -1474,7 +1738,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                           'Total: ${IdrCurrencyFormatter.format(total)}',
                                           style: AppTheme.moneyStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
                                         ),
-                                        if (balance > 0.5)
+                                        if (balance > 0.5 && !isDraft)
                                           Text(
                                             'Sisa: ${IdrCurrencyFormatter.format(balance)}',
                                             style: const TextStyle(
@@ -1488,11 +1752,11 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        if (balance > 0.5) ...[
+                                        if (isDraft) ...[
                                           ElevatedButton.icon(
-                                            onPressed: () => _openPayPurchaseModal(po),
+                                            onPressed: () => _confirmReceivePurchase(po),
                                             style: ElevatedButton.styleFrom(
-                                              backgroundColor: tokens.accent,
+                                              backgroundColor: AppColors.success,
                                               foregroundColor: Colors.white,
                                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                               minimumSize: const Size(0, 32),
@@ -1501,23 +1765,58 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                               ),
                                               elevation: 0,
                                             ),
-                                            icon: const Icon(Icons.payment_rounded, size: 15),
+                                            icon: const Icon(Icons.inventory_rounded, size: 14),
                                             label: const Text(
-                                              'Bayar PO',
+                                              'Terima Barang',
                                               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                                             ),
                                           ),
-                                          const SizedBox(width: 6),
+                                        ] else ...[
+                                          if (balance > 0.5) ...[
+                                            ElevatedButton.icon(
+                                              onPressed: () => _openPayPurchaseModal(po),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: tokens.accent,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                minimumSize: const Size(0, 32),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                elevation: 0,
+                                              ),
+                                              icon: const Icon(Icons.payment_rounded, size: 15),
+                                              label: const Text(
+                                                'Bayar PO',
+                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                          ],
+                                          if (isReceived && !isFullyReturned)
+                                            TextButton.icon(
+                                              onPressed: () => _openReturnPurchaseModal(po),
+                                              style: TextButton.styleFrom(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                minimumSize: const Size(0, 32),
+                                              ),
+                                              icon: const Icon(Icons.assignment_return_outlined, size: 16),
+                                              label: const Text('Retur PO', style: TextStyle(fontSize: 12)),
+                                            ),
+                                          if (isFullyReturned)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: tokens.bgPage,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: tokens.borderDefault),
+                                              ),
+                                              child: const Text(
+                                                'Habis Diretur',
+                                                style: TextStyle(fontSize: 11, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
                                         ],
-                                        TextButton.icon(
-                                          onPressed: () => _openReturnPurchaseModal(po),
-                                          style: TextButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                            minimumSize: const Size(0, 32),
-                                          ),
-                                          icon: const Icon(Icons.assignment_return_outlined, size: 16),
-                                          label: const Text('Retur PO', style: TextStyle(fontSize: 12)),
-                                        ),
                                       ],
                                     ),
                                   ],

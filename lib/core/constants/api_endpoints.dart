@@ -79,6 +79,7 @@ class ApiEndpoints {
   static const String suppliers = '/suppliers';
   static String supplierDetail(int id) => '/suppliers/$id';
   static const String purchases = '/purchases';
+  static String receivePurchase(int id) => '/purchases/$id/receive';
   static const String quickStockIn = '/purchases/quick-stock-in';
   static const String purchaseAiReorder = '/purchases/ai-reorder';
   static const String purchaseReturns = '/purchase-returns';

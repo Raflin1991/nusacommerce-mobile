@@ -300,15 +300,18 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
     String? supplierPhone,
     String? invoiceNumber,
     required List<Map<String, dynamic>> items,
-    required String paymentMode, // paid | partial | credit
+    required String paymentMode, // paid | partial | credit | draft
     double paidAmount = 0.0,
     String paymentMethod = 'Tunai',
     String? dueDate,
     String? notes,
+    bool isDraft = false,
   }) async {
     final now = DateTime.now();
     final id = now.millisecondsSinceEpoch;
     final poNumber = 'PO-${now.year}${now.month.toString().padLeft(2, '0')}-${(id % 10000).toString().padLeft(4, '0')}';
+
+    final effectiveDraft = isDraft || paymentMode == 'draft';
 
     double grandTotal = 0.0;
     final normalizedItems = <Map<String, dynamic>>[];
@@ -325,9 +328,141 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
         'quantity': qty,
         'unit_cost': unitCost,
         'line_total': lineTotal,
+        'received_quantity': effectiveDraft ? 0.0 : qty,
+        'returned_quantity': 0.0,
+        'returnable_quantity': effectiveDraft ? 0.0 : qty,
       });
 
-      // Increment product stock + update WAC cost_price + log stock movement
+      if (!effectiveDraft) {
+        // Increment product stock + update WAC cost_price + log stock movement
+        final products = getCachedProducts();
+        final pIdx = products.indexWhere((p) => (p['id'] as num?)?.toInt() == pid);
+        if (pIdx >= 0) {
+          final p = Map<String, dynamic>.from(products[pIdx]);
+          final oldStock = (p['stock'] as num?)?.toDouble() ?? 0.0;
+          final nextStock = oldStock + qty;
+          p['stock'] = nextStock;
+          if (unitCost > 0) p['cost_price'] = unitCost;
+          p['is_low_stock'] = nextStock <= ((p['reorder_level'] as num?)?.toDouble() ?? 5.0);
+          await addOrUpdateLocalProduct(p);
+          await recordLocalStockMovement(
+            productId: pid,
+            productName: (p['name'] ?? 'Produk').toString(),
+            sku: (p['sku'] ?? '-').toString(),
+            unitCode: (p['unit_code'] ?? 'pcs').toString(),
+            type: 'purchase',
+            quantityDelta: qty,
+            quantityAfter: nextStock,
+            unitCost: unitCost,
+            notes: 'Pembelian $poNumber ($supplierName)',
+          );
+        }
+      }
+    }
+
+    double appliedPaid = 0.0;
+    if (!effectiveDraft) {
+      if (paymentMode == 'paid') {
+        appliedPaid = grandTotal;
+      } else if (paymentMode == 'partial') {
+        appliedPaid = paidAmount.clamp(0.0, grandTotal);
+      }
+    }
+    final balanceDue = effectiveDraft ? 0.0 : (grandTotal - appliedPaid).clamp(0.0, grandTotal);
+    final status = effectiveDraft ? 'draft' : (balanceDue <= 0.5 ? 'paid' : (appliedPaid > 0 ? 'partially_paid' : 'received'));
+
+    final record = {
+      'id': id,
+      'number': poNumber,
+      'purchase_number': poNumber,
+      'supplier_invoice_number': invoiceNumber,
+      'supplier_id': supplierId,
+      'supplier_name': supplierName,
+      'purchase_date': now.toIso8601String().split('T').first,
+      'due_date': dueDate ?? now.add(const Duration(days: 14)).toIso8601String().split('T').first,
+      'status': status,
+      'status_label': effectiveDraft ? 'DRAF PO (BELUM DITERIMA)' : (status == 'paid' ? 'LUNAS' : 'TEMPO / HUTANG'),
+      'is_received': !effectiveDraft,
+      'can_receive': effectiveDraft,
+      'is_returnable': !effectiveDraft,
+      'is_fully_returned': false,
+      'total_returnable_qty': effectiveDraft ? 0.0 : grandTotal,
+      'subtotal': grandTotal,
+      'grand_total': grandTotal,
+      'paid_total': appliedPaid,
+      'balance_due': balanceDue,
+      'notes': notes,
+      'items': normalizedItems,
+      'is_local': true,
+    };
+
+    final purchases = _readPrefsList(OfflineDatabase._keyLocalPurchases);
+    purchases.insert(0, record);
+    await _prefs.setString(OfflineDatabase._keyLocalPurchases, jsonEncode(purchases));
+
+    if (!effectiveDraft && balanceDue > 0.5) {
+      await addLocalPayable(
+        purchaseId: id,
+        supplierId: supplierId,
+        supplierName: supplierName,
+        supplierPhone: supplierPhone,
+        totalAmount: grandTotal,
+        paidAmount: appliedPaid,
+        dueDate: record['due_date'].toString(),
+        invoiceNumber: invoiceNumber?.isNotEmpty == true ? invoiceNumber : poNumber,
+        notes: notes,
+      );
+    }
+
+    if (!effectiveDraft && appliedPaid > 0) {
+      await addLocalCashEntry(
+        title: 'Pembelian Stok $poNumber ($supplierName)',
+        category: 'Pembelian Stok',
+        direction: 'out',
+        channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
+            ? 'cash'
+            : 'non_cash',
+        methodName: paymentMethod,
+        amount: appliedPaid,
+      );
+    }
+    return record;
+  }
+
+  Future<Map<String, dynamic>?> receiveLocalPurchase({
+    required int purchaseId,
+    String? poNumber,
+  }) async {
+    final purchases = _readPrefsList(OfflineDatabase._keyLocalPurchases);
+    final idx = purchases.indexWhere(
+      (p) =>
+          (p['id'] as num?)?.toInt() == purchaseId ||
+          (poNumber != null && poNumber.isNotEmpty && p['number'] == poNumber),
+    );
+    if (idx < 0) return null;
+
+    final po = Map<String, dynamic>.from(purchases[idx]);
+    if (po['status'] == 'received' || po['status'] == 'paid' || po['status'] == 'partially_paid') {
+      return po;
+    }
+
+    final rawItems = po['items'] as List<dynamic>? ?? [];
+    double totalReturnable = 0.0;
+    final updatedItems = <Map<String, dynamic>>[];
+    for (final raw in rawItems) {
+      if (raw is! Map) continue;
+      final rawMap = Map<String, dynamic>.from(raw);
+      final pid = (rawMap['product_id'] as num?)?.toInt();
+      final qty = (rawMap['quantity'] as num?)?.toDouble() ?? 0.0;
+      final unitCost = (rawMap['unit_cost'] as num?)?.toDouble() ?? 0.0;
+      rawMap['received_quantity'] = qty;
+      rawMap['returnable_quantity'] = qty;
+      rawMap['returned_quantity'] = 0.0;
+      totalReturnable += qty;
+      updatedItems.add(rawMap);
+
+      if (pid == null || qty <= 0) continue;
+
       final products = getCachedProducts();
       final pIdx = products.indexWhere((p) => (p['id'] as num?)?.toInt() == pid);
       if (pIdx >= 0) {
@@ -347,69 +482,44 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
           quantityDelta: qty,
           quantityAfter: nextStock,
           unitCost: unitCost,
-          notes: 'Pembelian $poNumber ($supplierName)',
+          notes: 'Penerimaan Barang ${po['number']} (${po['supplier_name']})',
         );
       }
     }
 
-    double appliedPaid = 0.0;
-    if (paymentMode == 'paid') {
-      appliedPaid = grandTotal;
-    } else if (paymentMode == 'partial') {
-      appliedPaid = paidAmount.clamp(0.0, grandTotal);
-    }
-    final balanceDue = (grandTotal - appliedPaid).clamp(0.0, grandTotal);
-    final status = balanceDue <= 0.5 ? 'paid' : (appliedPaid > 0 ? 'partially_paid' : 'received');
+    final grandTotal = (po['grand_total'] as num?)?.toDouble() ?? 0.0;
+    final paidTotal = (po['paid_total'] as num?)?.toDouble() ?? 0.0;
+    final balanceDue = (grandTotal - paidTotal).clamp(0.0, grandTotal);
 
-    final record = {
-      'id': id,
-      'number': poNumber,
-      'supplier_invoice_number': invoiceNumber,
-      'supplier_id': supplierId,
-      'supplier_name': supplierName,
-      'purchase_date': now.toIso8601String().split('T').first,
-      'due_date': dueDate ?? now.add(const Duration(days: 14)).toIso8601String().split('T').first,
-      'status': status,
-      'subtotal': grandTotal,
-      'grand_total': grandTotal,
-      'paid_total': appliedPaid,
-      'balance_due': balanceDue,
-      'notes': notes,
-      'items': normalizedItems,
-      'is_local': true,
-    };
+    po['items'] = updatedItems;
+    po['status'] = balanceDue <= 0.5 ? 'paid' : 'received';
+    po['status_label'] = balanceDue <= 0.5 ? 'LUNAS' : 'TEMPO / HUTANG';
+    po['is_received'] = true;
+    po['can_receive'] = false;
+    po['is_returnable'] = true;
+    po['is_fully_returned'] = false;
+    po['total_returnable_qty'] = totalReturnable;
+    po['balance_due'] = balanceDue;
+    po['received_at'] = DateTime.now().toIso8601String();
 
-    final purchases = _readPrefsList(OfflineDatabase._keyLocalPurchases);
-    purchases.insert(0, record);
+    purchases[idx] = po;
     await _prefs.setString(OfflineDatabase._keyLocalPurchases, jsonEncode(purchases));
 
     if (balanceDue > 0.5) {
       await addLocalPayable(
-        purchaseId: id,
-        supplierId: supplierId,
-        supplierName: supplierName,
-        supplierPhone: supplierPhone,
+        purchaseId: (po['id'] as num?)?.toInt() ?? purchaseId,
+        supplierId: (po['supplier_id'] as num?)?.toInt() ?? 0,
+        supplierName: (po['supplier_name'] ?? 'Pemasok').toString(),
+        supplierPhone: po['supplier_phone']?.toString(),
         totalAmount: grandTotal,
-        paidAmount: appliedPaid,
-        dueDate: record['due_date'].toString(),
-        invoiceNumber: invoiceNumber?.isNotEmpty == true ? invoiceNumber : poNumber,
-        notes: notes,
+        paidAmount: paidTotal,
+        dueDate: (po['due_date'] ?? DateTime.now().add(const Duration(days: 14)).toIso8601String().split('T').first).toString(),
+        invoiceNumber: (po['supplier_invoice_number'] ?? po['number'] ?? '').toString(),
+        notes: po['notes']?.toString(),
       );
     }
 
-    if (appliedPaid > 0) {
-      await addLocalCashEntry(
-        title: 'Pembelian Stok $poNumber ($supplierName)',
-        category: 'Pembelian Stok',
-        direction: 'out',
-        channel: paymentMethod.toLowerCase().contains('tunai') || paymentMethod.toLowerCase().contains('cash')
-            ? 'cash'
-            : 'non_cash',
-        methodName: paymentMethod,
-        amount: appliedPaid,
-      );
-    }
-    return record;
+    return po;
   }
 
   List<Map<String, dynamic>> getLocalPurchaseReturns() {
@@ -425,6 +535,42 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
     required List<Map<String, dynamic>> items,
     String? notes,
   }) async {
+    final purchases = _readPrefsList(OfflineDatabase._keyLocalPurchases);
+    final pIdx = purchases.indexWhere(
+      (p) =>
+          (p['id'] as num?)?.toInt() == purchaseId ||
+          (p['number'] != null && p['number'] == purchaseNumber),
+    );
+
+    if (pIdx >= 0) {
+      final po = purchases[pIdx];
+      final poStatus = (po['status'] ?? '').toString().toLowerCase();
+      if (poStatus == 'draft' || poStatus == 'submitted' || poStatus == 'approved') {
+        throw StateError('PO status masih draft ($poStatus). Barang belum diterima dan tidak dapat diretur!');
+      }
+      if (po['is_fully_returned'] == true || po['is_returnable'] == false) {
+        throw StateError('Semua barang dalam PO ini telah habis diretur!');
+      }
+
+      final poItems = (po['items'] as List<dynamic>? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      for (final it in items) {
+        final pid = (it['product_id'] as num).toInt();
+        final qty = (it['quantity'] as num).toDouble();
+        final match = poItems.firstWhere(
+          (m) => (m['product_id'] as num?)?.toInt() == pid,
+          orElse: () => {},
+        );
+        if (match.isNotEmpty) {
+          final origQty = (match['quantity'] as num?)?.toDouble() ?? 0.0;
+          final prevReturned = (match['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+          final maxReturnable = (origQty - prevReturned).clamp(0.0, double.infinity);
+          if (qty > maxReturnable + 0.0001) {
+            throw ArgumentError('Kuantitas retur ($qty) melebihi batas yang dapat diretur ($maxReturnable) untuk produk ID $pid');
+          }
+        }
+      }
+    }
+
     final now = DateTime.now();
     final id = now.millisecondsSinceEpoch;
     final retNo = 'PR-${now.year}${now.month.toString().padLeft(2, '0')}-${(id % 10000).toString().padLeft(4, '0')}';
@@ -472,6 +618,46 @@ extension OfflineDatabaseParityExt on OfflineDatabase {
     final returns = _readPrefsList(OfflineDatabase._keyLocalPurchaseReturns);
     returns.insert(0, record);
     await _prefs.setString(OfflineDatabase._keyLocalPurchaseReturns, jsonEncode(returns));
+
+    // Update cumulative returned quantities in original purchase to prevent over-returns
+    if (pIdx >= 0) {
+      final po = Map<String, dynamic>.from(purchases[pIdx]);
+      final poItems = (po['items'] as List<dynamic>? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      double totalReturnableLeft = 0.0;
+      for (final poItem in poItems) {
+        final pid = (poItem['product_id'] as num?)?.toInt();
+        final match = items.firstWhere(
+          (retIt) => (retIt['product_id'] as num?)?.toInt() == pid,
+          orElse: () => {},
+        );
+        if (match.isNotEmpty) {
+          final retQty = (match['quantity'] as num?)?.toDouble() ?? 0.0;
+          final prevReturned = (poItem['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+          poItem['returned_quantity'] = prevReturned + retQty;
+        }
+        final origQty = (poItem['quantity'] as num?)?.toDouble() ?? 0.0;
+        final curReturned = (poItem['returned_quantity'] as num?)?.toDouble() ?? 0.0;
+        final rem = (origQty - curReturned).clamp(0.0, double.infinity);
+        poItem['returnable_quantity'] = rem;
+        totalReturnableLeft += rem;
+      }
+      po['items'] = poItems;
+      po['total_returnable_qty'] = totalReturnableLeft;
+      po['is_returnable'] = totalReturnableLeft > 0.0001;
+      po['is_fully_returned'] = totalReturnableLeft <= 0.0001;
+      if (po['is_fully_returned'] == true) {
+        po['status_label'] = 'SEMUA BARANG DIRETUR';
+      }
+
+      final curBalance = (po['balance_due'] as num?)?.toDouble() ?? 0.0;
+      if (curBalance > 0) {
+        po['balance_due'] = (curBalance - grandTotal).clamp(0.0, double.infinity);
+      }
+
+      purchases[pIdx] = po;
+      await _prefs.setString(OfflineDatabase._keyLocalPurchases, jsonEncode(purchases));
+    }
+
     return record;
   }
 
