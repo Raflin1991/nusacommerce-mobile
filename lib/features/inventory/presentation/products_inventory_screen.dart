@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/config/business_vertical_config.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
@@ -67,9 +68,25 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
     final selectableCats = posState.categories.where((c) => (c['id'] as num?)?.toInt() != 0).toList();
     int? selectedCatId = existing?.categoryId ??
         (selectableCats.isNotEmpty ? (selectableCats.first['id'] as num?)?.toInt() : null);
+    final bool isRestaurantMode = posState.currentVertical == BusinessVertical.restaurant;
+    bool isRawMaterialCatName(String? name) {
+      final clean = (name ?? '').trim().toLowerCase();
+      if (clean.isEmpty) return false;
+      return RegExp(r'\b(bahan(\s+(baku|dapur|mentah|masakan|tambahan))?|bumbu|ingredient|ingredients|raw\s*materials?|kemasan|packaging)\b')
+          .hasMatch(clean);
+    }
+
     int? selectedBrandId = existing?.brandId;
     int? selectedUnitId = existing?.unitId;
     String selectedType = existing?.type ?? 'physical';
+    final initialCatName = selectableCats
+        .where((c) => (c['id'] as num?)?.toInt() == selectedCatId)
+        .firstOrNull?['name']
+        ?.toString();
+    bool canBeSold = existing != null
+        ? existing.canBeSold
+        : !(isRestaurantMode && isRawMaterialCatName(initialCatName));
+    bool canBeSoldOverridden = existing != null;
     bool isSaving = false;
     String? saveError;
 
@@ -191,7 +208,16 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                               ),
                             )
                             .toList(),
-                        onChanged: (v) => setModalState(() => selectedCatId = v),
+                        onChanged: (v) => setModalState(() {
+                          selectedCatId = v;
+                          if (existing == null && isRestaurantMode && !canBeSoldOverridden) {
+                            final pickedName = selectableCats
+                                .where((c) => (c['id'] as num?)?.toInt() == v)
+                                .firstOrNull?['name']
+                                ?.toString();
+                            canBeSold = selectedType == 'kit' || !isRawMaterialCatName(pickedName);
+                          }
+                        }),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -299,6 +325,23 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Dapat Dijual (POS & Toko Online)',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text(
+                    'Matikan untuk bahan baku dapur agar tidak muncul di kasir POS maupun etalase online.',
+                    style: TextStyle(fontSize: 11.5),
+                  ),
+                  value: canBeSold,
+                  onChanged: (val) => setModalState(() {
+                    canBeSold = val;
+                    canBeSoldOverridden = true;
+                  }),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -497,6 +540,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                             brandName: matchedBrand?['name']?.toString() ?? existing?.brandName,
                             reorderLevel: reorderLvl,
                             trackStock: selectedType != 'service',
+                            canBeSold: canBeSold,
+                            isVisibleOnline: canBeSold,
                             type: selectedType == 'service' ? 'service' : 'simple',
                             isLowStock: selectedType != 'service' && stock <= reorderLvl,
                             shelfLocation: shelfCtrl.text.trim(),
@@ -976,6 +1021,11 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                       runSpacing: 4,
                                       crossAxisAlignment: WrapCrossAlignment.center,
                                       children: [
+                                        if (!product.canBeSold)
+                                          const NusaBadge(
+                                            label: 'Bahan Baku',
+                                            variant: NusaBadgeVariant.neutral,
+                                          ),
                                         NusaBadge(
                                           label: isOutOfStock
                                               ? 'Stok Habis (0)'

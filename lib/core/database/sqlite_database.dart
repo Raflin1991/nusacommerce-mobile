@@ -14,7 +14,7 @@ class SqliteDatabase {
   static final SqliteDatabase instance = SqliteDatabase._();
 
   static const String _dbName = 'nusacommerce_local.db';
-  static const int _dbVersion = 5;
+  static const int _dbVersion = 6;
 
   Database? _db;
   bool _ftsAvailable = false;
@@ -51,6 +51,7 @@ class SqliteDatabase {
               stock REAL,
               unit_code TEXT,
               is_low_stock INTEGER,
+              can_be_sold INTEGER NOT NULL DEFAULT 1,
               is_local_only INTEGER DEFAULT 0,
               local_uuid TEXT,
               raw_json TEXT
@@ -96,6 +97,9 @@ class SqliteDatabase {
           await _ensureStandaloneTables(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 6) {
+            await _ensureColumn(db, 'products', 'can_be_sold', 'INTEGER NOT NULL DEFAULT 1');
+          }
           await _ensureStandaloneTables(db);
         },
       );
@@ -124,6 +128,7 @@ class SqliteDatabase {
   }
 
   Future<void> _ensureStandaloneTables(Database db) async {
+    await _ensureColumn(db, 'products', 'can_be_sold', 'INTEGER NOT NULL DEFAULT 1');
     await _ensureColumn(db, 'products', 'is_local_only', 'INTEGER DEFAULT 0');
     await _ensureColumn(db, 'products', 'local_uuid', 'TEXT');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_prod_name ON products(name)');
@@ -376,6 +381,7 @@ class SqliteDatabase {
       'cost_price': (product['cost_price'] as num?)?.toDouble() ?? 0.0,
       'stock': stockVal,
       'unit_code': unitCode,
+      'can_be_sold': product['can_be_sold'] == false ? 0 : 1,
       'is_low_stock': isLow ? 1 : 0,
       'is_local_only': isLocalOnly ? 1 : 0,
       'local_uuid': product['local_uuid']?.toString(),

@@ -226,6 +226,8 @@ class ProductModel extends Equatable {
   final String? brandName;
   final double reorderLevel;
   final bool trackStock;
+  final bool canBeSold;
+  final bool isVisibleOnline;
   final bool isLowStock;
   final bool soldByWeight;
   final bool requiresPrescription;
@@ -264,6 +266,8 @@ class ProductModel extends Equatable {
     this.brandName,
     this.reorderLevel = 5.0,
     this.trackStock = true,
+    this.canBeSold = true,
+    this.isVisibleOnline = true,
     this.isLowStock = false,
     this.soldByWeight = false,
     this.requiresPrescription = false,
@@ -424,6 +428,8 @@ class ProductModel extends Equatable {
           : json['brand_name']?.toString(),
       reorderLevel: minStock,
       trackStock: json['track_stock'] != false,
+      canBeSold: json['can_be_sold'] != false,
+      isVisibleOnline: json['is_visible_online'] != false && json['can_be_sold'] != false,
       isLowStock: lowStock,
       soldByWeight: soldByWeight,
       requiresPrescription: json['requires_prescription'] == true ||
@@ -468,6 +474,8 @@ class ProductModel extends Equatable {
         'brand_name': brandName,
         'reorder_level': reorderLevel,
         'track_stock': trackStock,
+        'can_be_sold': canBeSold,
+        'is_visible_online': isVisibleOnline,
         'is_low_stock': isLowStock,
         'sold_by_weight': soldByWeight,
         'requires_prescription': requiresPrescription,
@@ -535,8 +543,11 @@ class ProductModel extends Equatable {
         nm.startsWith('jasa ');
   }
 
-  /// Cloud POS & APK POS parity rule: tracked physical products with balance <= 0 must not appear in POS.
-  bool get isSellableInPos => !trackStock || isServiceOrNonStockItem || stock > 0;
+  /// Cloud POS & APK POS parity rule: non-sellable items (raw materials) and tracked physical
+  /// products with balance <= 0 must not appear in POS. Kit/Recipe items compute stock from components.
+  bool get isSellableInPos =>
+      canBeSold &&
+      (!trackStock || isServiceOrNonStockItem || type.trim().toLowerCase() == 'kit' || stock > 0);
 
   @override
   List<Object?> get props => [
@@ -546,6 +557,8 @@ class ProductModel extends Equatable {
         sellingPrice,
         stock,
         trackStock,
+        canBeSold,
+        isVisibleOnline,
         isLowStock,
         requiresPrescription,
         taxRate,

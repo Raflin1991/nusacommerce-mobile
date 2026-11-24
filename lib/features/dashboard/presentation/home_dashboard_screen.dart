@@ -58,6 +58,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   bool _loading = true;
   String? _error;
+  String _selectedPeriod = 'month';
+  String _growthLabel = 'vs bln lalu';
   double _todaySales = 0;
   int _todayTxCount = 0;
   double _grossProfit = 0;
@@ -71,6 +73,40 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _pendingOnlineOrdersCount = 0;
   int _voidCount = 0;
   int _varianceShiftsCount = 0;
+
+  String get _periodTitle {
+    switch (_selectedPeriod) {
+      case 'month':
+        return 'Omzet Bulan Ini (MTD)';
+      case 'today':
+        return 'Omzet Bersih Hari Ini';
+      case 'yesterday':
+        return 'Omzet Bersih Kemarin';
+      case '7d':
+        return 'Omzet 7 Hari Terakhir';
+      case '30d':
+        return 'Omzet 30 Hari Terakhir';
+      default:
+        return 'Omzet Bersih';
+    }
+  }
+
+  String get _grossProfitTitle {
+    switch (_selectedPeriod) {
+      case 'month':
+        return 'Laba Kotor Bulan Ini';
+      case 'today':
+        return 'Laba Kotor Hari Ini';
+      case 'yesterday':
+        return 'Laba Kotor Kemarin';
+      case '7d':
+        return 'Laba Kotor 7 Hari';
+      case '30d':
+        return 'Laba Kotor 30 Hari';
+      default:
+        return 'Laba Kotor';
+    }
+  }
 
   // Shift fast-lane summary (Blind Drop compliant: never stores expected_cash for cashiers)
   bool _hasOpenShift = false;
@@ -117,11 +153,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
-  void _applyLocalDashboardMetrics({int? storeId}) {
+  void _applyLocalDashboardMetrics({int? storeId, String? period}) {
     final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
+    final p = period ?? _selectedPeriod;
+    DateTime startDate;
+    if (p == 'month') {
+      startDate = DateTime(now.year, now.month, 1);
+    } else if (p == '7d') {
+      startDate = now.subtract(const Duration(days: 6));
+    } else if (p == '30d') {
+      startDate = now.subtract(const Duration(days: 29));
+    } else if (p == 'yesterday') {
+      final y = now.subtract(const Duration(days: 1));
+      startDate = DateTime(y.year, y.month, y.day);
+    } else {
+      startDate = DateTime(now.year, now.month, now.day);
+    }
     final report = _offlineDb.computeLocalBusinessReport(
-      startDate: todayStart,
+      startDate: startDate,
       endDate: now,
     );
     final fraud = Map<String, dynamic>.from((report['fraud_indicators'] as Map?) ?? {});
@@ -140,6 +189,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _todayTxCount = (report['transactions_count'] as num?)?.toInt() ?? 0;
       _grossProfit = (report['gross_profit'] as num?)?.toDouble() ?? 0;
       _growthPercent = 0;
+      _growthLabel = _selectedPeriod == 'month' ? 'vs bln lalu' : 'vs kemarin';
       _totalReceivables = (report['total_receivables'] as num?)?.toDouble() ?? 0;
       _totalPayables = (report['total_payables'] as num?)?.toDouble() ?? 0;
       _lowStockCount = (report['low_stock_count'] as num?)?.toInt() ?? 0;
@@ -177,11 +227,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
-  Future<void> _loadDashboard({int? storeId}) {
+  Future<void> _loadDashboard({int? storeId, String? period}) {
     if (_activeLoadFuture != null) {
       return _activeLoadFuture!;
     }
-    final future = _executeDashboardLoad(storeId: storeId);
+    final future = _executeDashboardLoad(storeId: storeId, period: period);
     _activeLoadFuture = future;
     future.whenComplete(() {
       if (identical(_activeLoadFuture, future)) {
@@ -191,7 +241,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return future;
   }
 
-  Future<void> _executeDashboardLoad({int? storeId}) async {
+  Future<void> _executeDashboardLoad({int? storeId, String? period}) async {
+    final activePeriod = period ?? _selectedPeriod;
+    if (period != null && period != _selectedPeriod) {
+      _selectedPeriod = period;
+    }
     if (mounted) {
       setState(() {
         _loading = true;
@@ -201,13 +255,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
     final session = context.read<AuthCubit>().state.session;
     if (session.isLocalTrial || !(await _connectivity.checkOnline())) {
-      _applyLocalDashboardMetrics(storeId: storeId);
+      _applyLocalDashboardMetrics(storeId: storeId, period: activePeriod);
       return;
     }
 
     final workspace = _effectiveWorkspace(session);
     final activeStoreId = storeId ?? session.activeStore.id;
-    final params = <String, dynamic>{'period': 'today'};
+    final params = <String, dynamic>{'period': activePeriod};
     if (activeStoreId > 0) {
       params['store_id'] = activeStoreId;
     }
@@ -343,7 +397,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _todaySales = (kpi['net_sales'] as num?)?.toDouble() ?? 0;
       _todayTxCount = (kpi['transactions_count'] as num?)?.toInt() ?? 0;
       _grossProfit = (kpi['gross_profit'] as num?)?.toDouble() ?? 0;
-      _growthPercent = (kpi['growth_vs_yesterday_percent'] as num?)?.toDouble() ?? 0;
+      _growthPercent = ((kpi['growth_percent'] ?? kpi['growth_vs_yesterday_percent']) as num?)?.toDouble() ?? 0;
+      _growthLabel = (kpi['growth_label'] as String?) ?? (_selectedPeriod == 'month' ? 'vs bln lalu' : 'vs kemarin');
       _totalReceivables = (alerts['receivables_total'] as num?)?.toDouble() ?? 0;
       _totalPayables = (alerts['payables_total'] as num?)?.toDouble() ?? 0;
       _lowStockCount = (alerts['low_stock_count'] as num?)?.toInt() ?? 0;
@@ -1951,122 +2006,176 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
+  Widget _buildPeriodPill(String key, String label, NusaThemeTokens tokens) {
+    final isSelected = _selectedPeriod == key;
+    return InkWell(
+      onTap: () {
+        if (_selectedPeriod == key) return;
+        setState(() {
+          _selectedPeriod = key;
+        });
+        _loadDashboard(period: key);
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? tokens.accent : tokens.bgSurface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? tokens.accent : tokens.borderSubtle,
+            width: tokens.borderWidth,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? Colors.white : tokens.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildExecutivePulseCard(BuildContext context, NusaThemeTokens tokens) {
     final isUp = _growthPercent >= 0;
     final sign = _growthPercent > 0 ? '+' : '';
-    return InkWell(
-      onTap: () => context.push('/reports'),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: tokens.heroGradientColors,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildPeriodPill('month', 'Bulan Ini (MTD)', tokens),
+              const SizedBox(width: 6),
+              _buildPeriodPill('today', 'Hari Ini', tokens),
+              const SizedBox(width: 6),
+              _buildPeriodPill('7d', '7 Hari', tokens),
+              const SizedBox(width: 6),
+              _buildPeriodPill('30d', '30 Hari', tokens),
+            ],
           ),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: tokens.isHighContrast ? null : AppColors.cardShadow,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Omzet Bersih Hari Ini',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '$_todayTxCount Transaksi',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                IdrCurrencyFormatter.format(_todaySales),
-                style: AppTheme.moneyStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                ),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: () => context.push('/reports'),
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: tokens.heroGradientColors,
               ),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: tokens.isHighContrast ? null : AppColors.cardShadow,
             ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(
-                        isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-                        color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
-                        size: 16,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _periodTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          '$sign${_growthPercent.toStringAsFixed(1)}% vs kemarin',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.14),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$_todayTxCount Transaksi',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    IdrCurrencyFormatter.format(_todaySales),
+                    style: AppTheme.moneyStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(
+                            isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
                             color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              '$sign${_growthPercent.toStringAsFixed(1)}% $_growthLabel',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isUp ? const Color(0xFF4ADE80) : const Color(0xFFFCA5A5),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Detail Laporan',
+                          style: TextStyle(
+                            color: Colors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Detail Laporan',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
+                        SizedBox(width: 2),
+                        Icon(Icons.chevron_right_rounded, color: Colors.white, size: 16),
+                      ],
                     ),
-                    SizedBox(width: 2),
-                    Icon(Icons.chevron_right_rounded, color: Colors.white, size: 16),
                   ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -2271,7 +2380,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 tokens,
                 icon: Icons.monetization_on_outlined,
                 accentColor: tokens.positive,
-                label: 'Laba Kotor Hari Ini',
+                label: _grossProfitTitle,
                 value: IdrCurrencyFormatter.format(_grossProfit),
                 onTap: () => context.push('/reports'),
               ),
