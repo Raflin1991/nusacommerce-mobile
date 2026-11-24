@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -121,7 +120,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     if (existing != null)
                       IconButton(
                         tooltip: 'Hapus Produk',
-                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                        icon: Icon(Icons.delete_outline_rounded, color: NusaThemeTokens.of(ctx).danger),
                         onPressed: () async {
                           final confirm = await showDialog<bool>(
                             context: ctx,
@@ -133,7 +132,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                                     onPressed: () => Navigator.pop(dCtx, false),
                                     child: const Text('Batal')),
                                 FilledButton(
-                                  style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                                  style: FilledButton.styleFrom(backgroundColor: NusaThemeTokens.of(dCtx).danger),
                                   onPressed: () => Navigator.pop(dCtx, true),
                                   child: const Text('Hapus'),
                                 ),
@@ -153,7 +152,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
+                      color: NusaThemeTokens.of(ctx).accentSoft,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
@@ -161,18 +160,18 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                       children: [
                         Text(
                           '📍 Lokasi Rak: ${existing.shelfLocation ?? 'Rak Utama'}',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppColors.primary),
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: NusaThemeTokens.of(ctx).accent),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           '🏢 Stok $activeStoreName: ${IdrCurrencyFormatter.formatQty(existing.stock, unitCode: existing.unitCode)}',
-                          style: const TextStyle(fontSize: 12, color: AppColors.slate700),
+                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textPrimary),
                         ),
                         if (existing.fefoBatch != null) ...[
                           const SizedBox(height: 4),
                           Text(
                             '⏳ Batch FEFO Aktif: ${existing.fefoBatch!.batchNumber} (Exp: ${existing.fefoBatch!.expiryDate ?? '-'})',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.warningDark),
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(ctx).warning),
                           ),
                         ],
                       ],
@@ -359,7 +358,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                         decoration: InputDecoration(
                           labelText: 'Barcode (EAN/SKU)',
                           suffixIcon: IconButton(
-                            icon: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.primary),
+                            icon: Icon(Icons.qr_code_scanner_rounded, color: NusaThemeTokens.of(ctx).accent),
                             onPressed: () {
                               bool scanned = false;
                               showDialog(
@@ -426,8 +425,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     padding: const EdgeInsets.only(top: 10),
                     child: NusaCard(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      backgroundColor: isNegative ? AppColors.dangerSoft : AppColors.successSoft,
-                      borderColor: (isNegative ? AppColors.danger : AppColors.success).withOpacity(0.3),
+                      backgroundColor: isNegative ? NusaThemeTokens.of(ctx).dangerSoft : NusaThemeTokens.of(ctx).positiveSoft,
+                      borderColor: (isNegative ? NusaThemeTokens.of(ctx).danger : NusaThemeTokens.of(ctx).positive).withOpacity(0.3),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -436,7 +435,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: isNegative ? AppColors.danger : AppColors.successDark,
+                              color: isNegative ? NusaThemeTokens.of(ctx).danger : NusaThemeTokens.of(ctx).positive,
                             ),
                           ),
                           Text(
@@ -444,7 +443,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                             style: AppTheme.moneyStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w800,
-                              color: isNegative ? AppColors.danger : AppColors.successDark,
+                              color: isNegative ? NusaThemeTokens.of(ctx).danger : NusaThemeTokens.of(ctx).positive,
                             ),
                           ),
                         ],
@@ -483,13 +482,13 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.danger.withOpacity(0.1),
+                      color: NusaThemeTokens.of(ctx).danger.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).danger.withOpacity(0.4)),
                     ),
                     child: Text(
                       saveError!,
-                      style: const TextStyle(color: AppColors.danger, fontSize: 12.5, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: NusaThemeTokens.of(ctx).danger, fontSize: 12.5, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -572,7 +571,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              backgroundColor: result.syncedToCloud ? AppColors.successDark : AppColors.warningDark,
+                              backgroundColor: result.syncedToCloud ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).warning,
                               content: Text(
                                 result.syncedToCloud
                                     ? 'Data barang "${updated.name}" tersimpan & sinkron ke Cloud.'
@@ -616,7 +615,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
               });
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(backgroundColor: AppColors.danger, content: Text('Produk "$code" tidak ditemukan.')),
+                SnackBar(backgroundColor: NusaThemeTokens.of(ctx).danger, content: Text('Produk "$code" tidak ditemukan.')),
               );
             }
           }
@@ -687,7 +686,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: AppColors.primarySoft,
+                        color: NusaThemeTokens.of(ctx).accentSoft,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Column(
@@ -699,12 +698,12 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                           ),
                           Text(
                             'SKU: ${scannedProduct!.sku} • Rak: ${scannedProduct!.shelfLocation ?? '-'}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textSecondary),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'Stok Sistem Tercatat: ${IdrCurrencyFormatter.formatQty(systemQty, unitCode: scannedProduct!.unitCode)}',
-                            style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary),
+                            style: TextStyle(fontWeight: FontWeight.w700, color: NusaThemeTokens.of(ctx).accent),
                           ),
                         ],
                       ),
@@ -725,8 +724,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: variance == 0
-                            ? AppColors.successSoft
-                            : (variance > 0 ? AppColors.primarySoft : AppColors.dangerSoft),
+                            ? NusaThemeTokens.of(ctx).positiveSoft
+                            : (variance > 0 ? NusaThemeTokens.of(ctx).accentSoft : NusaThemeTokens.of(ctx).dangerSoft),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -734,8 +733,8 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           color: variance == 0
-                              ? AppColors.successDark
-                              : (variance > 0 ? AppColors.primary : AppColors.dangerDark),
+                              ? NusaThemeTokens.of(ctx).positive
+                              : (variance > 0 ? NusaThemeTokens.of(ctx).accent : NusaThemeTokens.of(ctx).danger),
                         ),
                       ),
                     ),
@@ -776,7 +775,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                           if (!result.ok) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                backgroundColor: AppColors.danger,
+                                backgroundColor: NusaThemeTokens.of(ctx).danger,
                                 content: Text(result.errorMessage ?? 'Gagal menyimpan penyesuaian stok.'),
                               ),
                             );
@@ -786,7 +785,7 @@ class _ProductsInventoryScreenState extends State<ProductsInventoryScreen> {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              backgroundColor: result.syncedToCloud ? AppColors.successDark : AppColors.warningDark,
+                              backgroundColor: result.syncedToCloud ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).warning,
                               content: Text('Stock Opname "${updated.name}" diperbarui menjadi $actualQty.'),
                             ),
                           );

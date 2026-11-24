@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  // Primary Brand Colors (Artisanal Terracotta Accent — `--accent`)
-  static const Color primary = Color(0xFFEA580C);
-  static const Color primaryDark = Color(0xFFC2410C);
+  // Primary Brand Colors (Official OXORA Orange Accent — `--accent`)
+  static const Color primary = Color(0xFFF97316);
+  static const Color primaryDark = Color(0xFFEA580C);
   static const Color primaryLight = Color(0xFFFED7AA);
   static const Color primarySoft = Color(0xFFFFF1E6);
 

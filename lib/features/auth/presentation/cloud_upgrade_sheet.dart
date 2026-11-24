@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
@@ -89,7 +88,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
     Navigator.of(context).pop(true);
     messenger.showSnackBar(
       SnackBar(
-        backgroundColor: AppColors.successDark,
+        backgroundColor: NusaThemeTokens.of(context).positive,
         duration: const Duration(seconds: 5),
         content: Text(
           'Migrasi Cloud berhasil! '
@@ -131,13 +130,13 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
+                      color: NusaThemeTokens.of(context).accentSoft,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.cloud_upload_outlined, color: AppColors.primary),
+                    child: Icon(Icons.cloud_upload_outlined, color: NusaThemeTokens.of(context).accent),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -146,13 +145,13 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                           style: TextStyle(
                             fontSize: 16.5,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.navyDark,
+                            color: NusaThemeTokens.of(context).textPrimary,
                           ),
                         ),
                         SizedBox(height: 2),
                         Text(
                           'Migrasi 1-klik: seluruh data lokal HP Anda diunggah aman ke server Cloud.',
-                          style: TextStyle(fontSize: 12, color: AppColors.slate600),
+                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                         ),
                       ],
                     ),
@@ -164,28 +163,28 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.slate100,
+                  color: NusaThemeTokens.of(context).bgElevated,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Ringkasan Data Siap Migrasi:',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.navyDark,
+                        color: NusaThemeTokens.of(context).textPrimary,
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       '$productsCount Produk • $customersCount Pelanggan • $suppliersCount Pemasok • $salesCount Nota • $expensesCount Biaya',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.slate700,
+                        color: NusaThemeTokens.of(context).textPrimary,
                       ),
                     ),
                   ],
@@ -197,16 +196,16 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
+                    color: NusaThemeTokens.of(context).dangerSoft,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                    border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.4)),
                   ),
                   child: Text(
                     _localError!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.dangerDark,
+                      color: NusaThemeTokens.of(context).danger,
                     ),
                   ),
                 ),

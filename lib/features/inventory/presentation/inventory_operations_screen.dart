@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -143,7 +142,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -185,7 +184,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                         return ListTile(
                           title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                           subtitle: Text('Stok Sistem: ${IdrCurrencyFormatter.formatQty(p.stock)} ${p.unitCode}'),
-                          trailing: const Icon(Icons.add_circle_outline, color: AppColors.primary),
+                          trailing: Icon(Icons.add_circle_outline, color: NusaThemeTokens.of(ctx).accent),
                           onTap: () {
                             Navigator.pop(ctx);
                             _promptOpnameQty(p);
@@ -214,7 +213,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Stok Tercatat: ${IdrCurrencyFormatter.formatQty(p.stock)} ${p.unitCode}',
-                style: const TextStyle(fontSize: 13, color: AppColors.slate600)),
+                style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(ctx).textSecondary)),
             const SizedBox(height: 10),
             TextField(
               controller: qtyCtrl,
@@ -274,7 +273,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
             setState(() => _loading = false);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                backgroundColor: AppColors.danger,
+                backgroundColor: NusaThemeTokens.of(context).danger,
                 content: Text(ApiClient.extractErrorMessage(e)),
               ),
             );
@@ -384,11 +383,11 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
           child: Row(
             children: [
-              _kpiChip('Tersedia', '$availableCount', AppColors.successDark, AppColors.successSoft),
+              _kpiChip('Tersedia', '$availableCount', NusaThemeTokens.of(context).positive, NusaThemeTokens.of(context).positiveSoft),
               const SizedBox(width: 8),
-              _kpiChip('Menipis', '$lowCount', AppColors.warningDark, AppColors.warningSoft),
+              _kpiChip('Menipis', '$lowCount', NusaThemeTokens.of(context).warning, NusaThemeTokens.of(context).warningSoft),
               const SizedBox(width: 8),
-              _kpiChip('Minus/Oversold', '$minusCount', AppColors.dangerDark, AppColors.dangerSoft),
+              _kpiChip('Minus/Oversold', '$minusCount', NusaThemeTokens.of(context).danger, NusaThemeTokens.of(context).dangerSoft),
             ],
           ),
         ),
@@ -427,7 +426,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                           Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
                           Text(
                             'SKU: ${p.sku} • Rak: ${(p.shelfLocation ?? '').isNotEmpty ? p.shelfLocation : "-"}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                           ),
                         ],
                       ),
@@ -446,7 +445,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                         const SizedBox(height: 4),
                         Text(
                           'Min: ${IdrCurrencyFormatter.formatQty(p.reorderLevel)}',
-                          style: const TextStyle(fontSize: 11, color: AppColors.slate500),
+                          style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(context).textSecondary),
                         ),
                       ],
                     ),
@@ -542,7 +541,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                               style: const TextStyle(fontWeight: FontWeight.w700)),
                           Text(
                             'Sistem: ${IdrCurrencyFormatter.formatQty((item['system_qty'] as num).toDouble())}  ➔  Fisik: ${IdrCurrencyFormatter.formatQty((item['physical_qty'] as num).toDouble())} ${item['unit_code']}',
-                            style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                            style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                           ),
                         ],
                       ),
@@ -554,7 +553,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                           : (delta > 0 ? NusaBadgeVariant.success : NusaBadgeVariant.neutral),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                      icon: Icon(Icons.delete_outline, color: NusaThemeTokens.of(context).danger),
                       onPressed: () => setState(() => _opnameDraftItems.remove(item)),
                     ),
                   ],
@@ -620,12 +619,12 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                           Container(
                             padding: const EdgeInsets.all(9),
                             decoration: BoxDecoration(
-                              color: isPositive ? AppColors.successSoft : AppColors.dangerSoft,
+                              color: isPositive ? NusaThemeTokens.of(context).positiveSoft : NusaThemeTokens.of(context).dangerSoft,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Icon(
                               isPositive ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
-                              color: isPositive ? AppColors.successDark : AppColors.dangerDark,
+                              color: isPositive ? NusaThemeTokens.of(context).positive : NusaThemeTokens.of(context).danger,
                               size: 18,
                             ),
                           ),
@@ -640,11 +639,11 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                                 ),
                                 Text(
                                   '${m['type'] ?? 'mutasi'} • ${m['notes'] ?? '-'}',
-                                  style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                                  style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                 ),
                                 Text(
                                   (m['created_at'] ?? '').toString().replaceFirst('T', ' ').split('.').first,
-                                  style: const TextStyle(fontSize: 11, color: AppColors.slate400),
+                                  style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(context).textTertiary),
                                 ),
                               ],
                             ),
@@ -657,13 +656,13 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                                 style: AppTheme.moneyStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w800,
-                                  color: isPositive ? AppColors.successDark : AppColors.dangerDark,
+                                  color: isPositive ? NusaThemeTokens.of(context).positive : NusaThemeTokens.of(context).danger,
                                 ),
                               ),
                               if (m['quantity_after'] != null)
                                 Text(
                                   'Saldo: ${IdrCurrencyFormatter.formatQty((m['quantity_after'] as num).toDouble())}',
-                                  style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                  style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary),
                                 ),
                             ],
                           ),
@@ -684,10 +683,10 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
         const Text('Batch & Kedaluwarsa (FEFO)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         if (_batches.isEmpty)
-          const NusaCard(
+          NusaCard(
             child: Text(
               'Belum ada data batch tanggal kedaluwarsa. Batch akan muncul dari stok masuk pembelian atau data apotek/F&B.',
-              style: TextStyle(fontSize: 13, color: AppColors.slate600),
+              style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(context).textSecondary),
             ),
           )
         else
@@ -704,7 +703,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                                 style: const TextStyle(fontWeight: FontWeight.w700)),
                             Text(
                               'Batch: ${b['batch_number'] ?? '-'} • Exp: ${(b['expiry_date'] ?? '-').toString().split('T').first}',
-                              style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                              style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                             ),
                           ],
                         ),
@@ -737,7 +736,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
               _isLocalStandalone
                   ? 'Transfer antar cabang tersedia saat beralih ke OXORA Cloud Multi-Cabang.'
                   : 'Belum ada dokumen transfer antar gudang/cabang.',
-              style: const TextStyle(fontSize: 13, color: AppColors.slate600),
+              style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(context).textSecondary),
             ),
           )
         else
@@ -763,7 +762,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                           ),
                           Text(
                             '${t['from_store_name'] ?? t['from_warehouse'] ?? 'Asal'} ➔ ${t['to_store_name'] ?? t['to_warehouse'] ?? 'Tujuan'}',
-                            style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                            style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                           ),
                         ],
                       ),
@@ -776,8 +775,8 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                             if (mounted) {
                               await context.read<PosCubit>().syncWithCloud(force: true, preserveActiveCart: true);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.successDark,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(context).positive,
                                   content: Text('Transfer stok berhasil diterima di cabang ini.'),
                                 ),
                               );
@@ -787,7 +786,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: AppColors.danger,
+                                  backgroundColor: NusaThemeTokens.of(context).danger,
                                   content: Text(ApiClient.extractErrorMessage(e)),
                                 ),
                               );
@@ -843,7 +842,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -875,7 +874,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                 ),
                 Text(
                   'Asal: ${session.activeStore.name}',
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                  style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
@@ -944,10 +943,10 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                 const SizedBox(height: 12),
                 Expanded(
                   child: lines.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
                             'Tambahkan barang yang akan dikirim ke cabang tujuan.',
-                            style: TextStyle(color: AppColors.slate500),
+                            style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary),
                           ),
                         )
                       : ListView.separated(
@@ -970,7 +969,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                                     style: const TextStyle(fontWeight: FontWeight.w800),
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                                    icon: Icon(Icons.close, color: NusaThemeTokens.of(ctx).danger, size: 18),
                                     onPressed: () => setModal(() => lines.removeAt(idx)),
                                   ),
                                 ],
@@ -985,20 +984,20 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: AppColors.dangerSoft,
+                      color: NusaThemeTokens.of(ctx).dangerSoft,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: const Color(0xFFFCA5A5)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                        Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             modalError!,
-                            style: const TextStyle(
-                              color: AppColors.dangerDark,
+                            style: TextStyle(
+                              color: NusaThemeTokens.of(ctx).danger,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1006,7 +1005,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                         ),
                         InkWell(
                           onTap: () => setModal(() => modalError = null),
-                          child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                          child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                         ),
                       ],
                     ),
@@ -1044,8 +1043,8 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                             await _loadInventoryOps();
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.successDark,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(ctx).positive,
                                   content: Text('Transfer stok antar cabang berhasil dikirim!'),
                                 ),
                               );
@@ -1059,7 +1058,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: AppColors.danger,
+                                  backgroundColor: NusaThemeTokens.of(ctx).danger,
                                   content: Text(errMsg),
                                 ),
                               );

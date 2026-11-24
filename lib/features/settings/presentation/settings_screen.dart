@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
@@ -163,9 +162,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Kode Terminal mempartisi nomor struk offline (contoh: M01, M02, M4F9A) agar multi-perangkat kasir tidak pernah bentrok.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
               ),
               const SizedBox(height: 14),
               TextField(
@@ -202,16 +201,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.danger.withOpacity(0.1),
+                    color: NusaThemeTokens.of(ctx).danger.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                    border: Border.all(color: NusaThemeTokens.of(ctx).danger.withOpacity(0.4)),
                   ),
                   child: Text(
                     inlineError!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.dangerDark,
+                      color: NusaThemeTokens.of(ctx).danger,
                     ),
                   ),
                 ),
@@ -682,7 +681,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 8),
                     if (isScanning)
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.symmetric(vertical: 16),
                         child: Center(
                           child: Column(
@@ -691,7 +690,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               SizedBox(height: 8),
                               Text(
                                 'Memindai printer Bluetooth di perangkat...',
-                                style: TextStyle(fontSize: 12, color: AppColors.slate500),
+                                style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textSecondary),
                               ),
                             ],
                           ),
@@ -743,10 +742,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: CircleAvatar(
-                            backgroundColor: isConnected ? AppColors.successSoft : AppColors.primarySoft,
+                            backgroundColor: isConnected ? NusaThemeTokens.of(ctx).positiveSoft : NusaThemeTokens.of(ctx).accentSoft,
                             child: Icon(
                               Icons.print_rounded,
-                              color: isConnected ? AppColors.successDark : AppColors.primary,
+                              color: isConnected ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).accent,
                             ),
                           ),
                           title: Text(dev.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
@@ -755,7 +754,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             height: 40,
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isConnected ? AppColors.success : AppColors.primary,
+                                backgroundColor: isConnected ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).accent,
                                 padding: const EdgeInsets.symmetric(horizontal: 12),
                               ),
                               onPressed: isConnecting
@@ -790,7 +789,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         if (context.mounted) {
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             SnackBar(
-                                              backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                                              backgroundColor: ok ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).warning,
                                               content: Text(
                                                 ok
                                                     ? '${dev.name} ditetapkan sebagai Printer $roleLabel (${dev.macAddress})'
@@ -836,7 +835,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             } else if (context.mounted && sentPhysical) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: AppColors.successDark,
+                                  backgroundColor: NusaThemeTokens.of(ctx).positive,
                                   content: Text(
                                     'Test Print ESC/POS berhasil dicetak ke ${_printerService.activePrinterLabel}!',
                                   ),
@@ -854,9 +853,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 content: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: AppColors.background,
+                                    color: NusaThemeTokens.of(pCtx).bgPage,
                                     borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.border),
+                                    border: Border.all(color: NusaThemeTokens.of(pCtx).borderSubtle),
                                   ),
                                   child: Text(
                                     previewText,
@@ -899,7 +898,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                                backgroundColor: ok ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).warning,
                                 content: Text(
                                   ok
                                       ? 'Pulse RJ-11 berhasil membuka laci: $hexStr'
@@ -984,7 +983,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            backgroundColor: AppColors.successDark,
+                            backgroundColor: NusaThemeTokens.of(ctx).positive,
                             content: Text(
                               'Mode bisnis aktif diubah ke ${v.label} (${caps.posDisplayName}).',
                             ),
@@ -999,14 +998,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           height: 40,
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? AppColors.primary.withOpacity(0.14)
-                                : AppColors.slate100,
+                                ? NusaThemeTokens.of(ctx).accent.withOpacity(0.14)
+                                : NusaThemeTokens.of(ctx).bgElevated,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
                             _verticalIcon(v),
                             size: 21,
-                            color: isSelected ? AppColors.primary : AppColors.slate600,
+                            color: isSelected ? NusaThemeTokens.of(ctx).accent : NusaThemeTokens.of(ctx).textSecondary,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1016,10 +1015,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             children: [
                               Text(
                                 v.label,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 13.5,
-                                  color: AppColors.navyDark,
+                                  color: NusaThemeTokens.of(ctx).textPrimary,
                                 ),
                               ),
                               const SizedBox(height: 2),
@@ -1027,7 +1026,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 v.shortDescription,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary),
                               ),
                             ],
                           ),
@@ -1055,9 +1054,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.storefront_rounded, color: AppColors.primary),
+            Icon(Icons.storefront_rounded, color: NusaThemeTokens.of(ctx).accent),
             SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1084,9 +1083,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             Text('Status Cloud: ${posState.isOnline ? 'Online & Sinkron' : 'Mode Offline Aman'}', style: const TextStyle(fontSize: 12.5)),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Platform Kasir POS Offline-First, Operasional Toko & 50 Laporan Bisnis oleh OXORA.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.slate500),
+              style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary),
             ),
           ],
         ),
@@ -1105,7 +1104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.successDark,
+          backgroundColor: NusaThemeTokens.of(context).positive,
           content: Text(
             syncedCount > 0
                 ? '$syncedCount item offline berhasil disinkronkan ke Cloud!'
@@ -1249,8 +1248,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             if (mounted) {
                               setState(() {});
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.successDark,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(mCtx).positive,
                                   content: Text('PIN Kasir Offline berhasil disimpan.'),
                                 ),
                               );
@@ -1727,7 +1726,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: tokens.bgSurface,
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
-                  boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.cardShadow,
+                  boxShadow: tokens.isDark || tokens.isHighContrast ? null : NusaThemeTokens.of(context).cardShadow,
                 ),
                 child: Row(
                   children: [

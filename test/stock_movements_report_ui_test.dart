@@ -12,7 +12,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      final tokens = NusaThemeTokens.warmLinenLight;
+      const tokens = NusaThemeTokens.warmLinenLight;
       const longPrimaryValue = 'GRN GRN-STORE01-202611-0002 (PO PUR-STORE01-202611-0012)';
 
       await tester.pumpWidget(
@@ -78,7 +78,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      final tokens = NusaThemeTokens.warmLinenLight;
+      const tokens = NusaThemeTokens.warmLinenLight;
       final kpis = [
         const MobileReportKpi(label: 'Total Mutasi', formatted: '17', type: 'count'),
         const MobileReportKpi(label: 'Total Masuk (+)', formatted: '175', type: 'count', tone: 'positive'),
@@ -163,7 +163,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      final tokens = NusaThemeTokens.warmLinenLight;
+      const tokens = NusaThemeTokens.warmLinenLight;
 
       await tester.pumpWidget(
         MaterialApp(

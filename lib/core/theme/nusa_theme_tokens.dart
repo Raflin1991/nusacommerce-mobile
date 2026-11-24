@@ -123,6 +123,62 @@ class NusaThemeTokens extends ThemeExtension<NusaThemeTokens> {
   bool get isDark => mode == NusaThemeMode.warmLinenDark;
   bool get isHighContrast => mode == NusaThemeMode.outdoorHighContrast;
 
+  Color get whatsapp => const Color(0xFF25D366);
+  Color get purple => isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+  Color get purpleSoft => isDark ? const Color(0x247C3AED) : const Color(0xFFEDE9FE);
+
+  LinearGradient get heroGradient => LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: heroGradientColors,
+      );
+
+  LinearGradient get accentGradient => LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: accentGradientColors,
+      );
+
+  LinearGradient get promoAmberGradient => LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: isDark
+            ? const [Color(0x24F59E0B), Color(0x38D97706)]
+            : const [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
+      );
+
+  List<BoxShadow> get cardShadow => isDark
+      ? const [
+          BoxShadow(
+            color: Color(0x55000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x081C1917),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ];
+
+  List<BoxShadow> get floatingCartShadow => isDark
+      ? const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 16,
+            offset: Offset(0, -4),
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x141C1917),
+            blurRadius: 16,
+            offset: Offset(0, -4),
+          ),
+        ];
+
   /// 1:1 with `:root` in `resources/css/tokens.css` (CDO Warm Linen Light).
   static const NusaThemeTokens warmLinenLight = NusaThemeTokens(
     mode: NusaThemeMode.warmLinenLight,
@@ -134,8 +190,8 @@ class NusaThemeTokens extends ThemeExtension<NusaThemeTokens> {
     textPrimary: Color(0xFF1C1917),
     textSecondary: Color(0xFF78716C),
     textTertiary: Color(0xFFA8A29E),
-    accent: Color(0xFFEA580C),
-    accentDark: Color(0xFFC2410C),
+    accent: Color(0xFFF97316),
+    accentDark: Color(0xFFEA580C),
     accentSoft: Color(0xFFFFF1E6),
     positive: Color(0xFF059669),
     positiveSoft: Color(0xFFECFDF5),
@@ -147,7 +203,7 @@ class NusaThemeTokens extends ThemeExtension<NusaThemeTokens> {
     shimmerHighlight: Color(0xFFF7F5F0),
     borderWidth: 1.0,
     heroGradientColors: [Color(0xFF292524), Color(0xFF1C1917)],
-    accentGradientColors: [Color(0xFFEA580C), Color(0xFFC2410C)],
+    accentGradientColors: [Color(0xFFF97316), Color(0xFFEA580C)],
   );
 
   /// 1:1 with `.dark` in `resources/css/tokens.css`.

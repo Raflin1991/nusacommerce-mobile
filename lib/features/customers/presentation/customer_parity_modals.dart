@@ -2,6 +2,7 @@ part of 'customer_list_screen.dart';
 
 extension _CustomerParityModalsExt on _CustomerListScreenState {
   Widget _buildCustomerGroupsTab(List<Map<String, dynamic>> groups) {
+    final tokens = NusaThemeTokens.of(context);
     if (groups.isEmpty) {
       return Center(
         child: Padding(
@@ -9,17 +10,17 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.groups_outlined, size: 48, color: AppColors.slate400),
+              Icon(Icons.groups_outlined, size: 48, color: tokens.textTertiary),
               const SizedBox(height: 10),
               const Text(
                 'Belum Ada Grup Pelanggan',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Kelompokkan pelanggan (misal: Member VIP, Reseller, Grosir) untuk memberikan diskon otomatis.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.slate600, fontSize: 13),
+                style: TextStyle(color: tokens.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 14),
               ElevatedButton.icon(
@@ -37,26 +38,27 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
       itemCount: groups.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (_, idx) {
+      itemBuilder: (itemCtx, idx) {
+        final itemTokens = NusaThemeTokens.of(itemCtx);
         final g = groups[idx];
         final id = (g['id'] as num?)?.toInt() ?? 0;
         final disc = double.tryParse((g['default_discount_percent'] ?? g['discount_percent'] ?? 0).toString()) ?? 0.0;
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: itemTokens.bgSurface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(color: itemTokens.borderSubtle),
           ),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
+                  color: itemTokens.accentSoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.workspace_premium_outlined, color: AppColors.primary),
+                child: Icon(Icons.workspace_premium_outlined, color: itemTokens.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -67,17 +69,17 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
                         style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                     Text(
                       'Diskon Default: ${disc.toStringAsFixed(0)}%',
-                      style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                      style: TextStyle(fontSize: 12.5, color: itemTokens.textSecondary),
                     ),
                   ],
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                icon: Icon(Icons.edit_outlined, color: itemTokens.accent),
                 onPressed: () => _showAddOrEditGroupModal(existing: g),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                icon: Icon(Icons.delete_outline, color: itemTokens.danger),
                 onPressed: () => context.read<PosCubit>().deleteCustomerGroup(id),
               ),
             ],
@@ -226,7 +228,7 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
               const SizedBox(height: 6),
               Text(
                 'Saldo Piutang: ${IdrCurrencyFormatter.format((customer['outstanding_balance'] as num?)?.toDouble() ?? 0)}  •  Deposit: ${IdrCurrencyFormatter.format((customer['store_credit_balance'] as num?)?.toDouble() ?? 0)}',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
               ),
               const Divider(height: 18),
               Expanded(
@@ -255,7 +257,7 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
                                 if (due > 0)
                                   Text(
                                     'Bon: ${IdrCurrencyFormatter.format(due)}',
-                                    style: const TextStyle(fontSize: 11, color: AppColors.danger),
+                                    style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(ctx).danger),
                                   ),
                               ],
                             ),

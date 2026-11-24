@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
@@ -69,7 +68,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -129,8 +128,8 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
               ],
               if (showColor) ...[
                 const SizedBox(height: 12),
-                const Text('Warna Label Kategori',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.slate600)),
+                Text('Warna Label Kategori',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: NusaThemeTokens.of(ctx).textSecondary)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 10,
@@ -147,7 +146,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                           color: colorVal,
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: active ? AppColors.navyDark : Colors.transparent,
+                            color: active ? NusaThemeTokens.of(ctx).textPrimary : Colors.transparent,
                             width: 3,
                           ),
                         ),
@@ -189,7 +188,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text((res['message'] ?? 'Gagal menyimpan').toString()),
-                              backgroundColor: AppColors.danger,
+                              backgroundColor: NusaThemeTokens.of(ctx).danger,
                             ),
                           );
                         }
@@ -214,7 +213,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(backgroundColor: NusaThemeTokens.of(ctx).danger),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Hapus'),
           ),
@@ -230,7 +229,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text((res['message'] ?? 'Gagal menghapus').toString()),
-          backgroundColor: AppColors.danger,
+          backgroundColor: NusaThemeTokens.of(context).danger,
         ),
       );
     }
@@ -253,9 +252,9 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
-          labelColor: AppColors.primary,
-          unselectedLabelColor: AppColors.slate500,
-          indicatorColor: AppColors.primary,
+          labelColor: NusaThemeTokens.of(context).accent,
+          unselectedLabelColor: NusaThemeTokens.of(context).textSecondary,
+          indicatorColor: NusaThemeTokens.of(context).accent,
           onTap: (_) => setState(() {}),
           tabs: const [
             Tab(text: 'Kategori'),
@@ -293,7 +292,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                   );
                 }
               },
-              backgroundColor: AppColors.primary,
+              backgroundColor: NusaThemeTokens.of(context).accent,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add_rounded),
               label: Text(
@@ -354,13 +353,13 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                     ),
                                     Text(
                                       '$count produk terdaftar',
-                                      style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                      style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                     ),
                                   ],
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                                icon: Icon(Icons.edit_outlined, color: NusaThemeTokens.of(context).accent),
                                 onPressed: () => _showSimpleCrudModal(
                                   title: 'Edit Kategori',
                                   nameLabel: 'Nama Kategori *',
@@ -370,7 +369,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                                icon: Icon(Icons.delete_outline_rounded, color: NusaThemeTokens.of(context).danger),
                                 onPressed: () => _confirmDelete(
                                   label: cat['name'].toString(),
                                   onDelete: () => context.read<PosCubit>().deleteCategory(id),
@@ -402,10 +401,10 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: AppColors.primarySoft,
+                                  color: NusaThemeTokens.of(context).accentSoft,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(Icons.verified_rounded, color: AppColors.primary, size: 20),
+                                child: Icon(Icons.verified_rounded, color: NusaThemeTokens.of(context).accent, size: 20),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -415,7 +414,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                                icon: Icon(Icons.edit_outlined, color: NusaThemeTokens.of(context).accent),
                                 onPressed: () => _showSimpleCrudModal(
                                   title: 'Edit Merek',
                                   nameLabel: 'Nama Merek *',
@@ -424,7 +423,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                                icon: Icon(Icons.delete_outline_rounded, color: NusaThemeTokens.of(context).danger),
                                 onPressed: () => _confirmDelete(
                                   label: brand['name'].toString(),
                                   onDelete: () => context.read<PosCubit>().deleteBrand(id),
@@ -467,13 +466,13 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                     ),
                                     Text(
                                       dec ? 'Mendukung qty desimal / timbangan' : 'Qty bilangan bulat',
-                                      style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                      style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                     ),
                                   ],
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                                icon: Icon(Icons.edit_outlined, color: NusaThemeTokens.of(context).accent),
                                 onPressed: () => _showSimpleCrudModal(
                                   title: 'Edit Satuan',
                                   nameLabel: 'Nama Satuan *',
@@ -484,7 +483,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                                icon: Icon(Icons.delete_outline_rounded, color: NusaThemeTokens.of(context).danger),
                                 onPressed: () => _confirmDelete(
                                   label: unit['name'].toString(),
                                   onDelete: () => context.read<PosCubit>().deleteUnit(id),
@@ -532,7 +531,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    const Icon(Icons.qr_code_2_rounded, color: AppColors.primary),
+                    Icon(Icons.qr_code_2_rounded, color: NusaThemeTokens.of(context).accent),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Row(
@@ -592,12 +591,12 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                           const SizedBox(height: 3),
                           Text(
                             'Kode: ${code.isNotEmpty ? code : "-"} • SKU: ${p.sku}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             IdrCurrencyFormatter.format(p.sellingPrice),
-                            style: AppTheme.moneyStyle(fontSize: 14, color: AppColors.primary),
+                            style: AppTheme.moneyStyle(fontSize: 14, color: NusaThemeTokens.of(context).accent),
                           ),
                         ],
                       ),
@@ -632,7 +631,7 @@ class _CatalogTaxonomiesScreenState extends State<CatalogTaxonomiesScreen>
                             content: Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: AppColors.slate100,
+                                color: NusaThemeTokens.of(ctx).bgElevated,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(

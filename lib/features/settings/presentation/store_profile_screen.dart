@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../auth/bloc/auth_cubit.dart';
@@ -82,8 +81,8 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.successDark,
+        SnackBar(
+          backgroundColor: NusaThemeTokens.of(context).positive,
           content: Text('Profil Toko berhasil disimpan dan disinkronkan ke header struk!'),
         ),
       );
@@ -115,9 +114,9 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  gradient: AppColors.executiveNavyGradient,
+                  gradient: NusaThemeTokens.of(context).heroGradient,
                   borderRadius: BorderRadius.circular(18),
-                  boxShadow: AppColors.cardShadow,
+                  boxShadow: NusaThemeTokens.of(context).cardShadow,
                 ),
                 child: Row(
                   children: [
@@ -162,15 +161,15 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.border),
-                  boxShadow: AppColors.cardShadow,
+                  border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
+                  boxShadow: NusaThemeTokens.of(context).cardShadow,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Nama Toko (Header Struk)',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -178,9 +177,9 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
+                    Text(
                       'Alamat Cabang',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -189,9 +188,9 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
+                    Text(
                       'Nomor Telepon / WhatsApp Toko',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -200,9 +199,9 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       'Footer Struk Kasir',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate600, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -225,7 +224,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
                 child: ElevatedButton(
                   onPressed: _saveChanges,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: NusaThemeTokens.of(context).accent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   child: const Text(

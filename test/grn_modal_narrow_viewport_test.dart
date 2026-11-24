@@ -12,9 +12,8 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
 
-    final tokens = NusaThemeTokens.warmLinenLight;
+    const tokens = NusaThemeTokens.warmLinenLight;
     double currentQty = 4.0;
-    const maxQty = 7.0;
 
     await tester.pumpWidget(
       MaterialApp(

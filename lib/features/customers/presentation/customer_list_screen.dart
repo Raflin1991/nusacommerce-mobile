@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -161,8 +160,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                         : () async {
                             if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.danger,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(ctx).danger,
                                   content: Text('Nama dan Nomor HP wajib diisi.'),
                                 ),
                               );
@@ -188,7 +187,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   backgroundColor:
-                                      res['success'] == true ? AppColors.successDark : AppColors.danger,
+                                      res['success'] == true ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).danger,
                                   content: Text(
                                     res['success'] == true
                                         ? (isEdit
@@ -245,13 +244,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                 children: [
                   CircleAvatar(
                     radius: 26,
-                    backgroundColor: AppColors.primarySoft,
+                    backgroundColor: NusaThemeTokens.of(ctx).accentSoft,
                     child: Text(
                       (customer['name'] ?? 'P').toString().substring(0, 1).toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.primary,
+                        color: NusaThemeTokens.of(ctx).accent,
                       ),
                     ),
                   ),
@@ -266,14 +265,14 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                         ),
                         Text(
                           '${customer['phone'] ?? '-'}${customer['business_name'] != null ? ' • ${customer['business_name']}' : ''}',
-                          style: const TextStyle(fontSize: 12.5, color: AppColors.slate500),
+                          style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     tooltip: 'Edit Pelanggan',
-                    icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                    icon: Icon(Icons.edit_outlined, color: NusaThemeTokens.of(ctx).accent),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _showAddOrEditCustomerModal(existing: customer);
@@ -287,7 +286,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                 decoration: BoxDecoration(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: NusaThemeTokens.of(ctx).borderSubtle),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,9 +306,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                       value: ratio,
                       minHeight: 7,
                       borderRadius: BorderRadius.circular(999),
-                      backgroundColor: AppColors.border,
+                      backgroundColor: NusaThemeTokens.of(ctx).borderSubtle,
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        outstanding > 0 ? AppColors.warningDark : AppColors.success,
+                        outstanding > 0 ? NusaThemeTokens.of(ctx).warning : NusaThemeTokens.of(ctx).positive,
                       ),
                     ),
                   ],
@@ -333,7 +332,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   if (outstanding > 0)
                     Expanded(
                       child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.whatsapp),
+                        style: ElevatedButton.styleFrom(backgroundColor: NusaThemeTokens.of(ctx).whatsapp),
                         onPressed: () => WhatsAppService.sendDebtReminder(
                           customerName: customer['name'].toString(),
                           customerPhone: (customer['phone'] ?? '').toString(),
@@ -352,7 +351,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                    style: ElevatedButton.styleFrom(backgroundColor: NusaThemeTokens.of(ctx).accent),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _openInstallmentFromReceivables(custId, customer['name'].toString());
@@ -385,7 +384,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                         Navigator.pop(ctx);
                         _showTopupDepositModal(customer);
                       },
-                      icon: const Icon(Icons.savings_outlined, size: 18, color: AppColors.successDark),
+                      icon: Icon(Icons.savings_outlined, size: 18, color: NusaThemeTokens.of(ctx).positive),
                       label: const Text('Top-up Deposit'),
                     ),
                   ),
@@ -398,17 +397,17 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
               ),
               const SizedBox(height: 10),
               if (history.isEmpty)
-                const Text(
+                Text(
                   'Belum ada riwayat transaksi tercatat untuk pelanggan ini.',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.slate500),
+                  style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
                 )
               else
                 ...history.take(15).map((sale) {
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const CircleAvatar(
-                      backgroundColor: AppColors.primarySoft,
-                      child: Icon(Icons.receipt_long_rounded, size: 18, color: AppColors.primary),
+                    leading: CircleAvatar(
+                      backgroundColor: NusaThemeTokens.of(ctx).accentSoft,
+                      child: Icon(Icons.receipt_long_rounded, size: 18, color: NusaThemeTokens.of(ctx).accent),
                     ),
                     title: Text(
                       (sale['number'] ?? '#INV').toString(),
@@ -416,7 +415,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                     ),
                     subtitle: Text(
                       (sale['sale_datetime'] ?? '').toString(),
-                      style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                      style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary),
                     ),
                     trailing: Text(
                       IdrCurrencyFormatter.format((sale['grand_total'] as num?) ?? 0),
@@ -481,8 +480,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   if (mounted) {
                     context.read<PosCubit>().syncWithCloud(force: false);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        backgroundColor: AppColors.successDark,
+                      SnackBar(
+                        backgroundColor: NusaThemeTokens.of(dCtx).positive,
                         content: Text('Pembayaran cicilan berhasil dicatat.'),
                       ),
                     );
@@ -491,7 +490,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        backgroundColor: AppColors.danger,
+                        backgroundColor: NusaThemeTokens.of(dCtx).danger,
                         content: Text(ApiClient.extractErrorMessage(e)),
                       ),
                     );
@@ -543,15 +542,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                 onPressed: () => context.read<PosCubit>().syncWithCloud(force: false),
               ),
               IconButton(
-                icon: const Icon(Icons.person_add_alt_1_rounded, color: AppColors.primary),
+                icon: Icon(Icons.person_add_alt_1_rounded, color: NusaThemeTokens.of(context).accent),
                 onPressed: () => _showAddOrEditCustomerModal(),
               ),
             ],
             bottom: TabBar(
               controller: _tabController,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.slate500,
-              indicatorColor: AppColors.primary,
+              labelColor: NusaThemeTokens.of(context).accent,
+              unselectedLabelColor: NusaThemeTokens.of(context).textSecondary,
+              indicatorColor: NusaThemeTokens.of(context).accent,
               tabs: [
                 Tab(text: 'Semua (${state.customers.length})'),
                 Tab(text: 'Punya Piutang ($debtorsCount)'),
@@ -563,7 +562,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
             onPressed: _tabController.index == 2
                 ? () => _showAddOrEditGroupModal()
                 : () => _showAddOrEditCustomerModal(),
-            backgroundColor: AppColors.primary,
+            backgroundColor: NusaThemeTokens.of(context).accent,
             icon: Icon(
               _tabController.index == 2 ? Icons.group_add_rounded : Icons.person_add_rounded,
               color: Colors.white,
@@ -584,14 +583,14 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                   children: [
                     Row(
                       children: [
-                        _kpiCard('Total Member', '${state.customers.length}', AppColors.primary),
+                        _kpiCard('Total Member', '${state.customers.length}', NusaThemeTokens.of(context).accent),
                         const SizedBox(width: 8),
-                        _kpiCard('Berhutang', '$debtorsCount Org', AppColors.warningDark),
+                        _kpiCard('Berhutang', '$debtorsCount Org', NusaThemeTokens.of(context).warning),
                         const SizedBox(width: 8),
                         _kpiCard(
                           'Piutang Aktif',
                           IdrCurrencyFormatter.formatCompact(totalReceivables),
-                          AppColors.dangerDark,
+                          NusaThemeTokens.of(context).danger,
                         ),
                       ],
                     ),
@@ -614,7 +613,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                           onlyDebtors
                               ? 'Tidak ada pelanggan dengan saldo piutang bon.'
                               : 'Belum ada data pelanggan.',
-                          style: const TextStyle(color: AppColors.slate500),
+                          style: TextStyle(color: NusaThemeTokens.of(context).textSecondary),
                         ),
                       )
                     : ListView.separated(
@@ -636,15 +635,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.border),
+                                border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                               ),
                               child: Row(
                                 children: [
                                   CircleAvatar(
-                                    backgroundColor: AppColors.primarySoft,
+                                    backgroundColor: NusaThemeTokens.of(context).accentSoft,
                                     child: Text(
                                       (c['name'] ?? 'P').toString().substring(0, 1).toUpperCase(),
-                                      style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary),
+                                      style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).accent),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -664,15 +663,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                                 decoration: BoxDecoration(
-                                                  color: AppColors.primarySoft,
+                                                  color: NusaThemeTokens.of(context).accentSoft,
                                                   borderRadius: BorderRadius.circular(999),
                                                 ),
                                                 child: Text(
                                                   group,
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 10,
                                                     fontWeight: FontWeight.w800,
-                                                    color: AppColors.primary,
+                                                    color: NusaThemeTokens.of(context).accent,
                                                   ),
                                                 ),
                                               ),
@@ -681,16 +680,16 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                                         const SizedBox(height: 2),
                                         Text(
                                           '$phone • $pts Poin',
-                                          style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                         ),
                                         if (balance > 0) ...[
                                           const SizedBox(height: 4),
                                           Text(
                                             'Bon Aktif: ${IdrCurrencyFormatter.format(balance)}',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
-                                              color: AppColors.warningDark,
+                                              color: NusaThemeTokens.of(context).warning,
                                             ),
                                           ),
                                         ],
@@ -699,7 +698,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                                   ),
                                   IconButton(
                                     tooltip: 'Chat / Tagih WhatsApp',
-                                    icon: const Icon(Icons.chat_rounded, color: AppColors.whatsapp),
+                                    icon: Icon(Icons.chat_rounded, color: NusaThemeTokens.of(context).whatsapp),
                                     onPressed: () {
                                       final storeName = context.read<AuthCubit>().state.session.activeStore.name;
                                       WhatsAppService.sendDebtReminder(
@@ -737,7 +736,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.slate600)),
+            Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(context).textSecondary)),
             const SizedBox(height: 2),
             Text(
               value,

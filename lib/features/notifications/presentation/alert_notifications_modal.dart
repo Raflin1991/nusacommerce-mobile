@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -152,9 +151,12 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     bool retryOnly = false,
   }) async {
     if (_processingConflictUuids.contains(uuid)) return;
-    setState(() => _processingConflictUuids.add(uuid));
+    setState(() {
+      _processingConflictUuids.add(uuid);
+      _conflictInlineError = null;
+      _conflictInlineSuccess = null;
+    });
     final posCubit = context.read<PosCubit>();
-    final messenger = ScaffoldMessenger.of(context);
     final ok = retryOnly
         ? await posCubit.retryOfflineSyncConflict(uuid)
         : await posCubit.resolveOfflineStockConflict(
@@ -162,39 +164,26 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
             approveOversell: approveOversell,
           );
     if (!mounted) return;
-    setState(() => _processingConflictUuids.remove(uuid));
-    if (retryOnly) {
-      messenger.showSnackBar(
-        SnackBar(
-          backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
-          content: Text(
-            ok
-                ? 'Nota offline berhasil disinkronkan ulang ke Cloud.'
-                : 'Sinkronisasi ulang masih ditolak server. Pastikan syarat (seperti Shift Kasir) sudah terpenuhi.',
-          ),
-        ),
-      );
-    } else if (approveOversell) {
-      messenger.showSnackBar(
-        SnackBar(
-          backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
-          content: Text(
-            ok
-                ? 'Oversell disetujui dan nota offline berhasil disinkronkan.'
-                : 'Gagal sinkronisasi oversell. Periksa koneksi jaringan cabang.',
-          ),
-        ),
-      );
-    } else {
-      messenger.showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.warningDark,
-          content: Text(
-            'Nota offline dibatalkan dari antrean. Lakukan pengembalian dana manual ke pelanggan.',
-          ),
-        ),
-      );
-    }
+    setState(() {
+      _processingConflictUuids.remove(uuid);
+      if (retryOnly) {
+        if (ok) {
+          _conflictInlineSuccess = 'Nota offline berhasil disinkronkan ulang ke Cloud.';
+        } else {
+          _conflictInlineError =
+              'Sinkronisasi ulang masih ditolak server. Pastikan syarat (seperti Shift Kasir) sudah terpenuhi.';
+        }
+      } else if (approveOversell) {
+        if (ok) {
+          _conflictInlineSuccess = 'Oversell disetujui dan nota offline berhasil disinkronkan.';
+        } else {
+          _conflictInlineError = 'Gagal sinkronisasi oversell. Periksa koneksi jaringan cabang.';
+        }
+      } else {
+        _conflictInlineError =
+            'Nota offline dibatalkan dari antrean. Lakukan pengembalian dana manual ke pelanggan.';
+      }
+    });
   }
 
   bool _isTodayIso(dynamic rawDate) {
@@ -212,27 +201,24 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
     if (widget.onDecideApproval == null || _processingApprovalIds.contains(id)) {
       return;
     }
-    setState(() => _processingApprovalIds.add(id));
+    setState(() {
+      _processingApprovalIds.add(id);
+      _conflictInlineError = null;
+      _conflictInlineSuccess = null;
+    });
     final ok = await widget.onDecideApproval!(id, decision);
     if (!mounted) return;
     setState(() {
       _processingApprovalIds.remove(id);
       if (ok) {
         _approvals.removeWhere((a) => (a['id'] as num?)?.toInt() == id);
+        _conflictInlineSuccess = decision == 'approved'
+            ? 'Permintaan otorisasi disetujui.'
+            : 'Permintaan otorisasi ditolak.';
+      } else {
+        _conflictInlineError = 'Gagal memproses keputusan otorisasi.';
       }
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: ok ? AppColors.successDark : AppColors.danger,
-        content: Text(
-          ok
-              ? (decision == 'approved'
-                  ? 'Permintaan otorisasi disetujui.'
-                  : 'Permintaan otorisasi ditolak.')
-              : 'Gagal memproses keputusan otorisasi.',
-        ),
-      ),
-    );
   }
 
   @override
@@ -351,6 +337,52 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                   controller: scrollController,
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
                   children: [
+                    if (_conflictInlineError != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: tokens.dangerSoft,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: tokens.danger),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline_rounded, color: tokens.danger, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _conflictInlineError!,
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.danger),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (_conflictInlineSuccess != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: tokens.positiveSoft,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: tokens.positive),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.check_circle_outline_rounded, color: tokens.positive, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _conflictInlineSuccess!,
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.positive),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     if (_approvals.isNotEmpty) ...[
                       _buildApprovalsSection(),
                       const SizedBox(height: 12),
@@ -394,8 +426,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Otorisasi & Approval Manajer (${_approvals.length})',
       subtitle: 'Permintaan persetujuan transaksi, biaya, atau pembelian stok',
       icon: Icons.verified_user_outlined,
-      accentColor: AppColors.primary,
-      softBgColor: AppColors.primarySoft,
+      accentColor: NusaThemeTokens.of(context).accent,
+      softBgColor: NusaThemeTokens.of(context).accentSoft,
       child: Column(
         children: _approvals.take(10).map((ap) {
           final id = (ap['id'] as num?)?.toInt() ?? 0;
@@ -421,20 +453,20 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     Expanded(
                       child: Text(
                         actionType.toUpperCase(),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.primary,
+                          color: NusaThemeTokens.of(context).accent,
                         ),
                       ),
                     ),
                     if (amount != null)
                       Text(
                         IdrCurrencyFormatter.format(amount),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.navyDark,
+                          color: NusaThemeTokens.of(context).textPrimary,
                         ),
                       ),
                   ],
@@ -442,11 +474,11 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                 const SizedBox(height: 3),
                 Text(
                   reason,
-                  style: const TextStyle(fontSize: 12, color: AppColors.navyDark, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textPrimary, fontWeight: FontWeight.w600),
                 ),
                 Text(
                   'Pemohon: $requester',
-                  style: const TextStyle(fontSize: 11, color: AppColors.slate500),
+                  style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(context).textSecondary),
                 ),
                 if (widget.onDecideApproval != null && id > 0) ...[
                   const SizedBox(height: 8),
@@ -456,8 +488,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: OutlinedButton(
                           onPressed: busy ? null : () => _handleApprovalDecision(id, 'rejected'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.dangerDark,
-                            side: const BorderSide(color: AppColors.danger),
+                            foregroundColor: NusaThemeTokens.of(context).danger,
+                            side: BorderSide(color: NusaThemeTokens.of(context).danger),
                             visualDensity: VisualDensity.compact,
                           ),
                           child: const Text('Tolak'),
@@ -468,7 +500,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: ElevatedButton(
                           onPressed: busy ? null : () => _handleApprovalDecision(id, 'approved'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.successDark,
+                            backgroundColor: NusaThemeTokens.of(context).positive,
                             foregroundColor: Colors.white,
                             visualDensity: VisualDensity.compact,
                           ),
@@ -498,8 +530,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Pesanan Toko Online (Webstore)',
       subtitle: 'Pesanan daring menunggu konfirmasi, proses, atau pengiriman',
       icon: Icons.shopping_bag_outlined,
-      accentColor: hasPending ? AppColors.primary : AppColors.successDark,
-      softBgColor: hasPending ? AppColors.primarySoft : AppColors.successSoft,
+      accentColor: hasPending ? NusaThemeTokens.of(context).accent : NusaThemeTokens.of(context).positive,
+      softBgColor: hasPending ? NusaThemeTokens.of(context).accentSoft : NusaThemeTokens.of(context).positiveSoft,
       child: Row(
         children: [
           Expanded(
@@ -510,7 +542,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
-                color: hasPending ? AppColors.navyDark : AppColors.slate600,
+                color: hasPending ? NusaThemeTokens.of(context).textPrimary : NusaThemeTokens.of(context).textSecondary,
               ),
             ),
           ),
@@ -537,23 +569,23 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Tugas Operasional Toko (${widget.tasks.length})',
       subtitle: 'Daftar pekerjaan harian dan eskalasi tim cabang',
       icon: Icons.task_alt_rounded,
-      accentColor: AppColors.warningDark,
-      softBgColor: AppColors.warningSoft,
+      accentColor: NusaThemeTokens.of(context).warning,
+      softBgColor: NusaThemeTokens.of(context).warningSoft,
       child: Column(
         children: widget.tasks.take(8).map((t) {
           final title = (t['title'] ?? t['name'] ?? 'Tugas Operasional').toString();
           final desc = (t['description'] ?? t['notes'] ?? '').toString();
           final priority = (t['priority'] ?? 'normal').toString().toUpperCase();
           final priorityColor = priority == 'URGENT' || priority == 'HIGH'
-              ? AppColors.danger
-              : AppColors.warningDark;
+              ? NusaThemeTokens.of(context).danger
+              : NusaThemeTokens.of(context).warning;
           return Container(
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: AppColors.background,
+              color: NusaThemeTokens.of(context).bgPage,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
             ),
             child: Row(
               children: [
@@ -563,14 +595,14 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.navyDark),
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(context).textPrimary),
                       ),
                       if (desc.isNotEmpty)
                         Text(
                           desc,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11, color: AppColors.slate500),
+                          style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(context).textSecondary),
                         ),
                     ],
                   ),
@@ -608,8 +640,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
           ? 'Transaksi offline yang terblokir akibat stok fisik server habis (InsufficientStock)'
           : 'Transaksi offline tertahan validasi server (mis. Shift Kasir, stok, atau aturan bisnis)',
       icon: Icons.sync_problem_rounded,
-      accentColor: AppColors.danger,
-      softBgColor: AppColors.danger.withOpacity(0.1),
+      accentColor: NusaThemeTokens.of(context).danger,
+      softBgColor: NusaThemeTokens.of(context).danger.withOpacity(0.1),
       child: Column(
         children: [
           if (_conflictInlineError != null)
@@ -618,16 +650,16 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.1),
+                color: NusaThemeTokens.of(context).danger.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.4)),
               ),
               child: Text(
                 _conflictInlineError!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.dangerDark,
+                  color: NusaThemeTokens.of(context).danger,
                 ),
               ),
             ),
@@ -637,16 +669,16 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.successDark.withOpacity(0.1),
+                color: NusaThemeTokens.of(context).positive.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.successDark.withOpacity(0.35)),
+                border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.35)),
               ),
               child: Text(
                 _conflictInlineSuccess!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.successDark,
+                  color: NusaThemeTokens.of(context).positive,
                 ),
               ),
             ),
@@ -681,9 +713,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.background,
+              color: NusaThemeTokens.of(context).bgPage,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+              border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.35)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -695,10 +727,10 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         saleNumber.isNotEmpty
                             ? '$saleNumber • $cashier'
                             : 'Nota Offline #$uuid • $cashier',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.navyDark,
+                          color: NusaThemeTokens.of(context).textPrimary,
                         ),
                       ),
                     ),
@@ -706,15 +738,15 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: AppColors.danger.withOpacity(0.12),
+                          color: NusaThemeTokens.of(context).danger.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           conflictCode.toUpperCase(),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.dangerDark,
+                            color: NusaThemeTokens.of(context).danger,
                           ),
                         ),
                       ),
@@ -723,9 +755,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                 const SizedBox(height: 3),
                 Text(
                   reason,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
-                    color: AppColors.dangerDark,
+                    color: NusaThemeTokens.of(context).danger,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -737,8 +769,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            foregroundColor: AppColors.dangerDark,
-                            side: BorderSide(color: AppColors.danger.withOpacity(0.45)),
+                            foregroundColor: NusaThemeTokens.of(context).danger,
+                            side: BorderSide(color: NusaThemeTokens.of(context).danger.withOpacity(0.45)),
                           ),
                           onPressed: isProcessing
                               ? null
@@ -755,7 +787,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            backgroundColor: isStockConflict ? AppColors.warningDark : AppColors.primary,
+                            backgroundColor: isStockConflict ? NusaThemeTokens.of(context).warning : NusaThemeTokens.of(context).accent,
                             foregroundColor: Colors.white,
                           ),
                           onPressed: isProcessing
@@ -783,8 +815,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            foregroundColor: AppColors.primaryDark,
-                            side: const BorderSide(color: AppColors.primary),
+                            foregroundColor: NusaThemeTokens.of(context).accentDark,
+                            side: BorderSide(color: NusaThemeTokens.of(context).accent),
                           ),
                           onPressed: isProcessing
                               ? null
@@ -808,8 +840,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            foregroundColor: AppColors.navyDark,
-                            side: BorderSide(color: AppColors.slate400.withOpacity(0.6)),
+                            foregroundColor: NusaThemeTokens.of(context).textPrimary,
+                            side: BorderSide(color: NusaThemeTokens.of(context).textTertiary.withOpacity(0.6)),
                           ),
                           onPressed: isProcessing
                               ? null
@@ -830,7 +862,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            backgroundColor: AppColors.primary,
+                            backgroundColor: NusaThemeTokens.of(context).accent,
                             foregroundColor: Colors.white,
                           ),
                           onPressed: isProcessing
@@ -864,8 +896,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Dead-Letter Queue / Gagal Sinkron (${items.length})',
       subtitle: 'Payload piutang, biaya, produk, atau tutup shift yang ditolak server dikarantina agar antrean lain tidak macet',
       icon: Icons.report_problem_outlined,
-      accentColor: AppColors.warningDark,
-      softBgColor: AppColors.warningSoft,
+      accentColor: NusaThemeTokens.of(context).warning,
+      softBgColor: NusaThemeTokens.of(context).warningSoft,
       child: Column(
         children: [
           if (_conflictInlineError != null)
@@ -874,16 +906,16 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.1),
+                color: NusaThemeTokens.of(context).danger.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.4)),
               ),
               child: Text(
                 _conflictInlineError!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.dangerDark,
+                  color: NusaThemeTokens.of(context).danger,
                 ),
               ),
             ),
@@ -893,16 +925,16 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.successDark.withOpacity(0.1),
+                color: NusaThemeTokens.of(context).positive.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.successDark.withOpacity(0.35)),
+                border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.35)),
               ),
               child: Text(
                 _conflictInlineSuccess!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.successDark,
+                  color: NusaThemeTokens.of(context).positive,
                 ),
               ),
             ),
@@ -919,9 +951,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppColors.background,
+                color: NusaThemeTokens.of(context).bgPage,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.warningDark.withOpacity(0.35)),
+                border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.35)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -931,25 +963,25 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                       Expanded(
                         child: Text(
                           title,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.navyDark,
+                            color: NusaThemeTokens.of(context).textPrimary,
                           ),
                         ),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: AppColors.warningDark.withOpacity(0.14),
+                          color: NusaThemeTokens.of(context).warning.withOpacity(0.14),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           httpStatus > 0 ? 'HTTP $httpStatus' : entityType.toUpperCase(),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.warningDark,
+                            color: NusaThemeTokens.of(context).warning,
                           ),
                         ),
                       ),
@@ -958,9 +990,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                   const SizedBox(height: 3),
                   Text(
                     errMsg,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11.5,
-                      color: AppColors.dangerDark,
+                      color: NusaThemeTokens.of(context).danger,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -971,8 +1003,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            foregroundColor: AppColors.dangerDark,
-                            side: BorderSide(color: AppColors.danger.withOpacity(0.45)),
+                            foregroundColor: NusaThemeTokens.of(context).danger,
+                            side: BorderSide(color: NusaThemeTokens.of(context).danger.withOpacity(0.45)),
                           ),
                           onPressed: busy
                               ? null
@@ -1001,7 +1033,7 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            backgroundColor: AppColors.primary,
+                            backgroundColor: NusaThemeTokens.of(context).accent,
                             foregroundColor: Colors.white,
                           ),
                           onPressed: busy
@@ -1151,8 +1183,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Radar Void & Diskon > Rp 50.000',
       subtitle: 'Audit transaksi batal dan potongan harga besar hari ini',
       icon: Icons.gpp_maybe_rounded,
-      accentColor: hasAlert ? AppColors.danger : AppColors.successDark,
-      softBgColor: hasAlert ? AppColors.danger.withOpacity(0.1) : AppColors.successSoft,
+      accentColor: hasAlert ? NusaThemeTokens.of(context).danger : NusaThemeTokens.of(context).positive,
+      softBgColor: hasAlert ? NusaThemeTokens.of(context).danger.withOpacity(0.1) : NusaThemeTokens.of(context).positiveSoft,
       child: !hasAlert
           ? _buildSafePill('Aman • Tidak ada void atau diskon > Rp 50.000 hari ini')
           : Column(
@@ -1163,10 +1195,10 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       'Server Audit Watch mendeteksi ${widget.voidCountFromServer} transaksi void.',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.danger,
+                        color: NusaThemeTokens.of(context).danger,
                       ),
                     ),
                   ),
@@ -1182,19 +1214,19 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     margin: const EdgeInsets.only(bottom: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: AppColors.background,
+                      color: NusaThemeTokens.of(context).bgPage,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                     ),
                     child: Row(
                       children: [
                         Expanded(
                           child: Text(
                             inv,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.navyDark,
+                              color: NusaThemeTokens.of(context).textPrimary,
                             ),
                           ),
                         ),
@@ -1202,10 +1234,10 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                           status == 'VOID'
                               ? 'STATUS VOID'
                               : 'Diskon ${IdrCurrencyFormatter.format(discount)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.danger,
+                            color: NusaThemeTokens.of(context).danger,
                           ),
                         ),
                       ],
@@ -1223,8 +1255,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Radar Selisih Kasir (Shift Variance)',
       subtitle: 'Pantau perbedaan kas fisik laci dengan catatan sistem',
       icon: Icons.point_of_sale_rounded,
-      accentColor: hasVariance ? AppColors.warningDark : AppColors.successDark,
-      softBgColor: hasVariance ? AppColors.warningSoft : AppColors.successSoft,
+      accentColor: hasVariance ? NusaThemeTokens.of(context).warning : NusaThemeTokens.of(context).positive,
+      softBgColor: hasVariance ? NusaThemeTokens.of(context).warningSoft : NusaThemeTokens.of(context).positiveSoft,
       child: !hasVariance
           ? _buildSafePill('Aman • Tidak ditemukan shift dengan selisih kas')
           : Row(
@@ -1232,10 +1264,10 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                 Expanded(
                   child: Text(
                     '${widget.varianceShiftsCount} shift ditutup dengan selisih kas laci.',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.warningDark,
+                      color: NusaThemeTokens.of(context).warning,
                     ),
                   ),
                 ),
@@ -1258,8 +1290,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Radar Stok Menipis & FEFO (< 30 Hari)',
       subtitle: 'Barang mendekati stok minimum atau tanggal kedaluwarsa',
       icon: Icons.inventory_2_rounded,
-      accentColor: hasAlert ? AppColors.warningDark : AppColors.successDark,
-      softBgColor: hasAlert ? AppColors.warningSoft : AppColors.successSoft,
+      accentColor: hasAlert ? NusaThemeTokens.of(context).warning : NusaThemeTokens.of(context).positive,
+      softBgColor: hasAlert ? NusaThemeTokens.of(context).warningSoft : NusaThemeTokens.of(context).positiveSoft,
       child: !hasAlert
           ? _buildSafePill('Aman • Stok produk & tanggal kedaluwarsa terkendali')
           : Column(
@@ -1268,14 +1300,14 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                     ? 'FEFO < 30 Hari'
                     : 'Stok Menipis';
                 final badgeColor =
-                    p.hasExpiringSoonBatch ? AppColors.danger : AppColors.warningDark;
+                    p.hasExpiringSoonBatch ? NusaThemeTokens.of(context).danger : NusaThemeTokens.of(context).warning;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.background,
+                    color: NusaThemeTokens.of(context).bgPage,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                   ),
                   child: Row(
                     children: [
@@ -1287,17 +1319,17 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                               p.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.navyDark,
+                                color: NusaThemeTokens.of(context).textPrimary,
                               ),
                             ),
                             Text(
                               'SKU: ${p.sku.isEmpty ? '-' : p.sku} • Sisa ${IdrCurrencyFormatter.formatQty(p.stock)} ${p.unitCode}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: AppColors.slate500,
+                                color: NusaThemeTokens.of(context).textSecondary,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1334,8 +1366,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       title: 'Radar Piutang Jatuh Tempo',
       subtitle: 'Kirim pengingat tagihan WhatsApp langsung ke pelanggan',
       icon: Icons.receipt_long_rounded,
-      accentColor: hasOverdue ? AppColors.danger : AppColors.successDark,
-      softBgColor: hasOverdue ? AppColors.danger.withOpacity(0.1) : AppColors.successSoft,
+      accentColor: hasOverdue ? NusaThemeTokens.of(context).danger : NusaThemeTokens.of(context).positive,
+      softBgColor: hasOverdue ? NusaThemeTokens.of(context).danger.withOpacity(0.1) : NusaThemeTokens.of(context).positiveSoft,
       child: !hasOverdue
           ? _buildSafePill('Aman • Tidak ada piutang jatuh tempo tertunggak')
           : Column(
@@ -1379,19 +1411,19 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                           Expanded(
                             child: Text(
                               customerName,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.navyDark,
+                                color: NusaThemeTokens.of(context).textPrimary,
                               ),
                             ),
                           ),
                           Text(
                             IdrCurrencyFormatter.format(balance),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.danger,
+                              color: NusaThemeTokens.of(context).danger,
                             ),
                           ),
                         ],
@@ -1399,9 +1431,9 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                       const SizedBox(height: 2),
                       Text(
                         'Nota: $invoiceNumber • Jatuh Tempo: $dueDate',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
-                          color: AppColors.slate500,
+                          color: NusaThemeTokens.of(context).textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1418,24 +1450,18 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
                                 balanceDue: balance,
                                 storeName: widget.storeName,
                               );
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Membuka WhatsApp tagihan untuk $customerName.',
-                                    ),
-                                  ),
-                                );
+                              if (mounted) {
+                                setState(() {
+                                  _conflictInlineError = null;
+                                  _conflictInlineSuccess = 'Membuka WhatsApp tagihan untuk $customerName.';
+                                });
                               }
                             } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Gagal membuka WhatsApp: $e',
-                                    ),
-                                  ),
-                                );
+                              if (mounted) {
+                                setState(() {
+                                  _conflictInlineSuccess = null;
+                                  _conflictInlineError = 'Gagal membuka WhatsApp: $e';
+                                });
                               }
                             }
                           },

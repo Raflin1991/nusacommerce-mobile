@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/barcode_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
@@ -165,7 +164,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               autofocus: true,
               decoration: InputDecoration(
                 labelText: product.digitalTargetLabel ?? 'Nomor HP / ID Pelanggan',
-                prefixIcon: const Icon(Icons.bolt_rounded, color: AppColors.primary),
+                prefixIcon: Icon(Icons.bolt_rounded, color: NusaThemeTokens.of(ctx).accent),
               ),
             ),
             const SizedBox(height: 16),
@@ -216,7 +215,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             const SizedBox(height: 6),
             Text(
               'Harga: ${IdrCurrencyFormatter.format(product.sellingPrice)} / ${product.unitCode}',
-              style: const TextStyle(fontSize: 13, color: AppColors.slate600),
+              style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(ctx).textSecondary),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -242,7 +241,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               autofocus: true,
               decoration: InputDecoration(
                 labelText: 'Berat (${product.unitCode}) — contoh: 0.5 atau 1.25',
-                prefixIcon: const Icon(Icons.scale_rounded, color: AppColors.primary),
+                prefixIcon: Icon(Icons.scale_rounded, color: NusaThemeTokens.of(ctx).accent),
               ),
             ),
             const SizedBox(height: 16),
@@ -429,7 +428,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: discMode == 'rp' ? 'Diskon Nota (Rp)' : 'Diskon Nota (%)',
-                    prefixIcon: const Icon(Icons.discount_outlined, color: AppColors.primary),
+                    prefixIcon: Icon(Icons.discount_outlined, color: NusaThemeTokens.of(ctx).accent),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -440,9 +439,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     if (modalError != null) setModalState(() => modalError = null);
                   },
                   keyboardType: TextInputType.text,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'PIN / Sandi Manajer (Wajib jika diskon > 15%)',
-                    prefixIcon: Icon(Icons.verified_user_outlined, color: AppColors.warningDark),
+                    prefixIcon: Icon(Icons.verified_user_outlined, color: NusaThemeTokens.of(ctx).warning),
                   ),
                 ),
                 const Divider(height: 24),
@@ -452,7 +451,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     labelText: state.capabilities.hasTableManagement
                         ? 'Label Parkir Antrean (Misal: Ibu Sari / Meja 4)'
                         : 'Label Parkir Antrean (Misal: Ibu Sari / Antrean 2)',
-                    prefixIcon: const Icon(Icons.bookmark_border_rounded, color: AppColors.warningDark),
+                    prefixIcon: Icon(Icons.bookmark_border_rounded, color: NusaThemeTokens.of(ctx).warning),
                   ),
                 ),
                 if (modalError != null) ...[
@@ -461,21 +460,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.dangerSoft,
+                      color: NusaThemeTokens.of(ctx).dangerSoft,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).danger.withOpacity(0.4)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             modalError!,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.dangerDark,
+                              color: NusaThemeTokens.of(ctx).danger,
                             ),
                           ),
                         ),
@@ -569,16 +568,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: AppColors.warningSoft,
+                      color: NusaThemeTokens.of(ctx).warningSoft,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).warning.withOpacity(0.4)),
                     ),
                     child: Text(
                       'Keranjang aktif (${state.cart.length} item) akan otomatis diparkir agar tidak hilang saat membuka antrean.',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.warningDark,
+                        color: NusaThemeTokens.of(ctx).warning,
                       ),
                     ),
                   ),
@@ -603,7 +602,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       state.heldCarts.isEmpty
                           ? 'Belum ada keranjang ditahan.'
                           : 'Antrean tidak ditemukan untuk pencarian "${searchCtrl.text}".',
-                      style: const TextStyle(color: AppColors.slate500),
+                      style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary),
                     ),
                   )
                 else
@@ -631,10 +630,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           leading: Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: AppColors.warningSoft,
+                              color: NusaThemeTokens.of(ctx).warningSoft,
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Icon(Icons.pause_circle_filled_rounded, color: AppColors.warningDark),
+                            child: Icon(Icons.pause_circle_filled_rounded, color: NusaThemeTokens.of(ctx).warning),
                           ),
                           title: Text(
                             (held['held_label'] ?? held['number'] ?? 'Antrean').toString(),
@@ -642,7 +641,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                           ),
                           subtitle: Text(
                             metaParts.join(' • '),
-                            style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textSecondary),
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -655,9 +654,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                     setModalState(() {});
                                   }
                                 },
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.delete_outline_rounded,
-                                  color: AppColors.danger,
+                                  color: NusaThemeTokens.of(ctx).danger,
                                   size: 20,
                                 ),
                               ),
@@ -726,7 +725,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 ),
                 Text(
                   'Harga Satuan: ${IdrCurrencyFormatter.format(effectiveUnitPrice)} / ${item.product.unitCode}',
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.slate500),
+                  style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
                 ),
                 const SizedBox(height: 14),
                 TextField(
@@ -745,7 +744,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     label: 'Layanan Express (+Rp 5.000 / ${item.effectiveUnitCode})',
                     icon: Icons.bolt_rounded,
                     selected: isExpressLaundry,
-                    selectedColor: AppColors.warningDark,
+                    selectedColor: NusaThemeTokens.of(ctx).warning,
                     onTap: () {
                       setModalState(() {
                         isExpressLaundry = !isExpressLaundry;
@@ -839,9 +838,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 ),
                 if (isSalonMode) ...[
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'Kapster / Stylist / Terapis',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).textPrimary),
                   ),
                   const SizedBox(height: 6),
                   Wrap(
@@ -872,21 +871,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.dangerSoft,
+                      color: NusaThemeTokens.of(ctx).dangerSoft,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).danger.withOpacity(0.4)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             modalError!,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.dangerDark,
+                              color: NusaThemeTokens.of(ctx).danger,
                             ),
                           ),
                         ),
@@ -902,7 +901,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         context.read<PosCubit>().removeCartItem(idx);
                         Navigator.pop(ctx);
                       },
-                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                      style: OutlinedButton.styleFrom(foregroundColor: NusaThemeTokens.of(ctx).danger),
                       icon: const Icon(Icons.delete_outline_rounded),
                       label: const Text('Hapus'),
                     ),
@@ -1013,14 +1012,14 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   const SizedBox(height: 10),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const CircleAvatar(
+                    leading: CircleAvatar(
                       backgroundColor: Color(0xFFF1F5F9),
-                      child: Icon(Icons.person_outline_rounded, color: AppColors.slate600),
+                      child: Icon(Icons.person_outline_rounded, color: NusaThemeTokens.of(ctx).textSecondary),
                     ),
                     title: const Text('Pelanggan Umum (Guest)', style: TextStyle(fontWeight: FontWeight.w700)),
                     subtitle: const Text('Tanpa diskon member / kasbon', style: TextStyle(fontSize: 12)),
                     trailing: state.selectedCustomer == null
-                        ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+                        ? Icon(Icons.check_circle_rounded, color: NusaThemeTokens.of(ctx).accent)
                         : null,
                     onTap: () {
                       context.read<PosCubit>().selectCustomer(null);
@@ -1030,11 +1029,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   const Divider(),
                   Expanded(
                     child: filtered.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'Belum ada pelanggan cocok. Tekan "Tambah Baru" untuk mendaftarkan member.',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.slate500),
+                              style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary),
                             ),
                           )
                         : ListView.separated(
@@ -1057,10 +1056,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   Navigator.pop(ctx);
                                 },
                                 leading: CircleAvatar(
-                                  backgroundColor: AppColors.primarySoft,
+                                  backgroundColor: NusaThemeTokens.of(ctx).accentSoft,
                                   child: Text(
                                     (c['name'] ?? 'P').toString().substring(0, 1).toUpperCase(),
-                                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary),
+                                    style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).accent),
                                   ),
                                 ),
                                 title: Row(
@@ -1075,15 +1074,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: AppColors.primarySoft,
+                                          color: NusaThemeTokens.of(ctx).accentSoft,
                                           borderRadius: BorderRadius.circular(999),
                                         ),
                                         child: Text(
                                           discPct > 0 ? '$groupName • ${discPct.toInt()}%' : groupName,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w800,
-                                            color: AppColors.primary,
+                                            color: NusaThemeTokens.of(ctx).accent,
                                           ),
                                         ),
                                       ),
@@ -1092,7 +1091,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 subtitle: Text(
                                   '${c['phone'] ?? '-'} • $pts Poin'
                                   '${limit > 0 ? ' • Sisa Limit: ${IdrCurrencyFormatter.format(remaining)}' : ''}',
-                                  style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                  style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary),
                                 ),
                               );
                             },
@@ -1182,7 +1181,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        backgroundColor: res['success'] == true ? AppColors.successDark : AppColors.danger,
+                        backgroundColor: res['success'] == true ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).danger,
                         content: Text(
                           res['success'] == true
                               ? 'Pelanggan ${nameCtrl.text.trim()} disimpan & dipilih.'
@@ -1255,7 +1254,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         if (state.alertMessage != null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              backgroundColor: AppColors.danger,
+              backgroundColor: NusaThemeTokens.of(context).danger,
               content: Text(state.alertMessage!),
             ),
           );
@@ -1355,21 +1354,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                         decoration: BoxDecoration(
-                          color: AppColors.successSoft,
+                          color: NusaThemeTokens.of(context).positiveSoft,
                           borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: AppColors.success.withOpacity(0.3)),
+                          border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.3)),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.circle, size: 7, color: AppColors.success),
+                            Icon(Icons.circle, size: 7, color: NusaThemeTokens.of(context).positive),
                             SizedBox(width: 4),
                             Text(
                               'Shift',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.successDark,
+                                color: NusaThemeTokens.of(context).positive,
                               ),
                             ),
                           ],
@@ -1392,21 +1391,21 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                           decoration: BoxDecoration(
-                            color: AppColors.warningSoft,
+                            color: NusaThemeTokens.of(context).warningSoft,
                             borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                            border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.35)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.pause_circle_outline_rounded, size: 14, color: AppColors.warningDark),
+                              Icon(Icons.pause_circle_outline_rounded, size: 14, color: NusaThemeTokens.of(context).warning),
                               const SizedBox(width: 4),
                               Text(
                                 '${state.heldCarts.length}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.w800,
-                                  color: AppColors.warningDark,
+                                  color: NusaThemeTokens.of(context).warning,
                                 ),
                               ),
                             ],
@@ -1579,31 +1578,31 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
-                              color: AppColors.dangerSoft,
+                              color: NusaThemeTokens.of(context).dangerSoft,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                              border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.35)),
                             ),
                             child: Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.medical_information_rounded,
-                                  color: AppColors.danger,
+                                  color: NusaThemeTokens.of(context).danger,
                                   size: 17,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     '${state.prescriptionRequiredCartProducts.length} obat resep belum dilengkapi Nama Dokter & Pasien. Ketuk untuk isi.',
-                                    style: const TextStyle(
-                                      color: AppColors.danger,
+                                    style: TextStyle(
+                                      color: NusaThemeTokens.of(context).danger,
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
-                                const Icon(
+                                Icon(
                                   Icons.chevron_right_rounded,
-                                  color: AppColors.danger,
+                                  color: NusaThemeTokens.of(context).danger,
                                   size: 18,
                                 ),
                               ],
@@ -1632,7 +1631,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   label: ot.$2,
                                   icon: ot.$3,
                                   selected: state.orderType == ot.$1,
-                                  selectedColor: AppColors.navyDark,
+                                  selectedColor: NusaThemeTokens.of(context).textPrimary,
                                   onTap: () => context.read<PosCubit>().setOrderType(ot.$1),
                                 ),
                               ),
@@ -1668,7 +1667,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
                               decoration: InputDecoration(
                                 hintText: 'Cari nama, barcode, atau SKU...',
-                                prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppColors.slate400),
+                                prefixIcon: Icon(Icons.search_rounded, size: 20, color: NusaThemeTokens.of(context).textTertiary),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                                 suffixIcon: _searchController.text.isNotEmpty
                                     ? IconButton(
@@ -1688,7 +1687,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         Tooltip(
                           message: 'Scan Barcode Kamera',
                           child: Material(
-                            color: AppColors.primarySoft,
+                            color: NusaThemeTokens.of(context).accentSoft,
                             borderRadius: BorderRadius.circular(12),
                             child: InkWell(
                               onTap: () => _openCameraBarcodeScanner(context),
@@ -1698,11 +1697,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 height: 44,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                                  border: Border.all(color: NusaThemeTokens.of(context).accent.withOpacity(0.25)),
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.qr_code_scanner_rounded,
-                                  color: AppColors.primary,
+                                  color: NusaThemeTokens.of(context).accent,
                                   size: 21,
                                 ),
                               ),
@@ -1713,7 +1712,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         Tooltip(
                           message: 'Cek Stok Multi-Gudang',
                           child: Material(
-                            color: AppColors.warningSoft,
+                            color: NusaThemeTokens.of(context).warningSoft,
                             borderRadius: BorderRadius.circular(12),
                             child: InkWell(
                               onTap: () => _showWarehouseStockSheet(
@@ -1726,11 +1725,11 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                 height: 44,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                                  border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.35)),
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.warehouse_outlined,
-                                  color: AppColors.warningDark,
+                                  color: NusaThemeTokens.of(context).warning,
                                   size: 20,
                                 ),
                               ),
@@ -1817,9 +1816,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.warningSoft,
+                    color: NusaThemeTokens.of(context).warningSoft,
                     border: Border(
-                      bottom: BorderSide(color: AppColors.warning.withOpacity(0.45)),
+                      bottom: BorderSide(color: NusaThemeTokens.of(context).warning.withOpacity(0.45)),
                     ),
                   ),
                   child: Column(
@@ -1827,15 +1826,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.swap_horiz_rounded, size: 18, color: AppColors.warningDark),
+                          Icon(Icons.swap_horiz_rounded, size: 18, color: NusaThemeTokens.of(context).warning),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
                               'Mode Tukar Barang • Nota ${state.exchangeSourceSale?['number'] ?? '-'}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.warningDark,
+                                color: NusaThemeTokens.of(context).warning,
                               ),
                             ),
                           ),
@@ -1847,14 +1846,14 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppColors.warning.withOpacity(0.5)),
+                                border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.5)),
                               ),
-                              child: const Text(
+                              child: Text(
                                 'Batal Tukar',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: AppColors.dangerDark,
+                                  color: NusaThemeTokens.of(context).danger,
                                 ),
                               ),
                             ),
@@ -1865,10 +1864,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                       Text(
                         'Retur: -${IdrCurrencyFormatter.format(state.exchangeReturnCreditTotal)} • Pengganti: +${IdrCurrencyFormatter.format(state.replacementItemsSubtotal)}'
                         '${state.exchangeSurplusCredit > 0 ? ' • Kelebihan: ${IdrCurrencyFormatter.format(state.exchangeSurplusCredit)}' : ' • Kurang Bayar: ${IdrCurrencyFormatter.format(state.grandTotal)}'}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.navyDark,
+                          color: NusaThemeTokens.of(context).textPrimary,
                         ),
                       ),
                     ],
@@ -2074,16 +2073,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppColors.successSoft,
+                            color: NusaThemeTokens.of(context).positiveSoft,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.success.withOpacity(0.35)),
+                            border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.35)),
                           ),
-                          child: const Text(
+                          child: Text(
                             'Grosir',
                             style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.successDark,
+                              color: NusaThemeTokens.of(context).positive,
                             ),
                           ),
                         ),
@@ -2136,16 +2135,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: AppColors.warningSoft,
+                                  color: NusaThemeTokens.of(context).warningSoft,
                                   borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                                  border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.35)),
                                 ),
                                 child: Text(
                                   '+Gdg ${IdrCurrencyFormatter.formatQty(product.otherWarehousesStock)}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 9.5,
                                     fontWeight: FontWeight.w700,
-                                    color: AppColors.warningDark,
+                                    color: NusaThemeTokens.of(context).warning,
                                   ),
                                 ),
                               ),
@@ -2377,7 +2376,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
             children: [
               Row(
                 children: [
-                  Icon(icon, color: AppColors.primary),
+                  Icon(icon, color: NusaThemeTokens.of(ctx).accent),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -2566,15 +2565,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: hasNotes ? AppColors.primarySoft : const Color(0xFFF8FAFC),
+          color: hasNotes ? NusaThemeTokens.of(context).accentSoft : const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: hasNotes ? AppColors.primary.withOpacity(0.35) : AppColors.border,
+            color: hasNotes ? NusaThemeTokens.of(context).accent.withOpacity(0.35) : NusaThemeTokens.of(context).borderSubtle,
           ),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 17, color: hasNotes ? AppColors.primary : AppColors.slate600),
+            Icon(icon, size: 17, color: hasNotes ? NusaThemeTokens.of(context).accent : NusaThemeTokens.of(context).textSecondary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -2584,14 +2583,14 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: hasNotes ? FontWeight.w700 : FontWeight.w600,
-                  color: hasNotes ? AppColors.navyDark : AppColors.slate600,
+                  color: hasNotes ? NusaThemeTokens.of(context).textPrimary : NusaThemeTokens.of(context).textSecondary,
                 ),
               ),
             ),
             Icon(
               hasNotes ? Icons.edit_outlined : Icons.add_circle_outline_rounded,
               size: 16,
-              color: AppColors.primary,
+              color: NusaThemeTokens.of(context).accent,
             ),
           ],
         ),
@@ -2737,7 +2736,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
         color: tokens.bgSurface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
         border: Border(top: BorderSide(color: tokens.borderSubtle, width: tokens.borderWidth)),
-        boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.floatingCartShadow,
+        boxShadow: tokens.isDark || tokens.isHighContrast ? null : NusaThemeTokens.of(context).floatingCartShadow,
       ),
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
       child: SafeArea(
@@ -3016,7 +3015,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
     return ListView.separated(
       shrinkWrap: shrinkWrap,
       itemCount: state.cart.length,
-      separatorBuilder: (_, __) => const Divider(height: 8, color: AppColors.divider),
+      separatorBuilder: (_, __) => Divider(height: 8, color: NusaThemeTokens.of(context).borderSubtle),
                           itemBuilder: (context, idx) {
                             final item = state.cart[idx];
                             return Row(
@@ -3043,10 +3042,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                 item.displayName,
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 13,
                                                   fontWeight: FontWeight.w700,
-                                                  color: AppColors.navyDark,
+                                                  color: NusaThemeTokens.of(context).textPrimary,
                                                 ),
                                               ),
                                             ),
@@ -3055,18 +3054,18 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                 decoration: BoxDecoration(
-                                                  color: AppColors.warningSoft,
+                                                  color: NusaThemeTokens.of(context).warningSoft,
                                                   borderRadius: BorderRadius.circular(6),
                                                   border: Border.all(
-                                                    color: AppColors.warning.withOpacity(0.45),
+                                                    color: NusaThemeTokens.of(context).warning.withOpacity(0.45),
                                                   ),
                                                 ),
-                                                child: const Text(
+                                                child: Text(
                                                   'RETUR / TUKAR',
                                                   style: TextStyle(
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.w800,
-                                                    color: AppColors.warningDark,
+                                                    color: NusaThemeTokens.of(context).warning,
                                                   ),
                                                 ),
                                               ),
@@ -3092,16 +3091,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                           children: [
                                                             Text(
                                                               'Pilih Satuan • ${item.displayName}',
-                                                              style: const TextStyle(
+                                                              style: TextStyle(
                                                                 fontSize: 15,
                                                                 fontWeight: FontWeight.w800,
-                                                                color: AppColors.navyDark,
+                                                                color: NusaThemeTokens.of(sheetCtx).textPrimary,
                                                               ),
                                                             ),
                                                             const SizedBox(height: 4),
-                                                            const Text(
+                                                            Text(
                                                               'Harga & pengurangan stok otomatis mengikuti konversi satuan.',
-                                                              style: TextStyle(fontSize: 12, color: AppColors.slate500),
+                                                              style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(sheetCtx).textSecondary),
                                                             ),
                                                             const SizedBox(height: 12),
                                                             ...item.product.unitConversions.map((u) {
@@ -3122,13 +3121,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                                     ),
                                                                     decoration: BoxDecoration(
                                                                       color: selected
-                                                                          ? AppColors.primary.withOpacity(0.08)
+                                                                          ? NusaThemeTokens.of(sheetCtx).accent.withOpacity(0.08)
                                                                           : Colors.white,
                                                                       borderRadius: BorderRadius.circular(12),
                                                                       border: Border.all(
                                                                         color: selected
-                                                                            ? AppColors.primary
-                                                                            : AppColors.border,
+                                                                            ? NusaThemeTokens.of(sheetCtx).accent
+                                                                            : NusaThemeTokens.of(sheetCtx).borderSubtle,
                                                                         width: selected ? 1.5 : 1,
                                                                       ),
                                                                     ),
@@ -3144,15 +3143,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                                                   fontSize: 13.5,
                                                                                   fontWeight: FontWeight.w800,
                                                                                   color: selected
-                                                                                      ? AppColors.primary
-                                                                                      : AppColors.navyDark,
+                                                                                      ? NusaThemeTokens.of(sheetCtx).accent
+                                                                                      : NusaThemeTokens.of(sheetCtx).textPrimary,
                                                                                 ),
                                                                               ),
                                                                               Text(
                                                                                 '1 ${u.unitCode.toUpperCase()} = ${IdrCurrencyFormatter.formatQty(u.multiplier)} ${item.product.unitCode.toUpperCase()}',
-                                                                                style: const TextStyle(
+                                                                                style: TextStyle(
                                                                                   fontSize: 11.5,
-                                                                                  color: AppColors.slate500,
+                                                                                  color: NusaThemeTokens.of(sheetCtx).textSecondary,
                                                                                 ),
                                                                               ),
                                                                             ],
@@ -3164,15 +3163,15 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                                             fontSize: 13.5,
                                                                             fontWeight: FontWeight.w800,
                                                                             color: selected
-                                                                                ? AppColors.primary
-                                                                                : AppColors.navyDark,
+                                                                                ? NusaThemeTokens.of(sheetCtx).accent
+                                                                                : NusaThemeTokens.of(sheetCtx).textPrimary,
                                                                           ),
                                                                         ),
                                                                         if (selected) ...[
                                                                           const SizedBox(width: 8),
-                                                                          const Icon(
+                                                                          Icon(
                                                                             Icons.check_circle_rounded,
-                                                                            color: AppColors.primary,
+                                                                            color: NusaThemeTokens.of(sheetCtx).accent,
                                                                             size: 18,
                                                                           ),
                                                                         ],
@@ -3191,10 +3190,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                 child: Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                   decoration: BoxDecoration(
-                                                    color: AppColors.primary.withOpacity(0.08),
+                                                    color: NusaThemeTokens.of(context).accent.withOpacity(0.08),
                                                     borderRadius: BorderRadius.circular(6),
                                                     border: Border.all(
-                                                      color: AppColors.primary.withOpacity(0.3),
+                                                      color: NusaThemeTokens.of(context).accent.withOpacity(0.3),
                                                     ),
                                                   ),
                                                   child: Row(
@@ -3202,16 +3201,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                                     children: [
                                                       Text(
                                                         item.effectiveUnitCode.toUpperCase(),
-                                                        style: const TextStyle(
+                                                        style: TextStyle(
                                                           fontSize: 10,
                                                           fontWeight: FontWeight.w800,
-                                                          color: AppColors.primary,
+                                                          color: NusaThemeTokens.of(context).accent,
                                                         ),
                                                       ),
-                                                      const Icon(
+                                                      Icon(
                                                         Icons.arrow_drop_down_rounded,
                                                         size: 14,
-                                                        color: AppColors.primary,
+                                                        color: NusaThemeTokens.of(context).accent,
                                                       ),
                                                     ],
                                                   ),
@@ -3228,9 +3227,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                           '${item.notes != null && item.notes!.isNotEmpty ? ' • ${item.notes}' : ''}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 11.5,
-                                            color: AppColors.slate500,
+                                            color: NusaThemeTokens.of(context).textSecondary,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -3243,16 +3242,16 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
-                                      color: AppColors.warningSoft,
+                                      color: NusaThemeTokens.of(context).warningSoft,
                                       borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: AppColors.warning.withOpacity(0.45)),
+                                      border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.45)),
                                     ),
                                     child: Text(
                                       '-${IdrCurrencyFormatter.format(item.lineTotal.abs())}',
                                       style: AppTheme.moneyStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w800,
-                                        color: AppColors.warningDark,
+                                        color: NusaThemeTokens.of(context).warning,
                                       ),
                                     ),
                                   )
@@ -3261,9 +3260,9 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                   Container(
                                     height: 34,
                                     decoration: BoxDecoration(
-                                      color: AppColors.slate100,
+                                      color: NusaThemeTokens.of(context).bgElevated,
                                       borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: AppColors.border),
+                                      border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -3271,10 +3270,10 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                         InkWell(
                                           onTap: () => context.read<PosCubit>().decrementCartItem(idx),
                                           borderRadius: BorderRadius.circular(10),
-                                          child: const SizedBox(
+                                          child: SizedBox(
                                             width: 34,
                                             height: 34,
-                                            child: Icon(Icons.remove_rounded, size: 16, color: AppColors.slate700),
+                                            child: Icon(Icons.remove_rounded, size: 16, color: NusaThemeTokens.of(context).textPrimary),
                                           ),
                                         ),
                                         Padding(
@@ -3284,17 +3283,17 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                             style: AppTheme.moneyStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.w800,
-                                              color: AppColors.navyDark,
+                                              color: NusaThemeTokens.of(context).textPrimary,
                                             ),
                                           ),
                                         ),
                                         InkWell(
                                           onTap: () => context.read<PosCubit>().incrementCartItem(idx),
                                           borderRadius: BorderRadius.circular(10),
-                                          child: const SizedBox(
+                                          child: SizedBox(
                                             width: 34,
                                             height: 34,
-                                            child: Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
+                                            child: Icon(Icons.add_rounded, size: 16, color: NusaThemeTokens.of(context).accent),
                                           ),
                                         ),
                                       ],
@@ -3330,7 +3329,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.warehouse_rounded, color: AppColors.primary, size: 22),
+                    Icon(Icons.warehouse_rounded, color: NusaThemeTokens.of(ctx).accent, size: 22),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -3505,7 +3504,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.warehouse_rounded, color: AppColors.warningDark, size: 22),
+                        Icon(Icons.warehouse_rounded, color: NusaThemeTokens.of(modalCtx).warning, size: 22),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -3549,13 +3548,13 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: AppColors.dangerSoft,
+                          color: NusaThemeTokens.of(modalCtx).dangerSoft,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.danger.withOpacity(0.4)),
+                          border: Border.all(color: NusaThemeTokens.of(modalCtx).danger.withOpacity(0.4)),
                         ),
                         child: Text(
                           inlineError!,
-                          style: const TextStyle(fontSize: 12, color: AppColors.danger, fontWeight: FontWeight.w700),
+                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(modalCtx).danger, fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],
@@ -3643,7 +3642,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                             borderRadius: BorderRadius.circular(8),
                                             border: Border.all(
                                               color: avail > 0
-                                                  ? AppColors.success.withOpacity(0.35)
+                                                  ? NusaThemeTokens.of(modalCtx).positive.withOpacity(0.35)
                                                   : tokens.borderSubtle,
                                             ),
                                           ),
@@ -3652,7 +3651,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
-                                              color: avail > 0 ? AppColors.successDark : tokens.textSecondary,
+                                              color: avail > 0 ? NusaThemeTokens.of(modalCtx).positive : tokens.textSecondary,
                                             ),
                                           ),
                                         );
@@ -3878,8 +3877,8 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                     fontSize: 13,
                                     fontWeight: FontWeight.w800,
                                     color: selectedProduct!.stock > 0
-                                        ? AppColors.successDark
-                                        : AppColors.danger,
+                                        ? NusaThemeTokens.of(ctx).positive
+                                        : NusaThemeTokens.of(ctx).danger,
                                   ),
                                 ),
                               ],
@@ -3912,7 +3911,7 @@ class _PosCatalogScreenState extends State<PosCatalogScreen> {
                                         IdrCurrencyFormatter.format(t.tierPrice),
                                         style: AppTheme.moneyStyle(
                                           fontSize: 12.5,
-                                          color: AppColors.successDark,
+                                          color: NusaThemeTokens.of(ctx).positive,
                                         ),
                                       ),
                                     ],

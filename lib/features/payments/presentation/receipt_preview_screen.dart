@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/hardware/whatsapp_service.dart';
@@ -92,7 +91,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
       if (printed) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: AppColors.successDark,
+            backgroundColor: NusaThemeTokens.of(context).positive,
             content: Text(
               'Struk berhasil dicetak ke ${widget.printerService.activePrinterLabel} ($selectedWidth)!',
             ),
@@ -103,7 +102,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.warningDark,
+          backgroundColor: NusaThemeTokens.of(context).warning,
           content: Text(
             'Printer (${widget.printerService.activePrinterLabel}) belum tersambung. Menampilkan pratinjau ESC/POS ($selectedWidth).',
           ),
@@ -114,7 +113,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: AppColors.danger,
+            backgroundColor: NusaThemeTokens.of(context).danger,
             content: Text('Gagal mencetak struk: $e'),
           ),
         );
@@ -141,7 +140,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
           return AlertDialog(
             title: Row(
               children: [
-                const Icon(Icons.print_rounded, color: AppColors.primary),
+                Icon(Icons.print_rounded, color: NusaThemeTokens.of(ctx).accent),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -183,7 +182,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).borderSubtle),
                     ),
                     child: Text(
                       formatted,
@@ -201,7 +200,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      backgroundColor: ok ? AppColors.successDark : null,
+                      backgroundColor: ok ? NusaThemeTokens.of(ctx).positive : null,
                       content: Text(
                         ok
                             ? 'Laci kasir RJ-11 berhasil dibuka via Bluetooth!'
@@ -219,7 +218,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                      backgroundColor: ok ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).warning,
                       content: Text(
                         ok
                             ? 'Byte ESC/POS ($selectedWidth) dikirim ke printer!'
@@ -263,8 +262,8 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
     await Clipboard.setData(ClipboardData(text: formatted));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        backgroundColor: AppColors.successDark,
+      SnackBar(
+        backgroundColor: NusaThemeTokens.of(context).positive,
         content: Text('Teks struk digital berhasil disalin ke clipboard.'),
       ),
     );
@@ -293,8 +292,8 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
       if (!mounted) return;
       if (printed) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: AppColors.successDark,
+          SnackBar(
+            backgroundColor: NusaThemeTokens.of(context).positive,
             content: Text('Tiket Dapur (KOT) berhasil dikirim ke printer!'),
           ),
         );
@@ -311,7 +310,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: NusaThemeTokens.of(ctx).borderSubtle),
               ),
               child: Text(
                 kotText,
@@ -331,7 +330,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: AppColors.danger,
+            backgroundColor: NusaThemeTokens.of(context).danger,
             content: Text('Gagal mencetak KOT: $e'),
           ),
         );
@@ -371,35 +370,35 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
               Container(
                 width: 64,
                 height: 64,
-                decoration: const BoxDecoration(
-                  color: AppColors.successSoft,
+                decoration: BoxDecoration(
+                  color: NusaThemeTokens.of(context).positiveSoft,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 44),
+                child: Icon(Icons.check_circle_rounded, color: NusaThemeTokens.of(context).positive, size: 44),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 'Transaksi Berhasil!',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).textPrimary),
               ),
               const SizedBox(height: 4),
               Text(
                 'Nomor Nota: ${sale['number']} • ${sale['sale_datetime']}',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w600),
               ),
               if (sale['notes'] != null && sale['notes'].toString().trim().isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
+                    color: NusaThemeTokens.of(context).accentSoft,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                    border: Border.all(color: NusaThemeTokens.of(context).accent.withOpacity(0.25)),
                   ),
                   child: Text(
                     sale['notes'].toString().trim(),
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.primary),
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(context).accent),
                   ),
                 ),
               ],
@@ -412,8 +411,8 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: AppColors.border),
-                  boxShadow: AppColors.cardShadow,
+                  border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
+                  boxShadow: NusaThemeTokens.of(context).cardShadow,
                 ),
                 child: Column(
                   children: [
@@ -423,28 +422,28 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppColors.warningSoft,
+                          color: NusaThemeTokens.of(context).warningSoft,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.warningDark.withOpacity(0.4)),
+                          border: Border.all(color: NusaThemeTokens.of(context).warning.withOpacity(0.4)),
                         ),
                         child: Column(
                           children: [
                             Text(
                               '*** SALINAN / REPRINT KE-$_reprintCount ***',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w900,
-                                color: AppColors.warningDark,
+                                color: NusaThemeTokens.of(context).warning,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'Kasir: ${sale['cashier_name'] ?? sale['cashier'] ?? 'Kasir POS'}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.warningDark,
+                                color: NusaThemeTokens.of(context).warning,
                               ),
                             ),
                           ],
@@ -458,11 +457,11 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                     const SizedBox(height: 2),
                     Text(
                       (storeProfile['address'] ?? '-').toString(),
-                      style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                      style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                     ),
                     Text(
                       'Telp: ${storeProfile['phone'] ?? '-'}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                      style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                     ),
                     if (sale['vertical_metadata'] is Map &&
                         (sale['vertical_metadata'] as Map).isNotEmpty) ...[
@@ -471,9 +470,9 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: AppColors.background,
+                          color: NusaThemeTokens.of(context).bgPage,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.border),
+                          border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,17 +524,17 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                                   ),
                                   Text(
                                     '${IdrCurrencyFormatter.formatQty(qty)} × ${IdrCurrencyFormatter.format(price)}',
-                                    style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                    style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary),
                                   ),
                                   if (batchNo.isNotEmpty || expiryDate.isNotEmpty)
                                     Text(
                                       'Batch: ${batchNo.isEmpty ? '-' : batchNo} • ED: ${expiryDate.isEmpty ? '-' : expiryDate}',
-                                      style: const TextStyle(fontSize: 10.5, color: AppColors.primary, fontWeight: FontWeight.w600),
+                                      style: TextStyle(fontSize: 10.5, color: NusaThemeTokens.of(context).accent, fontWeight: FontWeight.w600),
                                     ),
                                   if (stylist.isNotEmpty)
                                     Text(
                                       'Kapster/Terapis: $stylist',
-                                      style: const TextStyle(fontSize: 10.5, color: AppColors.slate600, fontWeight: FontWeight.w600),
+                                      style: TextStyle(fontSize: 10.5, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w600),
                                     ),
                                 ],
                               ),
@@ -562,7 +561,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       _receiptSummaryRow(
                         'Potong Saldo Deposit',
                         IdrCurrencyFormatter.format(storeCreditAmount),
-                        valueColor: AppColors.primary,
+                        valueColor: NusaThemeTokens.of(context).accent,
                       ),
                       const SizedBox(height: 6),
                     ],
@@ -570,13 +569,13 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       _receiptSummaryRow(
                         'Uang Muka (DP)',
                         IdrCurrencyFormatter.format(paid),
-                        valueColor: AppColors.successDark,
+                        valueColor: NusaThemeTokens.of(context).positive,
                       ),
                       const SizedBox(height: 6),
                       _receiptSummaryRow(
                         'Sisa Tagihan (Kasbon)',
                         IdrCurrencyFormatter.format(balanceDue),
-                        valueColor: AppColors.warningDark,
+                        valueColor: NusaThemeTokens.of(context).warning,
                         isBold: true,
                       ),
                       if (dueDate != null && dueDate.trim().isNotEmpty) ...[
@@ -584,7 +583,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                         _receiptSummaryRow(
                           'Jatuh Tempo',
                           dueDate.trim(),
-                          valueColor: AppColors.slate600,
+                          valueColor: NusaThemeTokens.of(context).textSecondary,
                         ),
                       ],
                     ] else ...[
@@ -596,7 +595,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       _receiptSummaryRow(
                         'Kembalian',
                         IdrCurrencyFormatter.format(change),
-                        valueColor: AppColors.successDark,
+                        valueColor: NusaThemeTokens.of(context).positive,
                         isBold: true,
                       ),
                     ],
@@ -609,9 +608,9 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
               TextField(
                 controller: _waPhoneController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Nomor WhatsApp Pelanggan',
-                  prefixIcon: Icon(Icons.chat_bubble_outline_rounded, color: AppColors.whatsapp),
+                  prefixIcon: Icon(Icons.chat_bubble_outline_rounded, color: NusaThemeTokens.of(context).whatsapp),
                 ),
               ),
               const SizedBox(height: 10),
@@ -697,7 +696,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                            backgroundColor: ok ? NusaThemeTokens.of(context).positive : NusaThemeTokens.of(context).warning,
                             content: Text(
                               ok
                                   ? 'Laci kasir RJ-11 berhasil dibuka (${kick.length} bytes)!'
@@ -748,7 +747,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
             style: TextStyle(
               fontSize: isBold ? 14 : 13,
               fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
-              color: AppColors.slate700,
+              color: NusaThemeTokens.of(context).textPrimary,
             ),
           ),
         ),
@@ -758,7 +757,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
           style: AppTheme.moneyStyle(
             fontSize: isBold ? 15.5 : 13.5,
             fontWeight: isBold ? FontWeight.w800 : FontWeight.w700,
-            color: valueColor ?? AppColors.navyDark,
+            color: valueColor ?? NusaThemeTokens.of(context).textPrimary,
           ),
         ),
       ],

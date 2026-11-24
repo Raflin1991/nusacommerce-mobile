@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
@@ -170,8 +169,8 @@ class _KdsScreenState extends State<KdsScreen> {
 
                           return NusaCard(
                             borderColor: st == 'ready'
-                                ? AppColors.success
-                                : (st == 'cooking' ? AppColors.warning : AppColors.primary),
+                                ? NusaThemeTokens.of(context).positive
+                                : (st == 'cooking' ? NusaThemeTokens.of(context).warning : NusaThemeTokens.of(context).accent),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -204,7 +203,7 @@ class _KdsScreenState extends State<KdsScreen> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text('${qty}x ',
-                                            style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary)),
+                                            style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).accent)),
                                         Expanded(
                                           child: Text(
                                             '$name${note.isNotEmpty ? '\n   Catatan: $note' : ''}',

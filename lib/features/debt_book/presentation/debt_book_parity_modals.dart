@@ -31,7 +31,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.slate100,
+              color: NusaThemeTokens.of(ctx).bgElevated,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
@@ -55,7 +55,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                   isReceivable: isReceivable,
                 );
               },
-              icon: const Icon(Icons.chat_rounded, color: AppColors.successDark),
+              icon: Icon(Icons.chat_rounded, color: NusaThemeTokens.of(ctx).positive),
               label: const Text('Kirim WA'),
             ),
           FilledButton.icon(
@@ -108,7 +108,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -122,14 +122,14 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
               'Riwayat Cicilan • ${invoice['number'] ?? '-'}',
               style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
             ),
-            Text(partyName, style: const TextStyle(fontSize: 13, color: AppColors.slate600)),
+            Text(partyName, style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(ctx).textSecondary)),
             const SizedBox(height: 12),
             if (logs.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(
                   child: Text('Belum ada riwayat cicilan untuk nota ini.',
-                      style: TextStyle(color: AppColors.slate500)),
+                      style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary)),
                 ),
               )
             else
@@ -146,10 +146,10 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(IdrCurrencyFormatter.format(amt),
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.successDark)),
+                          style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).positive)),
                       subtitle: Text('$method • $date'),
                       trailing: IconButton(
-                        icon: const Icon(Icons.print_outlined, color: AppColors.primary),
+                        icon: Icon(Icons.print_outlined, color: NusaThemeTokens.of(ctx).accent),
                         onPressed: () {
                           Navigator.pop(ctx);
                           _showSettlementReceiptDialog(
@@ -184,7 +184,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -261,7 +261,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Total Dilunasi:', style: TextStyle(fontWeight: FontWeight.w700)),
-                      NusaPriceTag(amount: totalSelected, fontSize: 17, color: AppColors.successDark),
+                      NusaPriceTag(amount: totalSelected, fontSize: 17, color: NusaThemeTokens.of(ctx).positive),
                     ],
                   ),
                   if (modalError != null) ...[
@@ -270,20 +270,20 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                       width: double.infinity,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.dangerSoft,
+                        color: NusaThemeTokens.of(ctx).dangerSoft,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                        border: Border.all(color: NusaThemeTokens.of(ctx).danger.withOpacity(0.35)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                          Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               modalError!,
-                              style: const TextStyle(
-                                color: AppColors.dangerDark,
+                              style: TextStyle(
+                                color: NusaThemeTokens.of(ctx).danger,
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -432,7 +432,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
     final posCubit = context.read<PosCubit>();
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -493,7 +493,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                     return ListTile(
                       title: Text(cat['name'].toString()),
                       trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                        icon: Icon(Icons.delete_outline, color: NusaThemeTokens.of(ctx).danger),
                         onPressed: () async {
                           await posCubit.deleteExpenseCategory(id);
                           await _loadData();
@@ -576,7 +576,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(backgroundColor: NusaThemeTokens.of(ctx).danger),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Hapus'),
           ),

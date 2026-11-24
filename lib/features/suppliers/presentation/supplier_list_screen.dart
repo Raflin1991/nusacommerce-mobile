@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -143,9 +142,9 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                   decoration: const InputDecoration(labelText: 'Nama Badan Usaha (Opsional)'),
                 ),
                 const Divider(height: 24),
-                const Text(
+                Text(
                   'Informasi Rekening Bank Transfer Pembayaran',
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.primary),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).accent),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -184,8 +183,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                         : () async {
                             if (nameCtrl.text.trim().isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.danger,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(ctx).danger,
                                   content: Text('Nama Pemasok wajib diisi.'),
                                 ),
                               );
@@ -213,7 +212,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   backgroundColor:
-                                      res['success'] == true ? AppColors.successDark : AppColors.danger,
+                                      res['success'] == true ? NusaThemeTokens.of(ctx).positive : NusaThemeTokens.of(ctx).danger,
                                   content: Text(
                                     res['success'] == true
                                         ? (isEdit ? 'Data pemasok diperbarui.' : 'Pemasok berhasil ditambahkan.')
@@ -279,7 +278,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          backgroundColor: AppColors.danger,
+                          backgroundColor: NusaThemeTokens.of(ctx).danger,
                           content: Text('Barang dengan barcode "$raw" tidak ditemukan di katalog.'),
                         ),
                       );
@@ -298,8 +297,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
     if (_submittingStockIn) return;
     if (_selectedSupplierId == null || _selectedProduct == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.danger,
+        SnackBar(
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text('Pilih Pemasok dan Produk terlebih dahulu.'),
         ),
       );
@@ -309,8 +308,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
     final cost = IdrCurrencyFormatter.parse(_costCtrl.text);
     if (qty <= 0 || cost < 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.danger,
+        SnackBar(
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text('Kuantitas harus > 0 dan harga beli tidak boleh negatif.'),
         ),
       );
@@ -337,7 +336,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
       _notesCtrl.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.successDark,
+          backgroundColor: NusaThemeTokens.of(context).positive,
           content: Text(
             _paymentStatus == 'paid'
                 ? 'Stok masuk Lunas berhasil dicatat.'
@@ -355,7 +354,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.danger,
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text(res['message']?.toString() ?? 'Gagal mencatat stok masuk.'),
         ),
       );
@@ -387,15 +386,15 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
               ),
               IconButton(
                 tooltip: 'Buku Bon Hutang Supplier',
-                icon: const Icon(Icons.menu_book_rounded, color: AppColors.warningDark),
+                icon: Icon(Icons.menu_book_rounded, color: NusaThemeTokens.of(context).warning),
                 onPressed: () => context.push('/debts?tab=payables'),
               ),
             ],
             bottom: TabBar(
               controller: _tabController,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.slate500,
-              indicatorColor: AppColors.primary,
+              labelColor: NusaThemeTokens.of(context).accent,
+              unselectedLabelColor: NusaThemeTokens.of(context).textSecondary,
+              indicatorColor: NusaThemeTokens.of(context).accent,
               tabs: [
                 Tab(text: 'Data Pemasok (${state.suppliers.length})'),
                 const Tab(text: 'Stok Masuk (Quick In)'),
@@ -405,7 +404,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
           floatingActionButton: _tabController.index == 0
               ? FloatingActionButton.extended(
                   onPressed: () => _showAddOrEditSupplierModal(),
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: NusaThemeTokens.of(context).accent,
                   icon: const Icon(Icons.add_business_rounded, color: Colors.white),
                   label: const Text('Tambah Pemasok', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
                 )
@@ -430,10 +429,10 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                   ),
                   Expanded(
                     child: filteredSuppliers.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'Belum ada data pemasok terdaftar.',
-                              style: TextStyle(color: AppColors.slate500),
+                              style: TextStyle(color: NusaThemeTokens.of(context).textSecondary),
                             ),
                           )
                         : ListView.separated(
@@ -453,7 +452,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: AppColors.border),
+                                  border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -461,8 +460,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                     Row(
                                       children: [
                                         CircleAvatar(
-                                          backgroundColor: AppColors.primarySoft,
-                                          child: const Icon(Icons.local_shipping_rounded, color: AppColors.primary, size: 20),
+                                          backgroundColor: NusaThemeTokens.of(context).accentSoft,
+                                          child: Icon(Icons.local_shipping_rounded, color: NusaThemeTokens.of(context).accent, size: 20),
                                         ),
                                         const SizedBox(width: 10),
                                         Expanded(
@@ -475,13 +474,13 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                               ),
                                               Text(
                                                 'PIC: ${s['contact_person'] ?? '-'} • Telp: ${s['phone'] ?? '-'}',
-                                                style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                                style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                               ),
                                             ],
                                           ),
                                         ),
                                         IconButton(
-                                          icon: const Icon(Icons.edit_outlined, size: 20, color: AppColors.slate600),
+                                          icon: Icon(Icons.edit_outlined, size: 20, color: NusaThemeTokens.of(context).textSecondary),
                                           onPressed: () => _showAddOrEditSupplierModal(existing: s),
                                         ),
                                       ],
@@ -493,11 +492,11 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                       decoration: BoxDecoration(
                                         color: const Color(0xFFF8FAFC),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: AppColors.border),
+                                        border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                                       ),
                                       child: Row(
                                         children: [
-                                          const Icon(Icons.account_balance_rounded, size: 18, color: AppColors.primary),
+                                          Icon(Icons.account_balance_rounded, size: 18, color: NusaThemeTokens.of(context).accent),
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: hasBank
@@ -506,28 +505,28 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                                     children: [
                                                       Text(
                                                         '$bankName • $bankNo',
-                                                        style: const TextStyle(
+                                                        style: TextStyle(
                                                           fontWeight: FontWeight.w800,
                                                           fontSize: 12.5,
-                                                          color: AppColors.navyDark,
+                                                          color: NusaThemeTokens.of(context).textPrimary,
                                                         ),
                                                       ),
                                                       if (bankHolder.isNotEmpty)
                                                         Text(
                                                           'a.n. $bankHolder',
-                                                          style: const TextStyle(fontSize: 11.5, color: AppColors.slate600),
+                                                          style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary),
                                                         ),
                                                     ],
                                                   )
-                                                : const Text(
+                                                : Text(
                                                     'Rekening bank belum dilengkapi',
-                                                    style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                                                    style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textTertiary),
                                                   ),
                                           ),
                                           if (bankNo.isNotEmpty)
                                             IconButton(
                                               tooltip: 'Salin Nomor Rekening',
-                                              icon: const Icon(Icons.copy_rounded, size: 17, color: AppColors.primary),
+                                              icon: Icon(Icons.copy_rounded, size: 17, color: NusaThemeTokens.of(context).accent),
                                               onPressed: () {
                                                 Clipboard.setData(ClipboardData(text: bankNo));
                                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -549,7 +548,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                                           style: TextStyle(
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.w800,
-                                            color: payable > 0 ? AppColors.dangerDark : AppColors.successDark,
+                                            color: payable > 0 ? NusaThemeTokens.of(context).danger : NusaThemeTokens.of(context).positive,
                                           ),
                                         ),
                                         TextButton.icon(
@@ -582,9 +581,9 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                       style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'Tambah stok barang langsung dari HP & catat pelunasan atau hutang tempo ke pemasok.',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<int>(
@@ -648,11 +647,11 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: AppColors.primarySoft,
+                              color: NusaThemeTokens.of(context).accentSoft,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                              border: Border.all(color: NusaThemeTokens.of(context).accent.withOpacity(0.3)),
                             ),
-                            child: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.primary),
+                            child: Icon(Icons.qr_code_scanner_rounded, color: NusaThemeTokens.of(context).accent),
                           ),
                         ),
                       ],
@@ -686,7 +685,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: AppColors.primarySoft,
+                        color: NusaThemeTokens.of(context).accentSoft,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -698,7 +697,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                               (double.tryParse(_qtyCtrl.text.replaceAll(',', '.').trim()) ?? 0) *
                                   IdrCurrencyFormatter.parse(_costCtrl.text),
                             ),
-                            style: AppTheme.moneyStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.primary),
+                            style: AppTheme.moneyStyle(fontSize: 16, fontWeight: FontWeight.w900, color: NusaThemeTokens.of(context).accent),
                           ),
                         ],
                       ),
@@ -713,10 +712,10 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                             label: const Center(child: Text('Lunas (Kas/Bank)')),
                             selected: _paymentStatus == 'paid',
                             onSelected: (_) => setState(() => _paymentStatus = 'paid'),
-                            selectedColor: AppColors.success,
+                            selectedColor: NusaThemeTokens.of(context).positive,
                             labelStyle: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: _paymentStatus == 'paid' ? Colors.white : AppColors.slate700,
+                              color: _paymentStatus == 'paid' ? Colors.white : NusaThemeTokens.of(context).textPrimary,
                             ),
                           ),
                         ),
@@ -726,10 +725,10 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                             label: const Center(child: Text('Tempo / Hutang Bon')),
                             selected: _paymentStatus == 'credit',
                             onSelected: (_) => setState(() => _paymentStatus = 'credit'),
-                            selectedColor: AppColors.warningDark,
+                            selectedColor: NusaThemeTokens.of(context).warning,
                             labelStyle: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: _paymentStatus == 'credit' ? Colors.white : AppColors.slate700,
+                              color: _paymentStatus == 'credit' ? Colors.white : NusaThemeTokens.of(context).textPrimary,
                             ),
                           ),
                         ),
@@ -741,13 +740,13 @@ class _SupplierListScreenState extends State<SupplierListScreen> with SingleTick
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: AppColors.border),
+                          side: BorderSide(color: NusaThemeTokens.of(context).borderSubtle),
                         ),
                         tileColor: Colors.white,
-                        leading: const Icon(Icons.event_rounded, color: AppColors.warningDark),
+                        leading: Icon(Icons.event_rounded, color: NusaThemeTokens.of(context).warning),
                         title: const Text('Tanggal Jatuh Tempo', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                         subtitle: Text(DateFormat('dd MMM yyyy').format(_dueDate)),
-                        trailing: const Text('Ubah', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700)),
+                        trailing: Text('Ubah', style: TextStyle(color: NusaThemeTokens.of(context).accent, fontWeight: FontWeight.w700)),
                         onTap: () async {
                           final picked = await showDatePicker(
                             context: context,

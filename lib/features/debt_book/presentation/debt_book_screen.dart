@@ -6,7 +6,6 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/hardware/whatsapp_service.dart';
@@ -272,7 +271,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
               const SizedBox(height: 6),
               Text(
                 'Nota ${item['number']} • Sisa Tagihan: ${IdrCurrencyFormatter.format(currentDue)}',
-                style: const TextStyle(color: AppColors.slate600, fontSize: 13),
+                style: TextStyle(color: NusaThemeTokens.of(mCtx).textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 12),
               if (_paymentMethods.isNotEmpty)
@@ -292,9 +291,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                 controller: amountCtrl,
                 enabled: !isSaving,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Nominal Dibayar (Rp)',
-                  prefixIcon: Icon(Icons.payments_rounded, color: AppColors.success),
+                  prefixIcon: Icon(Icons.payments_rounded, color: NusaThemeTokens.of(mCtx).positive),
                 ),
               ),
               if (modalError != null) ...[
@@ -303,20 +302,20 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
+                    color: NusaThemeTokens.of(mCtx).dangerSoft,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                    border: Border.all(color: NusaThemeTokens.of(mCtx).danger.withOpacity(0.35)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                      Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(mCtx).danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           modalError!,
-                          style: const TextStyle(
-                            color: AppColors.dangerDark,
+                          style: TextStyle(
+                            color: NusaThemeTokens.of(mCtx).danger,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -330,7 +329,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+                  style: ElevatedButton.styleFrom(backgroundColor: NusaThemeTokens.of(mCtx).positive),
                   onPressed: isSaving
                       ? null
                       : () async {
@@ -369,8 +368,8 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                             if (!mounted) return;
                             if (!_isLocalStandalone) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: AppColors.warningDark,
+                                SnackBar(
+                                  backgroundColor: NusaThemeTokens.of(mCtx).warning,
                                   content: Text(
                                     'Pelunasan piutang disimpan offline & masuk antrean sinkronisasi Cloud.',
                                   ),
@@ -487,19 +486,19 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
               const SizedBox(height: 6),
               Text(
                 'Faktur: ${item['number']} • Sisa Hutang: ${IdrCurrencyFormatter.format(currentDue)}',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(mCtx).textSecondary),
               ),
               if (bankName != '-' || bankAcc != '-') ...[
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
+                    color: NusaThemeTokens.of(mCtx).accentSoft,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.account_balance_rounded, color: AppColors.primary, size: 22),
+                      Icon(Icons.account_balance_rounded, color: NusaThemeTokens.of(mCtx).accent, size: 22),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -507,12 +506,12 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                           children: [
                             Text(
                               'Rekening Supplier: $bankName $bankAcc',
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.navyDark),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: NusaThemeTokens.of(mCtx).textPrimary),
                             ),
                             if (bankHolder != '-')
                               Text(
                                 'a.n. $bankHolder',
-                                style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                                style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(mCtx).textSecondary),
                               ),
                           ],
                         ),
@@ -538,9 +537,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
               TextField(
                 controller: amountCtrl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Nominal Dibayar (Rp)',
-                  prefixIcon: Icon(Icons.payments_rounded, color: AppColors.primary),
+                  prefixIcon: Icon(Icons.payments_rounded, color: NusaThemeTokens.of(mCtx).accent),
                 ),
               ),
               const SizedBox(height: 10),
@@ -661,9 +660,9 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   'Kategori Cepat:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.slate600),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(mCtx).textSecondary),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -720,20 +719,20 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.dangerSoft,
+                      color: NusaThemeTokens.of(mCtx).dangerSoft,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+                      border: Border.all(color: NusaThemeTokens.of(mCtx).danger.withOpacity(0.35)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
+                        Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(mCtx).danger, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             modalError!,
-                            style: const TextStyle(
-                              color: AppColors.dangerDark,
+                            style: TextStyle(
+                              color: NusaThemeTokens.of(mCtx).danger,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
                             ),
@@ -784,7 +783,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   backgroundColor:
-                                      _isLocalStandalone ? AppColors.successDark : AppColors.warningDark,
+                                      _isLocalStandalone ? NusaThemeTokens.of(mCtx).positive : NusaThemeTokens.of(mCtx).warning,
                                   content: Text(
                                     _isLocalStandalone
                                         ? 'Biaya operasional dicatat secara lokal!'
@@ -1097,17 +1096,17 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                               Expanded(
                                                 child: Text(
                                                   custName,
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 14.5,
                                                     fontWeight: FontWeight.w800,
-                                                    color: AppColors.navyDark,
+                                                    color: NusaThemeTokens.of(context).textPrimary,
                                                   ),
                                                 ),
                                               ),
                                               NusaPriceTag(
                                                 amount: (r['balance_due'] as num?)?.toDouble() ?? 0,
                                                 fontSize: 15,
-                                                color: AppColors.danger,
+                                                color: NusaThemeTokens.of(context).danger,
                                               ),
                                             ],
                                           ),
@@ -1120,7 +1119,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                                 child: Text(
                                                   'Nota ${r['number']} • WA: ${phone.isEmpty ? '-' : phone}',
                                                   overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                                  style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                                 ),
                                               ),
                                             ],
@@ -1155,7 +1154,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                                   invoice: r,
                                                   partyName: custName,
                                                 ),
-                                                icon: const Icon(Icons.history_rounded, color: AppColors.primary),
+                                                icon: Icon(Icons.history_rounded, color: NusaThemeTokens.of(context).accent),
                                               ),
                                               Expanded(
                                                 child: NusaButton(
@@ -1234,17 +1233,17 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                             Expanded(
                                               child: Text(
                                                 suppName,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 14.5,
                                                   fontWeight: FontWeight.w800,
-                                                  color: AppColors.navyDark,
+                                                  color: NusaThemeTokens.of(context).textPrimary,
                                                 ),
                                               ),
                                             ),
                                             NusaPriceTag(
                                               amount: (p['balance_due'] as num?)?.toDouble() ?? 0,
                                               fontSize: 15,
-                                              color: AppColors.danger,
+                                              color: NusaThemeTokens.of(context).danger,
                                             ),
                                           ],
                                         ),
@@ -1260,7 +1259,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                               child: Text(
                                                 'Faktur: ${p['number']} • Tempo: ${p['due_date'] ?? '-'}',
                                                 overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                                style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                               ),
                                             ),
                                           ],
@@ -1270,21 +1269,21 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                             decoration: BoxDecoration(
-                                              color: AppColors.background,
+                                              color: NusaThemeTokens.of(context).bgPage,
                                               borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: AppColors.border),
+                                              border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
                                             ),
                                             child: Row(
                                               children: [
-                                                const Icon(Icons.account_balance_outlined, size: 17, color: AppColors.primary),
+                                                Icon(Icons.account_balance_outlined, size: 17, color: NusaThemeTokens.of(context).accent),
                                                 const SizedBox(width: 8),
                                                 Expanded(
                                                   child: Text(
                                                     '$bankName $bankAcc ${bankHolder.isNotEmpty ? "($bankHolder)" : ""}',
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       fontSize: 12,
                                                       fontWeight: FontWeight.w700,
-                                                      color: AppColors.navyDark,
+                                                      color: NusaThemeTokens.of(context).textPrimary,
                                                     ),
                                                   ),
                                                 ),
@@ -1301,19 +1300,19 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                                       constraints: const BoxConstraints(minHeight: 36),
                                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                                       decoration: BoxDecoration(
-                                                        color: AppColors.primarySoft,
+                                                        color: NusaThemeTokens.of(context).accentSoft,
                                                         borderRadius: BorderRadius.circular(8),
                                                       ),
-                                                      child: const Row(
+                                                      child: Row(
                                                         children: [
-                                                          Icon(Icons.copy_rounded, size: 14, color: AppColors.primary),
+                                                          Icon(Icons.copy_rounded, size: 14, color: NusaThemeTokens.of(context).accent),
                                                           SizedBox(width: 4),
                                                           Text(
                                                             'Salin',
                                                             style: TextStyle(
                                                               fontSize: 11,
                                                               fontWeight: FontWeight.w800,
-                                                              color: AppColors.primary,
+                                                              color: NusaThemeTokens.of(context).accent,
                                                             ),
                                                           ),
                                                         ],
@@ -1354,7 +1353,7 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                                 invoice: p,
                                                 partyName: suppName,
                                               ),
-                                              icon: const Icon(Icons.history_rounded, color: AppColors.primary),
+                                              icon: Icon(Icons.history_rounded, color: NusaThemeTokens.of(context).accent),
                                             ),
                                             Expanded(
                                               child: NusaButton(
@@ -1448,10 +1447,10 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                             width: 40,
                                             height: 40,
                                             decoration: BoxDecoration(
-                                              color: AppColors.dangerSoft,
+                                              color: NusaThemeTokens.of(context).dangerSoft,
                                               borderRadius: BorderRadius.circular(10),
                                             ),
-                                            child: const Icon(Icons.receipt_long_rounded, color: AppColors.danger, size: 20),
+                                            child: Icon(Icons.receipt_long_rounded, color: NusaThemeTokens.of(context).danger, size: 20),
                                           ),
                                           const SizedBox(width: 12),
                                           Expanded(
@@ -1460,16 +1459,16 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                               children: [
                                                 Text(
                                                   (exp['description'] ?? '-').toString(),
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 13.5,
                                                     fontWeight: FontWeight.w800,
-                                                    color: AppColors.navyDark,
+                                                    color: NusaThemeTokens.of(context).textPrimary,
                                                   ),
                                                 ),
                                                 const SizedBox(height: 2),
                                                 Text(
                                                   '$catName • $dateStr',
-                                                  style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                                                  style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary),
                                                 ),
                                               ],
                                             ),
@@ -1480,23 +1479,23 @@ class _DebtBookScreenState extends State<DebtBookScreen> with SingleTickerProvid
                                               NusaPriceTag(
                                                 amount: (exp['amount'] as num?)?.toDouble() ?? 0,
                                                 fontSize: 13.5,
-                                                color: AppColors.dangerDark,
+                                                color: NusaThemeTokens.of(context).danger,
                                               ),
                                               Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
                                                   InkWell(
                                                     onTap: () => _showEditExpenseModal(exp),
-                                                    child: const Padding(
+                                                    child: Padding(
                                                       padding: EdgeInsets.all(4),
-                                                      child: Icon(Icons.edit_outlined, size: 17, color: AppColors.primary),
+                                                      child: Icon(Icons.edit_outlined, size: 17, color: NusaThemeTokens.of(context).accent),
                                                     ),
                                                   ),
                                                   InkWell(
                                                     onTap: () => _confirmDeleteExpense(exp),
-                                                    child: const Padding(
+                                                    child: Padding(
                                                       padding: EdgeInsets.all(4),
-                                                      child: Icon(Icons.delete_outline, size: 17, color: AppColors.danger),
+                                                      child: Icon(Icons.delete_outline, size: 17, color: NusaThemeTokens.of(context).danger),
                                                     ),
                                                   ),
                                                 ],

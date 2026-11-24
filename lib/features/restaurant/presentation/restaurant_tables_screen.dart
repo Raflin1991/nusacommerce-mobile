@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -97,45 +96,84 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
     }
 
     int? destId = (availableTables.first['id'] as num).toInt();
+    String? modalError;
+    bool submitting = false;
 
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (dCtx, setModalState) => AlertDialog(
-          title: Text('Pindah ${sourceTable['name']} ke Meja:'),
-          content: DropdownButtonFormField<int>(
-            value: destId,
-            items: availableTables
-                .map((t) => DropdownMenuItem<int>(
-                      value: (t['id'] as num).toInt(),
-                      child: Text('${t['name']} (${t['section'] ?? 'Indoor'})'),
-                    ))
-                .toList(),
-            onChanged: (v) => setModalState(() => destId = v),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-            ElevatedButton(
-              onPressed: () async {
-                if (destId == null) return;
-                Navigator.pop(ctx);
-                try {
-                  await _api.dio.post(
-                    ApiEndpoints.transferTable(sourceId),
-                    data: {'destination_table_id': destId},
-                  );
-                  await _loadTables();
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(ApiClient.extractErrorMessage(e))),
-                  );
-                }
-              },
-              child: const Text('Pindahkan'),
+        builder: (dCtx, setModalState) {
+          final tokens = NusaThemeTokens.of(dCtx);
+          return AlertDialog(
+            title: Text('Pindah ${sourceTable['name']} ke Meja:'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<int>(
+                  value: destId,
+                  isExpanded: true,
+                  items: availableTables
+                      .map((t) => DropdownMenuItem<int>(
+                            value: (t['id'] as num).toInt(),
+                            child: Text(
+                              '${t['name']} (${t['section'] ?? 'Indoor'})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setModalState(() => destId = v),
+                ),
+                if (modalError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: tokens.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: tokens.danger),
+                    ),
+                    child: Text(
+                      modalError!,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.danger),
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: submitting ? null : () => Navigator.pop(ctx),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                onPressed: submitting
+                    ? null
+                    : () async {
+                        if (destId == null) return;
+                        setModalState(() {
+                          submitting = true;
+                          modalError = null;
+                        });
+                        try {
+                          await _api.dio.post(
+                            ApiEndpoints.transferTable(sourceId),
+                            data: {'destination_table_id': destId},
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          await _loadTables();
+                        } catch (e) {
+                          setModalState(() {
+                            submitting = false;
+                            modalError = ApiClient.extractErrorMessage(e);
+                          });
+                        }
+                      },
+                child: Text(submitting ? 'Memindahkan...' : 'Pindahkan'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -159,8 +197,11 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Text(
                   '${table['name']} • Area ${table['section'] ?? 'Indoor'}',
@@ -179,7 +220,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   '${activeOrder['number'] ?? 'Open Tab'} • Tagihan: ${IdrCurrencyFormatter.format(total)}${customerName != null ? ' • $customerName' : ''}',
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.primary),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: NusaThemeTokens.of(ctx).accent),
                 ),
               ),
             SizedBox(
@@ -225,7 +266,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                     if (printed) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          backgroundColor: AppColors.successDark,
+                          backgroundColor: NusaThemeTokens.of(ctx).positive,
                           content: Text('Tiket Dapur (KOT) ${table['name']} dicetak ke printer!'),
                         ),
                       );
@@ -241,7 +282,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                             decoration: BoxDecoration(
                               color: const Color(0xFFF8FAFC),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: AppColors.border),
+                              border: Border.all(color: NusaThemeTokens.of(dCtx).borderSubtle),
                             ),
                             child: Text(kotText, style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5)),
                           ),
@@ -256,7 +297,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: ok ? AppColors.successDark : AppColors.warningDark,
+                                  backgroundColor: ok ? NusaThemeTokens.of(dCtx).positive : NusaThemeTokens.of(dCtx).warning,
                                   content: Text(
                                     ok
                                         ? 'Tiket Dapur (KOT) dikirim ke printer Bluetooth!'
@@ -325,7 +366,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.dangerDark)),
+                        Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: NusaThemeTokens.of(context).danger)),
                         const SizedBox(height: 12),
                         ElevatedButton(onPressed: _loadTables, child: const Text('Coba Lagi')),
                       ],
@@ -351,10 +392,10 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                                     label: Text(sec),
                                     selected: active,
                                     onSelected: (_) => setState(() => _selectedSection = sec),
-                                    selectedColor: AppColors.primary,
+                                    selectedColor: NusaThemeTokens.of(context).accent,
                                     showCheckmark: false,
                                     labelStyle: TextStyle(
-                                      color: active ? Colors.white : AppColors.slate700,
+                                      color: active ? Colors.white : NusaThemeTokens.of(context).textPrimary,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -363,17 +404,17 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.circle, size: 10, color: AppColors.success),
+                              Icon(Icons.circle, size: 10, color: NusaThemeTokens.of(context).positive),
                               SizedBox(width: 4),
                               Text('Kosong', style: TextStyle(fontSize: 11.5)),
                               SizedBox(width: 14),
-                              Icon(Icons.circle, size: 10, color: AppColors.danger),
+                              Icon(Icons.circle, size: 10, color: NusaThemeTokens.of(context).danger),
                               SizedBox(width: 4),
                               Text('Terisi (Open Tab)', style: TextStyle(fontSize: 11.5)),
                               SizedBox(width: 14),
-                              Icon(Icons.circle, size: 10, color: AppColors.warning),
+                              Icon(Icons.circle, size: 10, color: NusaThemeTokens.of(context).warning),
                               SizedBox(width: 4),
                               Text('Billed', style: TextStyle(fontSize: 11.5)),
                             ],
@@ -383,8 +424,8 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                     ),
                     Expanded(
                       child: filtered.isEmpty
-                          ? const Center(
-                              child: Text('Belum ada meja restoran terdaftar.', style: TextStyle(color: AppColors.slate500)),
+                          ? Center(
+                              child: Text('Belum ada meja restoran terdaftar.', style: TextStyle(color: NusaThemeTokens.of(context).textSecondary)),
                             )
                           : GridView.builder(
                               padding: const EdgeInsets.all(16),
@@ -404,11 +445,11 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                                 final total = (activeOrder?['grand_total'] as num?)?.toDouble() ?? 0.0;
 
                                 final borderColor = isAvail
-                                    ? AppColors.success
-                                    : (isBilled ? AppColors.warning : AppColors.danger);
+                                    ? NusaThemeTokens.of(context).positive
+                                    : (isBilled ? NusaThemeTokens.of(context).warning : NusaThemeTokens.of(context).danger);
                                 final bgColor = isAvail
-                                    ? AppColors.successSoft.withOpacity(0.45)
-                                    : (isBilled ? AppColors.warningSoft : AppColors.dangerSoft.withOpacity(0.55));
+                                    ? NusaThemeTokens.of(context).positiveSoft.withOpacity(0.45)
+                                    : (isBilled ? NusaThemeTokens.of(context).warningSoft : NusaThemeTokens.of(context).dangerSoft.withOpacity(0.55));
 
                                 return InkWell(
                                   onTap: () => _showTableActionsModal(context, table),
@@ -435,13 +476,13 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                                         ),
                                         Text(
                                           '${table['section'] ?? 'Indoor'} • Kapasitas ${table['capacity']} Kursi',
-                                          style: const TextStyle(fontSize: 11.5, color: AppColors.slate600),
+                                          style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary),
                                         ),
                                         const Spacer(),
                                         if (isAvail)
-                                          const Text(
+                                          Text(
                                             'Siap Ditempati',
-                                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.successDark),
+                                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).positive),
                                           )
                                         else ...[
                                           Text(

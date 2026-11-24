@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
-import '../constants/app_colors.dart';
 import '../network/api_client.dart';
+import '../theme/nusa_theme_tokens.dart';
 
 /// Crisp Vector/Illustrated Product & Store Graphics for OXORA Mobile
 class ProductIllustrationWidget extends StatelessWidget {
@@ -56,7 +56,7 @@ class ProductIllustrationWidget extends StatelessWidget {
         decoration: BoxDecoration(
           color: backgroundColor ?? Colors.white,
           borderRadius: resolvedRadius,
-          border: showBorder ? Border.all(color: AppColors.border) : null,
+          border: showBorder ? Border.all(color: NusaThemeTokens.of(context).borderSubtle) : null,
         ),
         clipBehavior: Clip.antiAlias,
         child: Image.network(
@@ -76,14 +76,14 @@ class ProductIllustrationWidget extends StatelessWidget {
               ),
             );
           },
-          errorBuilder: (_, __, ___) => _buildVectorBadge(w, h, resolvedRadius),
+          errorBuilder: (errCtx, __, ___) => _buildVectorBadge(NusaThemeTokens.of(errCtx), w, h, resolvedRadius),
         ),
       );
     }
-    return _buildVectorBadge(w, h, resolvedRadius);
+    return _buildVectorBadge(NusaThemeTokens.of(context), w, h, resolvedRadius);
   }
 
-  Widget _buildVectorBadge(double w, double h, BorderRadiusGeometry resolvedRadius) {
+  Widget _buildVectorBadge(NusaThemeTokens tokens, double w, double h, BorderRadiusGeometry resolvedRadius) {
     late Color bgColor;
     late Color accentColor;
     late IconData icon;
@@ -139,8 +139,8 @@ class ProductIllustrationWidget extends StatelessWidget {
         badgeText = 'PLN';
         break;
       default:
-        bgColor = AppColors.primarySoft;
-        accentColor = AppColors.primary;
+        bgColor = tokens.accentSoft;
+        accentColor = tokens.accent;
         icon = Icons.inventory_2_rounded;
         badgeText = 'POS';
     }
@@ -209,8 +209,8 @@ class Store3DIllustrationWidget extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  AppColors.primary.withOpacity(0.16),
-                  AppColors.primary.withOpacity(0.02),
+                  NusaThemeTokens.of(context).accent.withOpacity(0.16),
+                  NusaThemeTokens.of(context).accent.withOpacity(0.02),
                 ],
               ),
             ),
@@ -225,7 +225,7 @@ class Store3DIllustrationWidget extends StatelessWidget {
               border: Border.all(color: const Color(0xFFFDE68A), width: 2),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.14),
+                  color: NusaThemeTokens.of(context).accent.withOpacity(0.14),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -284,7 +284,7 @@ class Store3DIllustrationWidget extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: const Color(0xFF2563EB), width: 2),
                         ),
-                        child: const Icon(Icons.storefront_rounded, color: AppColors.primary, size: 24),
+                        child: Icon(Icons.storefront_rounded, color: NusaThemeTokens.of(context).accent, size: 24),
                       ),
                     ],
                   ),
@@ -302,15 +302,15 @@ class Store3DIllustrationWidget extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border),
-                  boxShadow: AppColors.cardShadow,
+                  border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
+                  boxShadow: NusaThemeTokens.of(context).cardShadow,
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.trending_up_rounded, color: AppColors.primary, size: 22),
+                    Icon(Icons.trending_up_rounded, color: NusaThemeTokens.of(context).accent, size: 22),
                     SizedBox(width: 4),
-                    Icon(Icons.bar_chart_rounded, color: AppColors.success, size: 22),
+                    Icon(Icons.bar_chart_rounded, color: NusaThemeTokens.of(context).positive, size: 22),
                   ],
                 ),
               ),

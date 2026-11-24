@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -83,7 +82,7 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -143,20 +142,20 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
+                    color: NusaThemeTokens.of(ctx).dangerSoft,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFFCA5A5)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                      Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           modalError!,
-                          style: const TextStyle(
-                            color: AppColors.dangerDark,
+                          style: TextStyle(
+                            color: NusaThemeTokens.of(ctx).danger,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -164,7 +163,7 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
                       ),
                       InkWell(
                         onTap: () => setModal(() => modalError = null),
-                        child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                        child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                       ),
                     ],
                   ),
@@ -211,7 +210,7 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: AppColors.danger,
+                                    backgroundColor: NusaThemeTokens.of(ctx).danger,
                                     content: Text(errMsg),
                                   ),
                                 );

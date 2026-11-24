@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -76,7 +75,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -160,13 +159,13 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                                               style: const TextStyle(fontWeight: FontWeight.w700)),
                                           Text(
                                             '${IdrCurrencyFormatter.formatQty((it['quantity'] as num).toDouble())} x ${IdrCurrencyFormatter.format((it['unit_price'] as num).toDouble())}',
-                                            style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textSecondary),
                                           ),
                                         ],
                                       ),
                                     ),
                                     IconButton(
-                                      icon: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                                      icon: Icon(Icons.close, color: NusaThemeTokens.of(ctx).danger, size: 18),
                                       onPressed: () => setModal(() => lines.remove(it)),
                                     ),
                                   ],
@@ -208,20 +207,20 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: AppColors.dangerSoft,
+                        color: NusaThemeTokens.of(ctx).dangerSoft,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFFCA5A5)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                          Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               modalError!,
-                              style: const TextStyle(
-                                color: AppColors.dangerDark,
+                              style: TextStyle(
+                                color: NusaThemeTokens.of(ctx).danger,
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -229,7 +228,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                           ),
                           InkWell(
                             onTap: () => setModal(() => modalError = null),
-                            child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                            child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                           ),
                         ],
                       ),
@@ -242,7 +241,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                       const Text('Total Penawaran', style: TextStyle(fontWeight: FontWeight.w700)),
                       Text(
                         IdrCurrencyFormatter.format(grand),
-                        style: AppTheme.moneyStyle(fontSize: 18, color: AppColors.primary),
+                        style: AppTheme.moneyStyle(fontSize: 18, color: NusaThemeTokens.of(ctx).accent),
                       ),
                     ],
                   ),
@@ -286,7 +285,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        backgroundColor: AppColors.danger,
+                                        backgroundColor: NusaThemeTokens.of(ctx).danger,
                                         content: Text(errMsg),
                                       ),
                                     );
@@ -445,7 +444,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openCreateQuotationModal,
-        backgroundColor: AppColors.primary,
+        backgroundColor: NusaThemeTokens.of(context).accent,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.note_add_rounded),
         label: const Text('Buat Penawaran'),
@@ -488,19 +487,19 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                           const SizedBox(height: 4),
                           Text(
                             'Pelanggan: ${q['customer_name'] ?? 'Umum'} • Berlaku s/d: ${q['valid_until'] ?? '-'}',
-                            style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                            style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             IdrCurrencyFormatter.format(total),
-                            style: AppTheme.moneyStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.primary),
+                            style: AppTheme.moneyStyle(fontSize: 16, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).accent),
                           ),
                           const SizedBox(height: 10),
                           Row(
                             children: [
                               OutlinedButton.icon(
                                 onPressed: () => _shareQuotationWa(q),
-                                icon: const Icon(Icons.share_rounded, size: 17, color: AppColors.successDark),
+                                icon: Icon(Icons.share_rounded, size: 17, color: NusaThemeTokens.of(context).positive),
                                 label: const Text('Kirim WA'),
                               ),
                               const SizedBox(width: 8),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/mobile_workspace_config.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/cascade_entitlement_teaser.dart';
 import '../../auth/bloc/auth_cubit.dart';
@@ -270,7 +269,7 @@ class _AllModulesDirectoryViewState extends State<AllModulesDirectoryView> {
         color: tokens.bgSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
-        boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.cardShadow,
+        boxShadow: tokens.isDark || tokens.isHighContrast ? null : NusaThemeTokens.of(context).cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -549,7 +548,7 @@ class _AllModulesDirectoryViewState extends State<AllModulesDirectoryView> {
       ),
       _ModuleCategory(
         title: 'Produk & Katalog',
-        accentColor: AppColors.purple,
+        accentColor: NusaThemeTokens.of(context).purple,
         items: [
           if (canProducts)
             _ModuleEntry(

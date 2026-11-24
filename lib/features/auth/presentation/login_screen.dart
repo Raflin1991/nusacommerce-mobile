@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
@@ -533,7 +532,7 @@ class _LoginScreenState extends State<LoginScreen> {
               icon: Icons.store_mall_directory_rounded,
               label: 'Toko Mandiri (Offline)',
               selected: !isCloud,
-              accentColor: AppColors.successDark,
+              accentColor: NusaThemeTokens.of(context).positive,
               onTap: () =>
                   setState(() => _entryMode = _LoginEntryMode.standalone),
             ),
@@ -547,20 +546,20 @@ class _LoginScreenState extends State<LoginScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.dangerSoft,
+        color: NusaThemeTokens.of(context).dangerSoft,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+        border: Border.all(color: NusaThemeTokens.of(context).danger.withOpacity(0.35)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline_rounded,
-              color: AppColors.dangerDark, size: 20),
+          Icon(Icons.error_outline_rounded,
+              color: NusaThemeTokens.of(context).danger, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(
-                color: AppColors.dangerDark,
+              style: TextStyle(
+                color: NusaThemeTokens.of(context).danger,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
               ),
@@ -584,7 +583,7 @@ class _LoginScreenState extends State<LoginScreen> {
             color: tokens.bgSurface,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
-            boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.cardShadow,
+            boxShadow: tokens.isDark || tokens.isHighContrast ? null : NusaThemeTokens.of(context).cardShadow,
           ),
           child: AutofillGroup(
             child: Column(
@@ -636,13 +635,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: InputDecoration(
                     hintText: 'Contoh: warungmaju',
                     prefixIcon:
-                        const Icon(Icons.storefront_rounded, color: AppColors.primary),
+                        Icon(Icons.storefront_rounded, color: NusaThemeTokens.of(context).accent),
                     suffixText: '.oxora.id',
                     suffixIcon: _tenantController.text.isNotEmpty
                         ? IconButton(
                             tooltip: 'Bersihkan',
-                            icon: const Icon(Icons.close_rounded,
-                                size: 18, color: AppColors.slate400),
+                            icon: Icon(Icons.close_rounded,
+                                size: 18, color: NusaThemeTokens.of(context).textTertiary),
                             onPressed: () {
                               _tenantController.clear();
                               setState(() {});
@@ -652,12 +651,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'Email Pengguna (Owner / Kasir)',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
-                    color: AppColors.navyDark,
+                    color: NusaThemeTokens.of(context).textPrimary,
                   ),
                 ),
                 const SizedBox(height: 7),
@@ -667,19 +666,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   textInputAction: TextInputAction.next,
                   autofillHints: const [AutofillHints.email],
                   autocorrect: false,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: 'owner@tokoanda.co.id',
                     prefixIcon:
-                        Icon(Icons.email_outlined, color: AppColors.primary),
+                        Icon(Icons.email_outlined, color: NusaThemeTokens.of(context).accent),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'Kata Sandi',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
-                    color: AppColors.navyDark,
+                    color: NusaThemeTokens.of(context).textPrimary,
                   ),
                 ),
                 const SizedBox(height: 7),
@@ -691,8 +690,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onSubmitted: (_) => state.isLoading ? null : _submitLogin(),
                   decoration: InputDecoration(
                     hintText: 'Masukkan kata sandi',
-                    prefixIcon: const Icon(Icons.lock_outline_rounded,
-                        color: AppColors.primary),
+                    prefixIcon: Icon(Icons.lock_outline_rounded,
+                        color: NusaThemeTokens.of(context).accent),
                     suffixIcon: IconButton(
                       tooltip: _obscurePassword
                           ? 'Tampilkan sandi'
@@ -746,28 +745,28 @@ class _LoginScreenState extends State<LoginScreen> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  AppColors.success.withOpacity(0.10),
-                  AppColors.primary.withOpacity(0.06),
+                  NusaThemeTokens.of(context).positive.withOpacity(0.10),
+                  NusaThemeTokens.of(context).accent.withOpacity(0.06),
                 ],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.success.withOpacity(0.35)),
+              border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.35)),
             ),
             child: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.success.withOpacity(0.16),
+                    color: NusaThemeTokens.of(context).positive.withOpacity(0.16),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.rocket_launch_rounded,
-                      color: AppColors.successDark, size: 19),
+                  child: Icon(Icons.rocket_launch_rounded,
+                      color: NusaThemeTokens.of(context).positive, size: 19),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -776,7 +775,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.navyDark,
+                          color: NusaThemeTokens.of(context).textPrimary,
                         ),
                       ),
                       SizedBox(height: 2),
@@ -784,14 +783,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         'Mulai Coba Gratis Mode Toko Mandiri tanpa login',
                         style: TextStyle(
                           fontSize: 11.5,
-                          color: AppColors.slate600,
+                          color: NusaThemeTokens.of(context).textSecondary,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Icon(Icons.arrow_forward_ios_rounded,
-                    size: 15, color: AppColors.successDark),
+                Icon(Icons.arrow_forward_ios_rounded,
+                    size: 15, color: NusaThemeTokens.of(context).positive),
               ],
             ),
           ),
@@ -841,16 +840,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 8),
-                        side: const BorderSide(color: AppColors.primaryLight),
-                        backgroundColor: AppColors.primarySoft,
+                        side: BorderSide(color: NusaThemeTokens.of(context).accentSoft),
+                        backgroundColor: NusaThemeTokens.of(context).accentSoft,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.admin_panel_settings_outlined,
-                              size: 15, color: AppColors.primaryDark),
+                              size: 15, color: NusaThemeTokens.of(context).accentDark),
                           SizedBox(width: 5),
                           Flexible(
                             child: Text(
@@ -859,7 +858,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.primaryDark,
+                                color: NusaThemeTokens.of(context).accentDark,
                               ),
                             ),
                           ),
@@ -880,16 +879,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 8),
-                        side: const BorderSide(color: AppColors.successSoft),
-                        backgroundColor: AppColors.successSoft.withOpacity(0.55),
+                        side: BorderSide(color: NusaThemeTokens.of(context).positiveSoft),
+                        backgroundColor: NusaThemeTokens.of(context).positiveSoft.withOpacity(0.55),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.point_of_sale_rounded,
-                              size: 15, color: AppColors.successDark),
+                              size: 15, color: NusaThemeTokens.of(context).positive),
                           SizedBox(width: 5),
                           Flexible(
                             child: Text(
@@ -898,7 +897,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.successDark,
+                                color: NusaThemeTokens.of(context).positive,
                               ),
                             ),
                           ),
@@ -928,8 +927,8 @@ class _LoginScreenState extends State<LoginScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppColors.cardShadow,
+        border: Border.all(color: NusaThemeTokens.of(context).borderSubtle),
+        boxShadow: NusaThemeTokens.of(context).cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -937,14 +936,14 @@ class _LoginScreenState extends State<LoginScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.successSoft.withOpacity(0.5),
+              color: NusaThemeTokens.of(context).positiveSoft.withOpacity(0.5),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.success.withOpacity(0.3)),
+              border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.3)),
             ),
-            child: const Row(
+            child: Row(
               children: [
                 Icon(Icons.offline_bolt_rounded,
-                    color: AppColors.successDark, size: 20),
+                    color: NusaThemeTokens.of(context).positive, size: 20),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -952,7 +951,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.navyDark,
+                      color: NusaThemeTokens.of(context).textPrimary,
                       height: 1.35,
                     ),
                   ),
@@ -961,31 +960,31 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             '1. Nama Usaha / Toko',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: AppColors.navyDark,
+              color: NusaThemeTokens.of(context).textPrimary,
             ),
           ),
           const SizedBox(height: 6),
           TextField(
             controller: _storeNameController,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Contoh: Warung Maju Jaya / Kopi Senja',
               prefixIcon: Icon(Icons.store_mall_directory_outlined,
-                  color: AppColors.successDark),
+                  color: NusaThemeTokens.of(context).positive),
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             '2. Pilih Jenis Usaha',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: AppColors.navyDark,
+              color: NusaThemeTokens.of(context).textPrimary,
             ),
           ),
           const SizedBox(height: 8),
@@ -1006,10 +1005,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: selected ? AppColors.primarySoft : AppColors.background,
+                    color: selected ? NusaThemeTokens.of(context).accentSoft : NusaThemeTokens.of(context).bgPage,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: selected ? AppColors.primary : AppColors.border,
+                      color: selected ? NusaThemeTokens.of(context).accent : NusaThemeTokens.of(context).borderSubtle,
                       width: selected ? 1.6 : 1.0,
                     ),
                   ),
@@ -1020,7 +1019,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         height: 30,
                         decoration: BoxDecoration(
                           color: selected
-                              ? AppColors.primary.withOpacity(0.14)
+                              ? NusaThemeTokens.of(context).accent.withOpacity(0.14)
                               : Colors.white,
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -1028,8 +1027,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           _verticalIcon(v),
                           size: 17,
                           color: selected
-                              ? AppColors.primary
-                              : AppColors.slate600,
+                              ? NusaThemeTokens.of(context).accent
+                              : NusaThemeTokens.of(context).textSecondary,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1048,17 +1047,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ? FontWeight.w800
                                     : FontWeight.w700,
                                 color: selected
-                                    ? AppColors.primaryDark
-                                    : AppColors.navyDark,
+                                    ? NusaThemeTokens.of(context).accentDark
+                                    : NusaThemeTokens.of(context).textPrimary,
                               ),
                             ),
                             Text(
                               _verticalSubtitle(v),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10,
-                                color: AppColors.slate500,
+                                color: NusaThemeTokens.of(context).textSecondary,
                               ),
                             ),
                           ],
@@ -1071,12 +1070,12 @@ class _LoginScreenState extends State<LoginScreen> {
             }).toList(),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             '3. Modal Kas Awal Laci (Rp)',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: AppColors.navyDark,
+              color: NusaThemeTokens.of(context).textPrimary,
             ),
           ),
           const SizedBox(height: 6),
@@ -1084,11 +1083,11 @@ class _LoginScreenState extends State<LoginScreen> {
             controller: _openingCashController,
             keyboardType: TextInputType.number,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: '100000',
               prefixText: 'Rp ',
               prefixIcon:
-                  Icon(Icons.payments_outlined, color: AppColors.successDark),
+                  Icon(Icons.payments_outlined, color: NusaThemeTokens.of(context).positive),
             ),
           ),
           const SizedBox(height: 8),
@@ -1109,11 +1108,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: active
-                        ? AppColors.successSoft
-                        : AppColors.slate100,
+                        ? NusaThemeTokens.of(context).positiveSoft
+                        : NusaThemeTokens.of(context).bgElevated,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: active ? AppColors.success : AppColors.border,
+                      color: active ? NusaThemeTokens.of(context).positive : NusaThemeTokens.of(context).borderSubtle,
                     ),
                   ),
                   child: Text(
@@ -1122,8 +1121,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                       color: active
-                          ? AppColors.successDark
-                          : AppColors.slate600,
+                          ? NusaThemeTokens.of(context).positive
+                          : NusaThemeTokens.of(context).textSecondary,
                     ),
                   ),
                 ),
@@ -1137,7 +1136,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: ElevatedButton.icon(
               onPressed: _startingStandalone ? null : _startStandaloneStore,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.success,
+                backgroundColor: NusaThemeTokens.of(context).positive,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
@@ -1182,7 +1181,7 @@ class _LoginScreenState extends State<LoginScreen> {
         color: tokens.bgSurface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: tokens.borderSubtle, width: tokens.borderWidth),
-        boxShadow: tokens.isDark || tokens.isHighContrast ? null : AppColors.cardShadow,
+        boxShadow: tokens.isDark || tokens.isHighContrast ? null : NusaThemeTokens.of(context).cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1260,13 +1259,13 @@ class _LoginScreenState extends State<LoginScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
-              color: AppColors.successSoft.withOpacity(0.55),
+              color: NusaThemeTokens.of(context).positiveSoft.withOpacity(0.55),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.success.withOpacity(0.3)),
+              border: Border.all(color: NusaThemeTokens.of(context).positive.withOpacity(0.3)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.verified_user_outlined, size: 17, color: AppColors.successDark),
+                Icon(Icons.verified_user_outlined, size: 17, color: NusaThemeTokens.of(context).positive),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1274,7 +1273,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.navyDark,
+                      color: NusaThemeTokens.of(context).textPrimary,
                       height: 1.3,
                     ),
                   ),
@@ -1329,7 +1328,7 @@ class _LoginScreenState extends State<LoginScreen> {
               key: const Key('resume_standalone_store_button'),
               onPressed: _startingStandalone ? null : _resumeStandaloneStore,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.success,
+                backgroundColor: NusaThemeTokens.of(context).positive,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -253,7 +252,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
               ? 'Ringkasan laporan siap dikirim ke WhatsApp (juga disalin ke clipboard).'
               : 'Teks laporan WhatsApp telah disalin ke clipboard.',
         ),
-        backgroundColor: AppColors.whatsapp,
+        backgroundColor: NusaThemeTokens.of(context).whatsapp,
       ),
     );
   }
@@ -373,7 +372,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                 _buildExportActionTile(
                   tokens: tokens,
                   icon: Icons.chat_rounded,
-                  iconColor: AppColors.whatsapp,
+                  iconColor: NusaThemeTokens.of(ctx).whatsapp,
                   title: 'Kirim Ringkasan via WhatsApp (1-Klik)',
                   subtitle: 'Teks rapi berformat emoji & total Rupiah siap kirim ke grup toko',
                   busy: busy,
@@ -386,7 +385,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                 _buildExportActionTile(
                   tokens: tokens,
                   icon: Icons.picture_as_pdf_rounded,
-                  iconColor: AppColors.danger,
+                  iconColor: NusaThemeTokens.of(ctx).danger,
                   title: 'Ekspor PDF Ringkas (A4)',
                   subtitle: payload.isOfflineData || isLocalTrial
                       ? 'Perlu koneksi Cloud untuk render PDF A4 resmi'
@@ -710,7 +709,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                       Expanded(
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.whatsapp,
+                            backgroundColor: NusaThemeTokens.of(ctx).whatsapp,
                           ),
                           onPressed: () async {
                             Navigator.pop(ctx);
@@ -831,7 +830,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
           IconButton(
             tooltip: 'Bagikan ke WhatsApp (1-Klik)',
             onPressed: payload == null ? null : _shareWhatsApp,
-            icon: const Icon(Icons.share_rounded, color: AppColors.whatsapp),
+            icon: Icon(Icons.share_rounded, color: NusaThemeTokens.of(context).whatsapp),
           ),
           IconButton(
             tooltip: 'Ekspor PDF / CSV',
@@ -911,8 +910,8 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                         FilledButton.tonalIcon(
                           onPressed: payload == null ? null : _shareWhatsApp,
                           style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.whatsapp.withOpacity(0.12),
-                            foregroundColor: AppColors.whatsapp,
+                            backgroundColor: NusaThemeTokens.of(context).whatsapp.withOpacity(0.12),
+                            foregroundColor: NusaThemeTokens.of(context).whatsapp,
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
                               vertical: 10,
@@ -1480,9 +1479,9 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                     if (item.primaryValue.isNotEmpty) () {
                       Color valColor = item.isTotal ? tokens.accent : tokens.textPrimary;
                       if (item.primaryValue.startsWith('+')) {
-                        valColor = AppColors.success;
+                        valColor = NusaThemeTokens.of(context).positive;
                       } else if (item.primaryValue.startsWith('-')) {
-                        valColor = AppColors.danger;
+                        valColor = NusaThemeTokens.of(context).danger;
                       }
                       return Text(
                         item.primaryValue,

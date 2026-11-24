@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/network_connectivity_service.dart';
@@ -174,7 +173,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -208,11 +207,11 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     child: ListView(
                       children: [
                         if (suppliers.isEmpty)
-                          const NusaCard(
-                            backgroundColor: AppColors.warningSoft,
+                          NusaCard(
+                            backgroundColor: NusaThemeTokens.of(ctx).warningSoft,
                             child: Text(
                               'Belum ada data Pemasok. Anda tetap bisa mencatat stok dengan pemasok umum atau tambahkan pemasok terlebih dahulu.',
-                              style: TextStyle(fontSize: 12.5, color: AppColors.warningDark),
+                              style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).warning),
                             ),
                           )
                         else
@@ -304,18 +303,18 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                   }
                                 });
                               },
-                              icon: const Icon(Icons.auto_awesome_rounded, size: 18, color: AppColors.primary),
+                              icon: Icon(Icons.auto_awesome_rounded, size: 18, color: NusaThemeTokens.of(ctx).accent),
                               label: const Text('Saran AI'),
                             ),
                           ],
                         ),
                         const SizedBox(height: 10),
                         if (lines.isEmpty)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
                             child: Center(
                               child: Text('Belum ada item barang dipilih.',
-                                  style: TextStyle(color: AppColors.slate500)),
+                                  style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary)),
                             ),
                           )
                         else
@@ -333,7 +332,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                                 style: const TextStyle(fontWeight: FontWeight.w700)),
                                             Text(
                                               '${IdrCurrencyFormatter.formatQty((item['quantity'] as num).toDouble())} ${item['unit_code']} x ${IdrCurrencyFormatter.format((item['unit_cost'] as num).toDouble())}',
-                                              style: const TextStyle(fontSize: 12, color: AppColors.slate600),
+                                              style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).textSecondary),
                                             ),
                                           ],
                                         ),
@@ -344,7 +343,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                         style: AppTheme.moneyStyle(fontSize: 13.5),
                                       ),
                                       IconButton(
-                                        icon: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                                        icon: Icon(Icons.close, color: NusaThemeTokens.of(ctx).danger, size: 18),
                                         onPressed: () => setModal(() => lines.remove(item)),
                                       ),
                                     ],
@@ -386,20 +385,20 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: AppColors.dangerSoft,
+                        color: NusaThemeTokens.of(ctx).dangerSoft,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFFCA5A5)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                          Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               modalError!,
-                              style: const TextStyle(
-                                color: AppColors.dangerDark,
+                              style: TextStyle(
+                                color: NusaThemeTokens.of(ctx).danger,
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -407,7 +406,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           ),
                           InkWell(
                             onTap: () => setModal(() => modalError = null),
-                            child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                            child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                           ),
                         ],
                       ),
@@ -420,7 +419,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       const Text('Total Pembelian', style: TextStyle(fontWeight: FontWeight.w700)),
                       Text(
                         IdrCurrencyFormatter.format(total),
-                        style: AppTheme.moneyStyle(fontSize: 18, color: AppColors.primary),
+                        style: AppTheme.moneyStyle(fontSize: 18, color: NusaThemeTokens.of(ctx).accent),
                       ),
                     ],
                   ),
@@ -468,7 +467,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        backgroundColor: AppColors.danger,
+                                        backgroundColor: NusaThemeTokens.of(ctx).danger,
                                         content: Text(errMsg),
                                       ),
                                     );
@@ -622,7 +621,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     if (isDraft) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.danger,
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text('PO ${purchase['number'] ?? '-'} masih berstatus draf/pesanan. Barang belum diterima secara fisik di toko sehingga belum dapat diretur.'),
         ),
       );
@@ -632,7 +631,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     if (purchase['is_fully_returned'] == true || purchase['is_returnable'] == false) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.warning,
+          backgroundColor: NusaThemeTokens.of(context).warning,
           content: Text('Seluruh barang pada PO ${purchase['number'] ?? '-'} sudah habis diretur sebelumnya.'),
         ),
       );
@@ -664,7 +663,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     if (maxReturnableQtys.values.every((v) => v <= 0.0001)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.warning,
+          backgroundColor: NusaThemeTokens.of(context).warning,
           content: Text('Seluruh barang pada PO ${purchase['number'] ?? '-'} sudah habis diretur sebelumnya.'),
         ),
       );
@@ -678,7 +677,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -710,9 +709,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   child: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isExhausted ? AppColors.slate100 : AppColors.surface,
+                      color: isExhausted ? NusaThemeTokens.of(ctx).bgElevated : NusaThemeTokens.of(ctx).bgSurface,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: NusaThemeTokens.of(ctx).borderSubtle),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -724,7 +723,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 it['product_name']?.toString() ?? 'Produk',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
-                                  color: isExhausted ? AppColors.slate400 : AppColors.navyDark,
+                                  color: isExhausted ? NusaThemeTokens.of(ctx).textTertiary : NusaThemeTokens.of(ctx).textPrimary,
                                 ),
                               ),
                             ),
@@ -733,14 +732,14 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             else
                               Text(
                                 'Sisa retur: ${IdrCurrencyFormatter.formatQty(maxQty)}',
-                                style: const TextStyle(fontSize: 11.5, color: AppColors.primary, fontWeight: FontWeight.w600),
+                                style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).accent, fontWeight: FontWeight.w600),
                               ),
                           ],
                         ),
                         const SizedBox(height: 3),
                         Text(
                           'Dipesan: ${IdrCurrencyFormatter.formatQty(origQty)} • Sudah Diretur: ${IdrCurrencyFormatter.formatQty(alreadyRet)}',
-                          style: const TextStyle(fontSize: 11.5, color: AppColors.slate500),
+                          style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary),
                         ),
                         if (!isExhausted) ...[
                           const SizedBox(height: 4),
@@ -778,20 +777,20 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
+                    color: NusaThemeTokens.of(ctx).dangerSoft,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFFCA5A5)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                      Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           returnModalError!,
-                          style: const TextStyle(
-                            color: AppColors.dangerDark,
+                          style: TextStyle(
+                            color: NusaThemeTokens.of(ctx).danger,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -799,7 +798,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       ),
                       InkWell(
                         onTap: () => setModal(() => returnModalError = null),
-                        child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                        child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                       ),
                     ],
                   ),
@@ -857,7 +856,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: AppColors.danger,
+                                    backgroundColor: NusaThemeTokens.of(ctx).danger,
                                     content: Text(errMsg),
                                   ),
                                 );
@@ -899,8 +898,8 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
 
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.danger,
+        SnackBar(
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text('Rincian barang dalam pesanan pembelian ini tidak ditemukan.'),
         ),
       );
@@ -969,10 +968,10 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: AppColors.successSoft,
+                          color: NusaThemeTokens.of(ctx).positiveSoft,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.inventory_rounded, color: AppColors.success, size: 22),
+                        child: Icon(Icons.inventory_rounded, color: NusaThemeTokens.of(ctx).positive, size: 22),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1037,7 +1036,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                                Icon(Icons.calendar_today_rounded, size: 18, color: NusaThemeTokens.of(ctx).accent),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
@@ -1054,7 +1053,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.arrow_drop_down, color: AppColors.slate400),
+                                Icon(Icons.arrow_drop_down, color: NusaThemeTokens.of(ctx).textTertiary),
                               ],
                             ),
                           ),
@@ -1110,7 +1109,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             receiveQtys[i] = 0.0;
                           }
                         }),
-                        child: const Text('Reset 0', style: TextStyle(fontSize: 11.5, color: AppColors.slate500)),
+                        child: Text('Reset 0', style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(ctx).textSecondary)),
                       ),
                     ],
                   ),
@@ -1131,7 +1130,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                         color: isExhausted ? tokens.bgPage : tokens.bgSurface,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isExhausted ? tokens.borderDefault : (curQty > 0 ? AppColors.success.withOpacity(0.5) : tokens.borderDefault),
+                          color: isExhausted ? tokens.borderDefault : (curQty > 0 ? NusaThemeTokens.of(ctx).positive.withOpacity(0.5) : tokens.borderDefault),
                         ),
                       ),
                       child: Column(
@@ -1167,12 +1166,12 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: AppColors.warningSoft,
+                                    color: NusaThemeTokens.of(ctx).warningSoft,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     'Sisa: ${IdrCurrencyFormatter.formatQty(maxQty)}',
-                                    style: const TextStyle(fontSize: 11, color: AppColors.warningDark, fontWeight: FontWeight.w700),
+                                    style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(ctx).warning, fontWeight: FontWeight.w700),
                                   ),
                                 ),
                             ],
@@ -1246,10 +1245,10 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isFullReceipt ? AppColors.successSoft : (isPartialReceipt ? AppColors.warningSoft : tokens.bgPage),
+                      color: isFullReceipt ? NusaThemeTokens.of(ctx).positiveSoft : (isPartialReceipt ? NusaThemeTokens.of(ctx).warningSoft : tokens.bgPage),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: isFullReceipt ? AppColors.success.withOpacity(0.4) : (isPartialReceipt ? AppColors.warning.withOpacity(0.4) : tokens.borderDefault),
+                        color: isFullReceipt ? NusaThemeTokens.of(ctx).positive.withOpacity(0.4) : (isPartialReceipt ? NusaThemeTokens.of(ctx).warning.withOpacity(0.4) : tokens.borderDefault),
                       ),
                     ),
                     child: Row(
@@ -1266,14 +1265,14 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
-                                  color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : tokens.textSecondary),
+                                  color: isFullReceipt ? NusaThemeTokens.of(ctx).positive : (isPartialReceipt ? NusaThemeTokens.of(ctx).warning : tokens.textSecondary),
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               if (isPartialReceipt)
-                                const Text(
+                                Text(
                                   'Sisa barang dapat diterima pada GRN berikutnya',
-                                  style: TextStyle(fontSize: 10, color: AppColors.warningDark),
+                                  style: TextStyle(fontSize: 10, color: NusaThemeTokens.of(ctx).warning),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1286,7 +1285,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
-                            color: isFullReceipt ? AppColors.successDark : (isPartialReceipt ? AppColors.warningDark : null),
+                            color: isFullReceipt ? NusaThemeTokens.of(ctx).positive : (isPartialReceipt ? NusaThemeTokens.of(ctx).warning : null),
                           ),
                         ),
                       ],
@@ -1298,12 +1297,12 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                       width: double.infinity,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.dangerSoft,
+                        color: NusaThemeTokens.of(ctx).dangerSoft,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         modalError!,
-                        style: const TextStyle(fontSize: 12, color: AppColors.dangerDark, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(ctx).danger, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -1387,7 +1386,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: AppColors.success,
+                                    backgroundColor: NusaThemeTokens.of(ctx).positive,
                                     content: Text(
                                       isFullReceipt
                                           ? 'Penerimaan fisik barang $poNumber selesai (Lengkap). Stok bertambah!'
@@ -1516,14 +1515,14 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                 decoration: BoxDecoration(
                   color: isDraft
                       ? tokens.bgPage
-                      : (isTempo ? AppColors.warningSoft : AppColors.successSoft),
+                      : (isTempo ? NusaThemeTokens.of(ctx).warningSoft : NusaThemeTokens.of(ctx).positiveSoft),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isDraft
                         ? tokens.borderDefault
                         : (isTempo
-                            ? AppColors.warning.withOpacity(0.3)
-                            : AppColors.success.withOpacity(0.3)),
+                            ? NusaThemeTokens.of(ctx).warning.withOpacity(0.3)
+                            : NusaThemeTokens.of(ctx).positive.withOpacity(0.3)),
                   ),
                 ),
                 child: Column(
@@ -1531,7 +1530,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Total Nilai PO', style: TextStyle(fontSize: 13, color: AppColors.slate700)),
+                        Text('Total Nilai PO', style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(ctx).textPrimary)),
                         Text(
                           IdrCurrencyFormatter.format(total),
                           style: AppTheme.moneyStyle(fontSize: 14, fontWeight: FontWeight.w700),
@@ -1542,12 +1541,12 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Sudah Dibayar', style: TextStyle(fontSize: 13, color: AppColors.slate700)),
+                        Text('Sudah Dibayar', style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(ctx).textPrimary)),
                         Text(
                           IdrCurrencyFormatter.format(paid),
                           style: AppTheme.moneyStyle(
                             fontSize: 13.5,
-                            color: AppColors.success,
+                            color: NusaThemeTokens.of(ctx).positive,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -1566,7 +1565,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             fontWeight: FontWeight.w800,
                             color: isDraft
                                 ? tokens.textSecondary
-                                : (isTempo ? AppColors.danger : AppColors.success),
+                                : (isTempo ? NusaThemeTokens.of(ctx).danger : NusaThemeTokens.of(ctx).positive),
                           ),
                         ),
                         Text(
@@ -1578,7 +1577,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             fontWeight: FontWeight.w800,
                             color: isDraft
                                 ? tokens.textSecondary
-                                : (isTempo ? AppColors.danger : AppColors.success),
+                                : (isTempo ? NusaThemeTokens.of(ctx).danger : NusaThemeTokens.of(ctx).positive),
                           ),
                         ),
                       ],
@@ -1647,10 +1646,10 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     color: tokens.bgPage,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'Rincian barang per item tidak tersedia dalam cache ringkas.',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.slate500),
+                      style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(ctx).textSecondary),
                     ),
                   ),
                 )
@@ -1844,20 +1843,20 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.dangerSoft,
+                  color: NusaThemeTokens.of(mCtx).dangerSoft,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.danger.withOpacity(0.3)),
+                  border: Border.all(color: NusaThemeTokens.of(mCtx).danger.withOpacity(0.3)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
+                    Text(
                       'Sisa Hutang Tagihan:',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.slate700),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: NusaThemeTokens.of(mCtx).textPrimary),
                     ),
                     Text(
                       IdrCurrencyFormatter.format(currentBalance),
-                      style: AppTheme.moneyStyle(fontSize: 15, color: AppColors.danger, fontWeight: FontWeight.w800),
+                      style: AppTheme.moneyStyle(fontSize: 15, color: NusaThemeTokens.of(mCtx).danger, fontWeight: FontWeight.w800),
                     ),
                   ],
                 ),
@@ -1944,7 +1943,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                 const SizedBox(height: 10),
                 Text(
                   payError!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: NusaThemeTokens.of(mCtx).danger, fontSize: 12.5, fontWeight: FontWeight.w600),
                 ),
               ],
               const SizedBox(height: 18),
@@ -2017,7 +2016,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                backgroundColor: AppColors.success,
+                                backgroundColor: NusaThemeTokens.of(mCtx).positive,
                                 content: Text(
                                   'Pembayaran $poNumber sebesar ${IdrCurrencyFormatter.format(paidAmount)} berhasil dicatat!',
                                 ),
@@ -2043,7 +2042,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.slate600)),
+        Text(label, style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary)),
         Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
       ],
     );
@@ -2164,10 +2163,10 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                             ),
                                           ),
                                           const SizedBox(width: 6),
-                                          const Icon(
+                                          Icon(
                                             Icons.visibility_outlined,
                                             size: 15,
-                                            color: AppColors.slate400,
+                                            color: NusaThemeTokens.of(context).textTertiary,
                                           ),
                                         ],
                                       ),
@@ -2182,7 +2181,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 const SizedBox(height: 4),
                                 Text(
                                   'Pemasok: ${po['supplier_name'] ?? 'Umum'} • ${(po['purchase_date'] ?? '').toString().split('T').first}',
-                                  style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                                  style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                                 ),
                                 const SizedBox(height: 8),
                                 Row(
@@ -2198,9 +2197,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                         if (balance > 0.5 && !isDraft)
                                           Text(
                                             'Sisa: ${IdrCurrencyFormatter.format(balance)}',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 11.5,
-                                              color: AppColors.danger,
+                                              color: NusaThemeTokens.of(context).danger,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
@@ -2213,7 +2212,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                           ElevatedButton.icon(
                                             onPressed: () => _openReceivePurchaseModal(po),
                                             style: ElevatedButton.styleFrom(
-                                              backgroundColor: AppColors.success,
+                                              backgroundColor: NusaThemeTokens.of(context).positive,
                                               foregroundColor: Colors.white,
                                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                               minimumSize: const Size(0, 32),
@@ -2269,9 +2268,9 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                                 borderRadius: BorderRadius.circular(6),
                                                 border: Border.all(color: tokens.borderDefault),
                                               ),
-                                              child: const Text(
+                                              child: Text(
                                                 'Habis Diretur',
-                                                style: TextStyle(fontSize: 11, color: AppColors.slate500, fontWeight: FontWeight.w600),
+                                                style: TextStyle(fontSize: 11, color: NusaThemeTokens.of(context).textSecondary, fontWeight: FontWeight.w600),
                                               ),
                                             ),
                                         ],
@@ -2308,12 +2307,12 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                       ),
                                       Text(
                                         'Ref: ${ret['purchase_number'] ?? '-'} • ${ret['supplier_name'] ?? '-'}',
-                                        style: const TextStyle(fontSize: 12.5, color: AppColors.slate600),
+                                        style: TextStyle(fontSize: 12.5, color: NusaThemeTokens.of(context).textSecondary),
                                       ),
                                       if ((ret['notes'] ?? '').toString().isNotEmpty)
                                         Text(
                                           ret['notes'].toString(),
-                                          style: const TextStyle(fontSize: 12, color: AppColors.slate500),
+                                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).textSecondary),
                                         ),
                                     ],
                                   ),
@@ -2321,7 +2320,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                                 Text(
                                   IdrCurrencyFormatter.format(
                                       ((ret['total_amount'] ?? ret['grand_total']) as num?)?.toDouble() ?? 0),
-                                  style: AppTheme.moneyStyle(fontSize: 14, color: AppColors.danger),
+                                  style: AppTheme.moneyStyle(fontSize: 14, color: NusaThemeTokens.of(context).danger),
                                 ),
                               ],
                             ),
@@ -2347,15 +2346,15 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
       children: [
         NusaCard(
-          backgroundColor: AppColors.primarySoft,
+          backgroundColor: NusaThemeTokens.of(context).accentSoft,
           child: Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, color: AppColors.primaryDark),
+              Icon(Icons.auto_awesome_rounded, color: NusaThemeTokens.of(context).accentDark),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   '${_reorderSuggestions.length} SKU perlu kulakan ulang.',
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.navyDark),
+                  style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).textPrimary),
                 ),
               ),
               FilledButton(
@@ -2401,11 +2400,11 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                         Text(
                           'SKU: ${s['sku'] ?? '-'} • Sisa: ${IdrCurrencyFormatter.formatQty(currentStock)} $unitCode (Min ${IdrCurrencyFormatter.formatQty(reorderLevel)})',
-                          style: const TextStyle(fontSize: 12, color: AppColors.dangerDark),
+                          style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).danger),
                         ),
                         if (supName != null && supName.isNotEmpty)
                           Text('Pemasok terakhir: $supName',
-                              style: const TextStyle(fontSize: 11.5, color: AppColors.slate500)),
+                              style: TextStyle(fontSize: 11.5, color: NusaThemeTokens.of(context).textSecondary)),
                       ],
                     ),
                   ),
@@ -2414,7 +2413,7 @@ class _PurchasesAndReturnsScreenState extends State<PurchasesAndReturnsScreen>
                     children: [
                       Text(
                         '+${IdrCurrencyFormatter.formatQty(suggestedQty)} $unitCode',
-                        style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary),
+                        style: TextStyle(fontWeight: FontWeight.w800, color: NusaThemeTokens.of(context).accent),
                       ),
                       const SizedBox(height: 4),
                       OutlinedButton(

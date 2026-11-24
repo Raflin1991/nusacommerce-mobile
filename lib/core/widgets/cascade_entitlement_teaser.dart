@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../constants/app_colors.dart';
+import '../theme/nusa_theme_tokens.dart';
 
 /// Gold Crown pill badge shown on All-Sidebar-Active menu items that require a
 /// higher Cascade subscription tier (`PRO` or `ENTERPRISE`).
@@ -89,7 +89,7 @@ Future<void> showCascadeModuleTeaserModal(
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.border,
+                    color: NusaThemeTokens.of(ctx).borderSubtle,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -151,19 +151,19 @@ Future<void> showCascadeModuleTeaserModal(
               const SizedBox(height: 16),
               Text(
                 description,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13.5,
-                  color: AppColors.slate700,
+                  color: NusaThemeTokens.of(ctx).textPrimary,
                   height: 1.45,
                 ),
               ),
               const SizedBox(height: 14),
-              const Text(
+              Text(
                 'Keunggulan yang Langsung Terbuka:',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.navyDark,
+                  color: NusaThemeTokens.of(ctx).textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -173,18 +173,18 @@ Future<void> showCascadeModuleTeaserModal(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.check_circle_rounded,
                         size: 17,
-                        color: AppColors.successDark,
+                        color: NusaThemeTokens.of(ctx).positive,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           item,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
-                            color: AppColors.slate700,
+                            color: NusaThemeTokens.of(ctx).textPrimary,
                             height: 1.3,
                           ),
                         ),
@@ -198,20 +198,20 @@ Future<void> showCascadeModuleTeaserModal(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
+                  color: NusaThemeTokens.of(ctx).accentSoft,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: const Color(0xFFBFDBFE)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.info_outline_rounded, size: 18, color: AppColors.primaryDark),
+                    Icon(Icons.info_outline_rounded, size: 18, color: NusaThemeTokens.of(ctx).accentDark),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Catatan Dual-Plane Cascade: Data transaksi kasir, stok, dan bon pelanggan tetap berjalan aman 100% dan langsung tersinkron saat paket diaktifkan.',
                         style: TextStyle(
                           fontSize: 11.5,
-                          color: AppColors.navyDark,
+                          color: NusaThemeTokens.of(ctx).textPrimary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -240,7 +240,7 @@ Future<void> showCascadeModuleTeaserModal(
                         Navigator.of(ctx).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            backgroundColor: AppColors.navyDark,
+                            backgroundColor: NusaThemeTokens.of(ctx).textPrimary,
                             content: Text(
                               'Hubungi Owner / Panel Web OXORA → Paket Langganan untuk mengaktifkan modul "$moduleTitle" ($normalizedRequired).',
                             ),
@@ -248,7 +248,7 @@ Future<void> showCascadeModuleTeaserModal(
                         );
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: NusaThemeTokens.of(ctx).accent,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 13),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

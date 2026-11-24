@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
@@ -120,7 +119,7 @@ class _HrAttendanceScreenState extends State<HrAttendanceScreen> {
               employeeName != null
                   ? 'Catat ${action == 'clock_in' ? 'masuk kerja' : 'pulang'} untuk $employeeName?'
                   : 'Catat ${action == 'clock_in' ? 'masuk kerja (Clock-In)' : 'pulang kerja (Clock-Out)'} akun Anda saat ini?',
-              style: const TextStyle(fontSize: 13.5, color: AppColors.slate700),
+              style: TextStyle(fontSize: 13.5, color: NusaThemeTokens.of(ctx).textPrimary),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -153,14 +152,14 @@ class _HrAttendanceScreenState extends State<HrAttendanceScreen> {
       final msg = (res.data?['message'] ?? 'Presensi berhasil dicatat.').toString();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(backgroundColor: AppColors.successDark, content: Text(msg)),
+        SnackBar(backgroundColor: NusaThemeTokens.of(context).positive, content: Text(msg)),
       );
       await _loadHrData();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppColors.danger,
+          backgroundColor: NusaThemeTokens.of(context).danger,
           content: Text(ApiClient.extractErrorMessage(e)),
         ),
       );

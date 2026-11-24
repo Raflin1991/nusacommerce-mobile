@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -133,8 +132,8 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
         );
     if (!ok && rootContext.mounted) {
       ScaffoldMessenger.of(rootContext).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.danger,
+        SnackBar(
+          backgroundColor: NusaThemeTokens.of(rootContext).danger,
           content: Text('PIN / Sandi Manajer tidak valid atau ditolak server!'),
         ),
       );
@@ -338,10 +337,10 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                         _showExchangeItemSelectorSheet(context, posCubit, activeSale);
                       },
                     ),
-                    const Divider(height: 24, color: AppColors.border),
-                    const Text(
+                    Divider(height: 24, color: NusaThemeTokens.of(ctx).borderSubtle),
+                    Text(
                       'Retur Barang / Pembatalan (Void) Transaksi',
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.dangerDark),
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).danger),
                     ),
                     if (returnReasons.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -368,9 +367,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: voidReasonCtrl,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'Wajib isi alasan retur / void (misal: tukar barang / salah input)',
-                        prefixIcon: Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+                        prefixIcon: Icon(Icons.warning_amber_rounded, color: NusaThemeTokens.of(ctx).danger),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -646,7 +645,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                             if (rootContext.mounted) {
                               ScaffoldMessenger.of(rootContext).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: AppColors.primary,
+                                  backgroundColor: NusaThemeTokens.of(ctx).accent,
                                   content: Text(
                                     'Mode Tukar Barang nota ${activeSale['number']} aktif — pilih barang pengganti di POS.',
                                   ),
@@ -1028,9 +1027,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
               ),
               const SizedBox(height: 12),
               if (state.returnReasons.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Text('Belum ada alasan retur terdaftar.', style: TextStyle(color: AppColors.slate500)),
+                  child: Text('Belum ada alasan retur terdaftar.', style: TextStyle(color: NusaThemeTokens.of(ctx).textSecondary)),
                 )
               else
                 Flexible(
@@ -1043,7 +1042,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen> {
                       return ListTile(
                         title: Text((r['name'] ?? r['code'] ?? '-').toString()),
                         trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                          icon: Icon(Icons.delete_outline, color: NusaThemeTokens.of(ctx).danger),
                           onPressed: () => posCubit.deleteReturnReason(id),
                         ),
                       );

@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
 import '../../../core/config/mobile_workspace_config.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/network_connectivity_service.dart';
@@ -1783,7 +1782,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 if (synced > 0) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     SnackBar(
-                      backgroundColor: AppColors.successDark,
+                      backgroundColor: NusaThemeTokens.of(ctx).positive,
                       content: Text('$synced nota offline berhasil disinkronkan ke Cloud.'),
                     ),
                   );
@@ -2074,7 +2073,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 colors: tokens.heroGradientColors,
               ),
               borderRadius: BorderRadius.circular(18),
-              boxShadow: tokens.isHighContrast ? null : AppColors.cardShadow,
+              boxShadow: tokens.isHighContrast ? null : NusaThemeTokens.of(context).cardShadow,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2218,7 +2217,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         (
           label: '+ Barang',
           icon: Icons.add_box_rounded,
-          color: AppColors.purple,
+          color: NusaThemeTokens.of(context).purple,
           onTap: () => widget.onSwitchTab(1),
         ),
       if (canOpname)
@@ -2416,7 +2415,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: _buildOperationalMetricTile(
                 tokens,
                 icon: Icons.inventory_2_outlined,
-                accentColor: (lowStock + expiring) > 0 ? tokens.danger : AppColors.purple,
+                accentColor: (lowStock + expiring) > 0 ? tokens.danger : NusaThemeTokens.of(context).purple,
                 label: 'Stok Menipis & FEFO',
                 value: '$lowStock Menipis • $expiring FEFO',
                 onTap: () => widget.onSwitchTab(1),
@@ -2526,7 +2525,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
       (
         icon: Icons.inventory_2_outlined,
-        color: AppColors.purple,
+        color: NusaThemeTokens.of(context).purple,
         title: 'Katalog & Opname Stok',
         subtitle: 'Produk, HPP, FEFO & kamera',
         isGated: false,

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../constants/app_colors.dart';
 import 'nusa_theme_tokens.dart';
 
 class AppTheme {
@@ -219,10 +218,12 @@ class AppTheme {
   }
 
   /// Helper style for tabular currency amounts so digits align vertically.
+  /// When [color] is omitted, inherits [DefaultTextStyle] (`tokens.textPrimary`)
+  /// so Dark Mode and Outdoor High-Contrast automatically maintain WCAG AA contrast.
   static TextStyle moneyStyle({
     double fontSize = 16,
     FontWeight fontWeight = FontWeight.w800,
-    Color color = AppColors.navyDark,
+    Color? color,
   }) {
     return _textStyle(
       fontSize: fontSize,

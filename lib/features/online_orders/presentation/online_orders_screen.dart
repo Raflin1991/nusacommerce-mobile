@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -72,7 +71,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: NusaThemeTokens.of(context).bgSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -125,20 +124,20 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
+                    color: NusaThemeTokens.of(ctx).dangerSoft,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFFCA5A5)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: AppColors.dangerDark, size: 18),
+                      Icon(Icons.error_outline_rounded, color: NusaThemeTokens.of(ctx).danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           modalError!,
-                          style: const TextStyle(
-                            color: AppColors.dangerDark,
+                          style: TextStyle(
+                            color: NusaThemeTokens.of(ctx).danger,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -146,7 +145,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                       ),
                       InkWell(
                         onTap: () => setModal(() => modalError = null),
-                        child: const Icon(Icons.close_rounded, color: AppColors.dangerDark, size: 16),
+                        child: Icon(Icons.close_rounded, color: NusaThemeTokens.of(ctx).danger, size: 16),
                       ),
                     ],
                   ),
@@ -184,7 +183,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                backgroundColor: AppColors.danger,
+                                backgroundColor: NusaThemeTokens.of(ctx).danger,
                                 content: Text(errMsg),
                               ),
                             );
@@ -224,10 +223,10 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: AppColors.warningSoft,
+                          color: NusaThemeTokens.of(context).warningSoft,
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: const Icon(Icons.storefront_rounded, size: 36, color: AppColors.warningDark),
+                        child: Icon(Icons.storefront_rounded, size: 36, color: NusaThemeTokens.of(context).warning),
                       ),
                       const SizedBox(height: 12),
                       const Text(
@@ -236,10 +235,10 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Terima pesanan webstore pelanggan langsung dari HP, sinkronkan stok real-time dengan kasir POS, cetak label kirim, dan input nomor resi kurir otomatis.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: AppColors.slate600),
+                        style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(context).textSecondary),
                       ),
                     ],
                   ),
@@ -315,11 +314,11 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                                       const SizedBox(height: 4),
                                       Text(
                                         '${o['customer_name'] ?? 'Pembeli Online'} • ${o['customer_phone'] ?? '-'}',
-                                        style: const TextStyle(fontSize: 13, color: AppColors.slate600),
+                                        style: TextStyle(fontSize: 13, color: NusaThemeTokens.of(context).textSecondary),
                                       ),
                                       if (resi.isNotEmpty)
                                         Text('Resi: $resi (${o['courier'] ?? '-'})',
-                                            style: const TextStyle(fontSize: 12, color: AppColors.primary)),
+                                            style: TextStyle(fontSize: 12, color: NusaThemeTokens.of(context).accent)),
                                       const SizedBox(height: 8),
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -341,7 +340,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                                                           'Halo ${o['customer_name']}, update pesanan #$orderNo: Status *$status*${resi.isNotEmpty ? ' • No. Resi: *$resi*' : ''}. Terima kasih!',
                                                     );
                                                   },
-                                                  icon: const Icon(Icons.chat_outlined, color: AppColors.successDark),
+                                                  icon: Icon(Icons.chat_outlined, color: NusaThemeTokens.of(context).positive),
                                                 ),
                                               FilledButton(
                                                 onPressed: () => _openFulfillmentModal(o),

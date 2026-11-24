@@ -5,7 +5,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/api_endpoints.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -382,7 +381,7 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
               ? 'Ringkasan eksekutif siap dikirim ke WhatsApp.'
               : 'Ringkasan laporan telah disalin ke clipboard.',
         ),
-        backgroundColor: AppColors.whatsapp,
+        backgroundColor: NusaThemeTokens.of(context).whatsapp,
       ),
     );
   }
@@ -586,7 +585,7 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             onPressed: _shareExecutiveWhatsApp,
-            icon: const Icon(Icons.share_rounded, size: 20, color: AppColors.whatsapp),
+            icon: Icon(Icons.share_rounded, size: 20, color: NusaThemeTokens.of(context).whatsapp),
           ),
           IconButton(
             tooltip: 'Muat Ulang',

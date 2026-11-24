@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../constants/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/nusa_theme_tokens.dart';
 import '../utils/currency_formatter.dart';
@@ -45,7 +44,7 @@ class NusaCard extends StatelessWidget {
         color: borderColor ?? tokens.borderSubtle,
         width: effectiveBorderWidth,
       ),
-      boxShadow: elevated && !tokens.isHighContrast ? AppColors.cardShadow : null,
+      boxShadow: elevated && !tokens.isHighContrast ? NusaThemeTokens.of(context).cardShadow : null,
     );
 
     final content = Container(
