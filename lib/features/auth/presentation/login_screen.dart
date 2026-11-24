@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/business_vertical_config.dart';
+import '../../../core/constants/api_endpoints.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
@@ -243,8 +244,30 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Gunakan URL domain Laragon/Cloud Anda atau http://10.0.2.2:8000/api/v1 untuk Android Emulator.',
+              'Pilih preset server atau masukkan URL kustom:',
               style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.cloud_done_outlined, size: 16),
+                  label: const Text('Cloud VPS', style: TextStyle(fontSize: 12)),
+                  onPressed: () => urlCtrl.text = ApiEndpoints.vpsServerUrl,
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.laptop_outlined, size: 16),
+                  label: const Text('Lokal Laragon', style: TextStyle(fontSize: 12)),
+                  onPressed: () => urlCtrl.text = ApiEndpoints.laragonDomainUrl,
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.phone_android_outlined, size: 16),
+                  label: const Text('Emulator (10.0.2.2)', style: TextStyle(fontSize: 12)),
+                  onPressed: () => urlCtrl.text = 'http://10.0.2.2/api/v1',
+                ),
+              ],
             ),
             const SizedBox(height: 14),
             TextField(

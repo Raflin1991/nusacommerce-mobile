@@ -5,8 +5,8 @@ class ApiEndpoints {
 
   /// Default base URL pointing to VPS Cloud Server.
   /// Can be overridden dynamically in Login / Settings Screen.
-  static const String defaultBaseUrl = 'http://43.159.49.77/api/v1';
-  static const String vpsServerUrl = 'http://43.159.49.77/api/v1';
+  static const String defaultBaseUrl = 'https://sambalengine.my.id/api/v1';
+  static const String vpsServerUrl = 'https://sambalengine.my.id/api/v1';
   static const String laragonDomainUrl = 'http://nusacommerce.test/api/v1';
 
   // 1. Auth & Multi-Store Session
