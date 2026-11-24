@@ -171,6 +171,8 @@ extension PosCubitCartExt on PosCubit {
     double quantity = 1.0,
     double? customUnitPrice,
     String? notes,
+    String? cookingNotes,
+    List<Map<String, dynamic>> modifiers = const [],
     String? digitalTargetValue,
     String? stylistName,
     ProductUnitConversion? unitConversion,
@@ -194,13 +196,17 @@ extension PosCubitCartExt on PosCubit {
     final updated = List<CartItemModel>.from(state.cart);
 
     final normalizedStylist = (stylistName ?? '').trim();
+    final normalizedCooking = (cookingNotes ?? '').trim();
+    final modSig = modifiers.map((m) => (m['name'] ?? '').toString().trim()).join('|');
     final existingIdx = updated.indexWhere(
       (item) =>
           !item.isExchangeReturn &&
           item.product.id == product.id &&
           item.variant?.id == variant?.id &&
           item.effectiveUnitCode == unitCode &&
-          (item.stylistName ?? '').trim() == normalizedStylist,
+          (item.stylistName ?? '').trim() == normalizedStylist &&
+          (item.cookingNotes ?? '').trim() == normalizedCooking &&
+          item.modifierLabels.join('|') == modSig,
     );
 
     if (existingIdx >= 0) {
@@ -208,6 +214,8 @@ extension PosCubitCartExt on PosCubit {
       updated[existingIdx] = current.copyWith(
         quantity: current.quantity + quantity,
         notes: notes ?? current.notes,
+        cookingNotes: cookingNotes ?? current.cookingNotes,
+        modifiers: modifiers.isNotEmpty ? modifiers : current.modifiers,
         digitalTargetValue: digitalTargetValue ?? current.digitalTargetValue,
         stylistName: stylistName ?? current.stylistName,
       );
@@ -220,6 +228,8 @@ extension PosCubitCartExt on PosCubit {
           quantity: quantity,
           unitPrice: price,
           notes: notes,
+          cookingNotes: cookingNotes,
+          modifiers: modifiers,
           digitalTargetValue: digitalTargetValue,
           stylistName: stylistName,
           selectedUnitCode: unitCode,
@@ -350,6 +360,8 @@ extension PosCubitCartExt on PosCubit {
     double? unitPrice,
     double? discountAmount,
     String? notes,
+    String? cookingNotes,
+    List<Map<String, dynamic>>? modifiers,
     String? stylistName,
   }) {
     if (index < 0 || index >= state.cart.length) return;
@@ -371,6 +383,8 @@ extension PosCubitCartExt on PosCubit {
         unitPrice: unitPrice,
         discountAmount: clampedDiscount,
         notes: notes,
+        cookingNotes: cookingNotes,
+        modifiers: modifiers,
         stylistName: stylistName,
       );
     }

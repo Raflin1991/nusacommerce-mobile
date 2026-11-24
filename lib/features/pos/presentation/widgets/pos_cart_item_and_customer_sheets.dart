@@ -8,6 +8,10 @@ extension _PosCartItemAndCustomerSheetsExt on _PosCatalogScreenState {
       text: item.discountAmount > 0 ? item.discountAmount.toInt().toString() : '',
     );
     final noteCtrl = TextEditingController(text: item.notes ?? '');
+    final cookingNoteCtrl = TextEditingController(text: item.cookingNotes ?? '');
+    final selectedModifiers = <String>{
+      ...item.modifierLabels,
+    };
     final stylistCtrl = TextEditingController(text: item.stylistName ?? '');
     final pinCtrl = TextEditingController();
     final posState = context.read<PosCubit>().state;
@@ -120,27 +124,34 @@ extension _PosCartItemAndCustomerSheetsExt on _PosCatalogScreenState {
                     prefixIcon: Icon(Icons.lock_outline_rounded),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
+                Text(
+                  'Modifier F&B Terstruktur (KOT & Dapur)',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: NusaThemeTokens.of(ctx).textPrimary),
+                ),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    for (final chip in const [
+                    for (final modLabel in const [
+                      'Less Sugar 30%',
                       'Tanpa Gula',
-                      'Es Sedikit',
-                      'Bungkus Pisah',
-                      'Pedas',
+                      'Less Ice',
                       'Tanpa Es',
+                      'Extra Shot',
+                      'Pedas Lv.2',
+                      'Pisah Sambal/Kuah',
                     ])
-                      ActionChip(
-                        label: Text(chip, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
-                        onPressed: () {
+                      FilterChip(
+                        label: Text(modLabel, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        selected: selectedModifiers.contains(modLabel),
+                        onSelected: (checked) {
                           setModalState(() {
-                            final cur = noteCtrl.text.trim();
-                            if (cur.isEmpty) {
-                              noteCtrl.text = chip;
-                            } else if (!cur.toLowerCase().contains(chip.toLowerCase())) {
-                              noteCtrl.text = '$cur, $chip';
+                            if (checked) {
+                              selectedModifiers.add(modLabel);
+                            } else {
+                              selectedModifiers.remove(modLabel);
                             }
                           });
                         },
@@ -149,9 +160,18 @@ extension _PosCartItemAndCustomerSheetsExt on _PosCatalogScreenState {
                 ),
                 const SizedBox(height: 8),
                 TextField(
+                  controller: cookingNoteCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Catatan Masak Dapur / Alergi (Cooking Notes)',
+                    hintText: 'Contoh: alergi kacang, tanpa daun bawang, well done...',
+                    prefixIcon: Icon(Icons.soup_kitchen_outlined),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
                   controller: noteCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Catatan Item (Opsional)',
+                    labelText: 'Catatan Struk Umum (Opsional)',
                     prefixIcon: Icon(Icons.edit_note_rounded),
                   ),
                 ),
@@ -256,6 +276,10 @@ extension _PosCartItemAndCustomerSheetsExt on _PosCatalogScreenState {
                             unitPrice: isLaundryMode ? effectiveUnitPrice : null,
                             discountAmount: discRp.clamp(0, lineSub),
                             notes: noteCtrl.text.trim(),
+                            cookingNotes: cookingNoteCtrl.text.trim(),
+                            modifiers: selectedModifiers
+                                .map((m) => <String, dynamic>{'name': m, 'price': 0})
+                                .toList(),
                             stylistName: isSalonMode ? stylistCtrl.text.trim() : null,
                           );
                           if (ctx.mounted) Navigator.pop(ctx);

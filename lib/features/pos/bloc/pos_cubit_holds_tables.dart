@@ -103,6 +103,10 @@ extension PosCubitHoldsTablesExt on PosCubit {
                         'variant_id': c.variant?.id,
                         'quantity': c.quantity,
                         'unit_price': c.unitPrice,
+                        if (c.notes != null && c.notes!.trim().isNotEmpty) 'notes': c.notes!.trim(),
+                        if (c.cookingNotes != null && c.cookingNotes!.trim().isNotEmpty)
+                          'cooking_notes': c.cookingNotes!.trim(),
+                        if (c.modifiers.isNotEmpty) 'modifiers': c.modifiers,
                       })
                   .toList(),
             },

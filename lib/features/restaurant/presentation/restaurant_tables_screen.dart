@@ -168,6 +168,101 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
     );
   }
 
+  Future<void> _showMergeTableDialog(Map<String, dynamic> sourceTable) async {
+    final sourceId = (sourceTable['id'] as num).toInt();
+    final occupiedTargets = _tables
+        .where((t) => (t['id'] as num).toInt() != sourceId && (t['status'] ?? '') != 'available')
+        .toList();
+    if (occupiedTargets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tidak ada meja terisi lain untuk penggabungan tagihan.')),
+      );
+      return;
+    }
+
+    int? targetId = (occupiedTargets.first['id'] as num).toInt();
+    String? modalError;
+    bool submitting = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dCtx, setModalState) {
+          final tokens = NusaThemeTokens.of(dCtx);
+          return AlertDialog(
+            title: Text('Gabung Tagihan ${sourceTable['name']} ke:'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<int>(
+                  value: targetId,
+                  isExpanded: true,
+                  items: occupiedTargets
+                      .map((t) => DropdownMenuItem<int>(
+                            value: (t['id'] as num).toInt(),
+                            child: Text(
+                              '${t['name']} (${t['section'] ?? 'Indoor'})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setModalState(() => targetId = v),
+                ),
+                if (modalError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: tokens.dangerSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: tokens.danger),
+                    ),
+                    child: Text(
+                      modalError!,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tokens.danger),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: submitting ? null : () => Navigator.pop(ctx),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                onPressed: submitting
+                    ? null
+                    : () async {
+                        if (targetId == null) return;
+                        setModalState(() {
+                          submitting = true;
+                          modalError = null;
+                        });
+                        try {
+                          await _tableRepo.mergeTables(
+                            targetTableId: targetId!,
+                            sourceTableIds: [sourceId],
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          await _loadTables();
+                        } catch (e) {
+                          setModalState(() {
+                            submitting = false;
+                            modalError = ApiClient.extractErrorMessage(e);
+                          });
+                        }
+                      },
+                child: Text(submitting ? 'Menggabungkan...' : 'Gabungkan Tagihan'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   void _showTableActionsModal(BuildContext context, Map<String, dynamic> table) {
     final status = (table['status'] ?? 'available').toString();
     final activeOrder = (table['active_sale'] ?? table['active_order']) as Map?;
@@ -239,7 +334,10 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                             .map((c) => {
                                   'product_name': c.displayName,
                                   'quantity': c.quantity,
+                                  'kds_station': c.product.kdsStation,
                                   'notes': c.notes,
+                                  'cooking_notes': c.cookingNotes,
+                                  'modifiers': c.modifiers,
                                 })
                             .toList();
                     final kotText = widget.printerService.formatKitchenOrderTicket(
@@ -320,6 +418,18 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                   label: const Text('Pindah Meja (Transfer Order)'),
                 ),
               ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showMergeTableDialog(table);
+                  },
+                  icon: const Icon(Icons.merge_type_rounded),
+                  label: const Text('Gabung Tagihan Meja (Merge Table)'),
+                ),
+              ),
             ],
           ],
         ),
@@ -366,7 +476,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
               : Column(
                   children: [
                     Container(
-                      color: Colors.white,
+                      color: NusaThemeTokens.of(context).bgSurface,
                       padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

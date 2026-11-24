@@ -399,6 +399,12 @@ extension PrinterServicePart1Ext on PrinterService {
         .toList();
 
     bool isDrinkItem(Map<String, dynamic> item) {
+      final explicitStation = (item['kds_station'] ?? '').toString().trim().toLowerCase();
+      if (explicitStation.isNotEmpty) {
+        return explicitStation == 'bar' ||
+            explicitStation == 'beverage' ||
+            explicitStation == 'coffee';
+      }
       final cat = (item['category_name'] ?? '').toString().toLowerCase();
       final name = (item['product_name'] ?? '').toString().toLowerCase();
       const drinkKeywords = [

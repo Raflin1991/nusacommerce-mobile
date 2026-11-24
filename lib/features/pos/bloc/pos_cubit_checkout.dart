@@ -160,6 +160,7 @@ extension PosCubitCheckoutExt on PosCubit {
         'category_name': c.product.categoryName,
         'product_name': c.displayName,
         'product_type': c.product.type,
+        'kds_station': c.product.kdsStation,
         'is_service': c.product.isServiceOrNonStockItem,
         'unit_code': c.effectiveUnitCode,
         'multiplier': c.multiplier,
@@ -169,6 +170,9 @@ extension PosCubitCheckoutExt on PosCubit {
         'discount_amount': combinedDiscount,
         'line_total': (c.lineSubtotal - combinedDiscount).clamp(0.0, double.infinity).roundToDouble(),
         'notes': c.notes,
+        if (c.cookingNotes != null && c.cookingNotes!.trim().isNotEmpty)
+          'cooking_notes': c.cookingNotes!.trim(),
+        if (c.modifiers.isNotEmpty) 'modifiers': c.modifiers,
         if (c.stylistName != null && c.stylistName!.trim().isNotEmpty)
           'stylist_name': c.stylistName!.trim(),
         'digital_target_value': c.digitalTargetValue,

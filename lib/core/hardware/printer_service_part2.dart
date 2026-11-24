@@ -120,6 +120,20 @@ extension PrinterServicePart2Ext on PrinterService {
       if (stylist.isNotEmpty) {
         sb.writeln('  Kapster/Terapis: $stylist');
       }
+      final rawMods = item['modifiers'] as List<dynamic>? ?? const [];
+      if (rawMods.isNotEmpty) {
+        final modNames = rawMods
+            .map((m) => m is Map ? (m['name'] ?? m['label'] ?? '').toString().trim() : m.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (modNames.isNotEmpty) {
+          sb.writeln('  + ${modNames.join(', ')}');
+        }
+      }
+      final cookNote = (item['cooking_notes'] ?? '').toString().trim();
+      if (cookNote.isNotEmpty) {
+        sb.writeln('  *Masak: $cookNote');
+      }
       if (item['notes'] != null && item['notes'].toString().isNotEmpty) {
         sb.writeln('  *Catatan: ${item['notes']}');
       }
@@ -170,22 +184,41 @@ extension PrinterServicePart2Ext on PrinterService {
   }
 
 
-  /// Build Kitchen Order Ticket (KOT) text for Restaurant / F&B Mode
+  /// Build Kitchen Order Ticket (KOT) text for Restaurant / F&B Mode (supports station header + structured modifiers)
   String formatKitchenOrderTicket({
     required String tableName,
     required String sectionName,
     required int pax,
     required List<Map<String, dynamic>> items,
+    String? stationLabel,
   }) {
     const width = 32;
     final sb = StringBuffer();
-    sb.writeln(_center('*** TIKET DAPUR (KOT) ***', width));
+    final headerTitle = (stationLabel != null && stationLabel.trim().isNotEmpty)
+        ? '*** KOT [${stationLabel.trim().toUpperCase()}] ***'
+        : '*** TIKET DAPUR (KOT) ***';
+    sb.writeln(_center(headerTitle, width));
     sb.writeln(_center('$tableName ($sectionName) • $pax Pax', width));
     sb.writeln('=' * width);
     for (final item in items) {
-      sb.writeln('[ ${IdrCurrencyFormatter.formatQty((item['quantity'] as num?) ?? 1)}x ] ${item['product_name']}');
-      if (item['notes'] != null && item['notes'].toString().isNotEmpty) {
-        sb.writeln('   >> CATATAN: ${item['notes']}');
+      final stationTag = (item['kds_station'] ?? '').toString().trim().toUpperCase();
+      final prefixStation = (stationLabel == null && stationTag.isNotEmpty) ? '[$stationTag] ' : '';
+      sb.writeln('[ ${IdrCurrencyFormatter.formatQty((item['quantity'] as num?) ?? 1)}x ] $prefixStation${item['product_name'] ?? item['name'] ?? '-'}');
+      final rawMods = item['modifiers'] as List<dynamic>? ?? const [];
+      if (rawMods.isNotEmpty) {
+        final modNames = rawMods
+            .map((m) => m is Map ? (m['name'] ?? m['label'] ?? '').toString().trim() : m.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (modNames.isNotEmpty) {
+          sb.writeln('   + ${modNames.join(', ')}');
+        }
+      }
+      final cookNote = (item['cooking_notes'] ?? '').toString().trim();
+      final regNote = (item['notes'] ?? '').toString().trim();
+      final combinedNote = cookNote.isNotEmpty ? cookNote : regNote;
+      if (combinedNote.isNotEmpty) {
+        sb.writeln('   >> CATATAN: $combinedNote');
       }
     }
     sb.writeln('=' * width);
