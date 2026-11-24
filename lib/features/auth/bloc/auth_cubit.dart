@@ -80,6 +80,13 @@ class AuthCubit extends Cubit<AuthState> {
     return hash.isNotEmpty;
   }
 
+  bool verifyStandaloneCashierPin(String pin) {
+    final profile = _offlineDb.getSavedStoreProfile();
+    final hash = (profile?['cashier_pin_hash'] ?? '').toString().trim();
+    if (hash.isEmpty) return false;
+    return _hashPin(pin.trim()) == hash;
+  }
+
   static String _hashPin(String pin) {
     // Legacy domain salt retained unchanged so stored offline PIN hashes remain valid across OXORA upgrade.
     final digest = SecureLicenseVault.sha256(

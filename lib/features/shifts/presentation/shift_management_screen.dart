@@ -19,6 +19,7 @@ import '../../../core/network/repositories/backoffice_repository.dart';
 part 'shift_management_screen_part1.dart';
 part 'shift_management_screen_part2.dart';
 part 'shift_management_screen_widgets3.dart';
+part 'shift_management_screen_widgets4.dart';
 
 /// MODUL SHIFT KASIR, STRICT BLIND DROP & REKONSILIASI Z-REPORT (`PRD-07` / Gelombang 5)
 /// - Strict Blind Drop: server menyembunyikan `expected_cash` bagi kasir non-supervisor

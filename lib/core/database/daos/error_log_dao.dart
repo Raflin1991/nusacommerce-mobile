@@ -18,19 +18,19 @@ class ErrorLogDao {
       RegExp(r'Bearer\s+[A-Za-z0-9\-._~+/]+=*', caseSensitive: false),
       'Bearer [REDACTED]',
     );
-    sanitized = sanitized.replaceAll(
+    sanitized = sanitized.replaceAllMapped(
       RegExp(
         r'("(?:password|pin|supervisor_pin|whatsapp_pin|token|access_token|refresh_token|secret|authorization)"\s*:\s*)"[^"]*"',
         caseSensitive: false,
       ),
-      r'$1"[REDACTED]"',
+      (m) => '${m.group(1)}"[REDACTED]"',
     );
-    sanitized = sanitized.replaceAll(
+    sanitized = sanitized.replaceAllMapped(
       RegExp(
         r'\b(password|pin|supervisor_pin|token|secret)\s*=\s*[^\s,&;]+',
         caseSensitive: false,
       ),
-      r'$1=[REDACTED]',
+      (m) => '${m.group(1)}=[REDACTED]',
     );
     return sanitized;
   }

@@ -75,6 +75,7 @@ class OfflineDatabase {
   static const String _keyCachedCloudReceivables = 'nusa_cached_cloud_receivables_v5';
   static const String _keyPendingShiftClosures = 'nusa_pending_shift_closures_v5';
   static const String _keyDeadLetterQueue = 'nusa_dead_letter_queue_v5';
+  static const String _keyLocalErrorLogs = 'nusa_local_error_logs_v1';
 
 
   List<Map<String, dynamic>>? _memProducts;
@@ -85,6 +86,7 @@ class OfflineDatabase {
   List<Map<String, dynamic>>? _memPendingReceivablePayments;
   List<Map<String, dynamic>>? _memPendingShiftClosures;
   List<Map<String, dynamic>>? _memDeadLetterQueue;
+  List<Map<String, dynamic>>? _memErrorLogs;
   final Map<String, List<Map<String, dynamic>>> _memCollections = {};
   Future<int>? _activeQueueSyncFuture;
 
@@ -246,24 +248,42 @@ class OfflineDatabase {
     await _prefs.setString(key, jsonEncode(payload));
   }
 
-  /// Record sanitized diagnostic/crash error into SQLite `local_error_logs` DAO (500-row cap).
+  /// Record sanitized diagnostic/crash error into SQLite `local_error_logs` DAO (500-row cap)
+  /// with in-memory & SharedPreferences mirror when native SQLite is inactive (VM tests / Web).
   Future<Map<String, dynamic>> recordLocalError({
     required String errorType,
     required String message,
     String? stackTrace,
     Map<String, dynamic>? context,
-  }) {
-    return errorLogDao.recordError(
+  }) async {
+    final row = await errorLogDao.recordError(
       id: _uuid.v4(),
       errorType: errorType,
       message: message,
       stackTrace: stackTrace,
       context: context,
     );
+    final list = _memErrorLogs ??
+        (isUsingNativeSqlite ? <Map<String, dynamic>>[] : _readPrefsList(_keyLocalErrorLogs));
+    list.insert(0, row);
+    if (list.length > 100) {
+      list.removeRange(100, list.length);
+    }
+    _memErrorLogs = list;
+    if (!isUsingNativeSqlite) {
+      await _prefs.setString(_keyLocalErrorLogs, jsonEncode(list));
+    }
+    return row;
   }
 
-  Future<List<Map<String, dynamic>>> getRecentLocalErrors({int limit = 50}) {
-    return errorLogDao.getRecentErrors(limit: limit);
+  Future<List<Map<String, dynamic>>> getRecentLocalErrors({int limit = 50}) async {
+    if (isUsingNativeSqlite) {
+      final rows = await errorLogDao.getRecentErrors(limit: limit);
+      if (rows.isNotEmpty) return rows;
+    }
+    final list = _memErrorLogs ?? _readPrefsList(_keyLocalErrorLogs);
+    _memErrorLogs = list;
+    return list.take(limit).map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   Future<void> saveAuthSession(Map<String, dynamic> sessionJson) async {

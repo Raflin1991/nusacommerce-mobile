@@ -24,12 +24,12 @@ class SqliteDatabase {
   bool _ftsAvailable = false;
 
   late final ProductLocalDao productsDao = ProductLocalDao(
-    () => database,
+    () async => _db,
     isFtsAvailable: () => _ftsAvailable,
   );
-  late final SalesQueueDao salesQueueDao = SalesQueueDao(() => database);
-  late final ShiftLocalDao shiftsDao = ShiftLocalDao(() => database);
-  late final ErrorLogDao errorLogDao = ErrorLogDao(() => database);
+  late final SalesQueueDao salesQueueDao = SalesQueueDao(() async => _db);
+  late final ShiftLocalDao shiftsDao = ShiftLocalDao(() async => _db);
+  late final ErrorLogDao errorLogDao = ErrorLogDao(() async => _db);
 
   bool get isSupported => !kIsWeb;
 

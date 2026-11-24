@@ -11,6 +11,7 @@ import 'core/network/repositories/sale_repository.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/nusa_theme_tokens.dart';
 import 'core/theme/theme_cubit.dart';
+import 'core/widgets/shift_inactivity_lock_guard.dart';
 import 'features/approvals/presentation/owner_approvals_screen.dart';
 import 'features/auth/bloc/auth_cubit.dart';
 import 'features/pos/bloc/cart_cubit.dart';
@@ -294,7 +295,11 @@ class _NusaCommerceMobileAppState extends State<NusaCommerceMobileApp> {
                       color: AppTheme.forMode(themeMode).scaffoldBackgroundColor,
                     );
                   }
-                  return child ?? const SizedBox.shrink();
+                  return ShiftInactivityLockGuard(
+                    apiClient: widget.apiClient,
+                    offlineDb: widget.offlineDb,
+                    child: child ?? const SizedBox.shrink(),
+                  );
                 },
               );
             },

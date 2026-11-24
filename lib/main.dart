@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -57,6 +59,7 @@ Future<void> main() async {
   const secureStorage = FlutterSecureStorage();
   final offlineDb = OfflineDatabase(prefs);
   await offlineDb.initialize();
+  installGlobalCrashTelemetry(offlineDb);
   final apiClient = ApiClient(secureStorage: secureStorage, prefs: prefs);
   final connectivityService = NetworkConnectivityService();
   final printerService = PrinterService();
@@ -112,4 +115,40 @@ Future<void> main() async {
       themeCubit: themeCubit,
     ),
   );
+}
+
+/// Hardening #3: Hooks Flutter widget framework & Dart PlatformDispatcher uncaught
+/// exceptions into sanitized `local_error_logs` (Bearer/PIN/password redacted, 500-row cap).
+void installGlobalCrashTelemetry(OfflineDatabase offlineDb) {
+  final previousFlutterError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    if (previousFlutterError != null) {
+      previousFlutterError(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+    unawaited(
+      offlineDb.recordLocalError(
+        errorType: 'FlutterError',
+        message: details.exceptionAsString(),
+        stackTrace: details.stack?.toString(),
+        context: {
+          'library': details.library ?? 'flutter',
+          'silent': details.silent,
+        },
+      ),
+    );
+  };
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    unawaited(
+      offlineDb.recordLocalError(
+        errorType: error.runtimeType.toString(),
+        message: error.toString(),
+        stackTrace: stack.toString(),
+        context: const {'source': 'PlatformDispatcher'},
+      ),
+    );
+    return true;
+  };
 }

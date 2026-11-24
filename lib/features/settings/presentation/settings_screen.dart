@@ -6,9 +6,11 @@ import '../../../core/config/business_vertical_config.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/edge_discovery_service.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/theme/theme_cubit.dart';
 import '../../../core/widgets/nusa_widgets.dart';
+import '../../../core/widgets/shift_inactivity_lock_guard.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/presentation/cloud_upgrade_sheet.dart';
 import '../../pos/bloc/pos_cubit.dart';
@@ -258,8 +260,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     tokens,
                     icon: Icons.dns_outlined,
                     title: 'Server Cloud, Edge & Kode Terminal',
-                    subtitle: 'Node ${posState.activeNodeCode} • ${_apiClient.baseUrl}',
+                    subtitle:
+                        'Node ${posState.activeNodeCode} • ${_tierShortLabel(_apiClient.edgeDiscovery.currentTier)} • Lease: ${_apiClient.lastLeaseState ?? 'aktif'}',
                     onTap: () => _showServerEndpointModal(context),
+                  ),
+                  Divider(height: 1, indent: 56, color: tokens.borderSubtle),
+                  _buildSettingsTile(
+                    tokens,
+                    icon: Icons.lock_clock_outlined,
+                    title: 'Auto-Lock Layar Kasir Saat Idle',
+                    subtitle: _idleLockSubtitle(),
+                    onTap: () => _showInactivityLockModal(context),
                   ),
                   Divider(height: 1, indent: 56, color: tokens.borderSubtle),
                   _buildSettingsTile(
