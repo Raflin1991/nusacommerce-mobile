@@ -1,11 +1,11 @@
 {
-    "name": "OXO.ID POS",
-    "short_name": "OXO.ID",
+    "name": "OXORA POS",
+    "short_name": "OXORA",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",
     "theme_color": "#0052FF",
-    "description": "OXO.ID — THE AI-POWERED BUSINESS OPERATING SYSTEM",
+    "description": "OXORA — THE AI-POWERED BUSINESS OPERATING SYSTEM",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

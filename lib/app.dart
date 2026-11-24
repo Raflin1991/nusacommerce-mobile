@@ -249,7 +249,7 @@ class _NusaCommerceMobileAppState extends State<NusaCommerceMobileApp> {
       child: BlocBuilder<ThemeCubit, NusaThemeMode>(
         builder: (context, themeMode) {
           return MaterialApp.router(
-            title: 'OXO.ID Mobile POS',
+            title: 'OXORA Mobile POS',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.forMode(themeMode),
             routerConfig: _router,
@@ -317,7 +317,7 @@ class _CloudWebHrRedirectScreen extends StatelessWidget {
                 Icon(Icons.public_rounded, color: tokens.accent, size: 32),
                 const SizedBox(height: 12),
                 Text(
-                  'Modul HRD & Payroll Dikelola di OXO.ID Cloud Web',
+                  'Modul HRD & Payroll Dikelola di OXORA Cloud Web',
                   style: TextStyle(
                     fontSize: 16.5,
                     fontWeight: FontWeight.w800,
@@ -326,7 +326,7 @@ class _CloudWebHrRedirectScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Agar aplikasi Kasir Mobile tetap super cepat dan bebas clutter, pengelolaan absensi lengkap, penggajian (Payroll), PPh 21 TER, dan BPJS tersedia di OXO.ID Cloud Web (/admin).',
+                  'Agar aplikasi Kasir Mobile tetap super cepat dan bebas clutter, pengelolaan absensi lengkap, penggajian (Payroll), PPh 21 TER, dan BPJS tersedia di OXORA Cloud Web (/admin).',
                   style: TextStyle(fontSize: 13, color: tokens.textSecondary, height: 1.45),
                 ),
                 const SizedBox(height: 16),

@@ -275,7 +275,7 @@ class _LoginScreenState extends State<LoginScreen> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'Endpoint REST API v1',
-                hintText: 'https://oxo.test/api/v1',
+                hintText: 'https://oxora.test/api/v1',
                 prefixIcon: Icon(Icons.cloud_outlined),
               ),
             ),
@@ -347,7 +347,7 @@ class _LoginScreenState extends State<LoginScreen> {
         cleaned == '43.159.49.77' ||
         cleaned == 'localhost' ||
         cleaned == '127.0.0.1') {
-      return 'oxo.id';
+      return 'oxora.id';
     }
     return rawHost.trim();
   }
@@ -368,7 +368,7 @@ class _LoginScreenState extends State<LoginScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          tooltip: 'Info OXO.ID',
+          tooltip: 'Info OXORA',
           icon: Icon(Icons.info_outline_rounded, color: tokens.textSecondary),
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
         ),
@@ -427,7 +427,7 @@ class _LoginScreenState extends State<LoginScreen> {
             height: 150,
             child: IgnorePointer(
               child: CustomPaint(
-                painter: _OxoLoginBottomWavesPainter(isDark: isDark),
+                painter: _OxoraLoginBottomWavesPainter(isDark: isDark),
               ),
             ),
           ),
@@ -478,11 +478,11 @@ class _LoginScreenState extends State<LoginScreen> {
         children: [
           Image.asset(
             isDark
-                ? 'assets/images/oxo_wordmark_dark.png'
-                : 'assets/images/oxo_wordmark_light.png',
+                ? 'assets/images/oxora_wordmark_dark.png'
+                : 'assets/images/oxora_wordmark_light.png',
             height: 44,
             fit: BoxFit.contain,
-            semanticLabel: 'OXO.ID',
+            semanticLabel: 'OXORA',
           ),
           const SizedBox(height: 12),
           Text(
@@ -615,7 +615,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          '$previewSlug.oxo.id',
+                          '$previewSlug.oxora.id',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -637,7 +637,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     hintText: 'Contoh: warungmaju',
                     prefixIcon:
                         const Icon(Icons.storefront_rounded, color: AppColors.primary),
-                    suffixText: '.oxo.id',
+                    suffixText: '.oxora.id',
                     suffixIcon: _tenantController.text.isNotEmpty
                         ? IconButton(
                             tooltip: 'Bersihkan',
@@ -1458,10 +1458,10 @@ class _ModeTabButton extends StatelessWidget {
   }
 }
 
-class _OxoLoginBottomWavesPainter extends CustomPainter {
+class _OxoraLoginBottomWavesPainter extends CustomPainter {
   final bool isDark;
 
-  const _OxoLoginBottomWavesPainter({required this.isDark});
+  const _OxoraLoginBottomWavesPainter({required this.isDark});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1517,6 +1517,6 @@ class _OxoLoginBottomWavesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OxoLoginBottomWavesPainter oldDelegate) =>
+  bool shouldRepaint(covariant _OxoraLoginBottomWavesPainter oldDelegate) =>
       oldDelegate.isDark != isDark;
 }

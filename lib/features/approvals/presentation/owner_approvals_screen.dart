@@ -525,7 +525,7 @@ class _OwnerApprovalsScreenState extends State<OwnerApprovalsScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Persetujuan Maker-Checker (Void, Diskon, Transfer Stok, PO) membutuhkan verifikasi real-time server OXO Cloud demi integritas audit SoD.',
+                  'Persetujuan Maker-Checker (Void, Diskon, Transfer Stok, PO) membutuhkan verifikasi real-time server OXORA Cloud demi integritas audit SoD.',
                   style: TextStyle(fontSize: 12.5, color: tokens.textSecondary),
                 ),
                 const SizedBox(height: 12),

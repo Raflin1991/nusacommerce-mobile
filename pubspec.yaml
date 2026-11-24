@@ -1,5 +1,5 @@
 name: nusacommerce_mobile
-description: "OXO.ID Mobile POS, Sales & Owner Super-App — The AI-Powered Business Operating System integrated with OXO Cloud."
+description: "OXORA Mobile POS, Sales & Owner Super-App — The AI-Powered Business Operating System integrated with OXORA Cloud."
 publish_to: 'none'
 version: 2.0.0+200
 
@@ -47,13 +47,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/images/oxo_icon.png
-    - assets/images/oxo_wordmark_light.png
-    - assets/images/oxo_wordmark_dark.png
-    - assets/images/oxo_splash_wordmark_light.png
-    - assets/images/oxo_splash_wordmark_dark.png
-    - assets/images/oxo_splash.png
-    - assets/images/oxo_login.png
+    - assets/images/oxora_icon.png
+    - assets/images/oxora_wordmark_light.png
+    - assets/images/oxora_wordmark_dark.png
+    - assets/images/oxora_splash_wordmark_light.png
+    - assets/images/oxora_splash_wordmark_dark.png
     - assets/images/nusacommerce_icon.png
     - assets/images/buddy/buddy_greeting.webp
     - assets/images/buddy/buddy_idle.webp

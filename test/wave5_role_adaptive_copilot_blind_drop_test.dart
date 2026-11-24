@@ -700,7 +700,7 @@ void main() {
       await authCubit.close();
     });
 
-    testWidgets('OXO Buddy Mascot runs 5-phase asset choreography (Greeting -> Idle -> Thinking -> Success -> Idle -> Poke)',
+    testWidgets('OXORA Buddy Mascot runs 5-phase asset choreography (Greeting -> Idle -> Thinking -> Success -> Idle -> Poke)',
         (WidgetTester tester) async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
@@ -769,7 +769,7 @@ void main() {
 
       // Phase 1: Greeting (large perched full-body waving Animated WebP)
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.bySemanticsLabel('OXO Buddy (greeting)'), findsOneWidget);
+      expect(find.bySemanticsLabel('OXORA Buddy (greeting)'), findsOneWidget);
       expect(activeMascotAsset(), 'assets/images/buddy/buddy_greeting.webp');
       final mascotBox = tester.getSize(find.byKey(const Key('copilot_nusa_buddy_mascot')));
       expect(mascotBox.height, greaterThanOrEqualTo(100.0));
@@ -777,7 +777,7 @@ void main() {
       // Auto-transition after 2.2s -> Phase 2: Idle (half-body living gaze/blink Animated WebP)
       await tester.pump(const Duration(milliseconds: 2200));
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.bySemanticsLabel('OXO Buddy (idle)'), findsOneWidget);
+      expect(find.bySemanticsLabel('OXORA Buddy (idle)'), findsOneWidget);
       expect(activeMascotAsset(), 'assets/images/buddy/buddy_idle.webp');
 
       // Phase 3: Thinking / Typing (headphones + laptop typing Animated WebP) while API request is in-flight
@@ -786,18 +786,18 @@ void main() {
       await tester.tap(find.byKey(const Key('copilot_send_button')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.bySemanticsLabel('OXO Buddy (thinking)'), findsOneWidget);
+      expect(find.bySemanticsLabel('OXORA Buddy (thinking)'), findsOneWidget);
       expect(activeMascotAsset(), 'assets/images/buddy/buddy_working.webp');
 
       // Phase 4: Arrival / Success joyful bounce Animated WebP -> settles back to Phase 2 Idle
       pendingGate.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.bySemanticsLabel('OXO Buddy (success)'), findsOneWidget);
+      expect(find.bySemanticsLabel('OXORA Buddy (success)'), findsOneWidget);
       expect(activeMascotAsset(), 'assets/images/buddy/buddy_success.webp');
 
       await tester.pumpAndSettle();
-      expect(find.bySemanticsLabel('OXO Buddy (idle)'), findsOneWidget);
+      expect(find.bySemanticsLabel('OXORA Buddy (idle)'), findsOneWidget);
       expect(activeMascotAsset(), 'assets/images/buddy/buddy_idle.webp');
 
       // Phase 5: Poke / Tap squash & stretch reaction

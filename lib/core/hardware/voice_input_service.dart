@@ -12,7 +12,7 @@ class VoiceCaptureResult {
   });
 }
 
-/// Platform-channel speech capture bridge for OXO Copilot Mobile Voice Input (`id-ID`).
+/// Platform-channel speech capture bridge for OXORA Copilot Mobile Voice Input (`id-ID`).
 /// Gracefully handles Android devices with native RecognizerIntent as well as Web/Desktop/Test
 /// environments where native speech recognition plugin is unavailable.
 class NusaVoiceInputService {
@@ -39,7 +39,7 @@ class NusaVoiceInputService {
     try {
       final result = await _channel.invokeMethod<dynamic>(
         'startVoiceRecognition',
-        {'locale': locale, 'prompt': 'Ucapkan pertanyaan untuk OXO Buddy...'},
+        {'locale': locale, 'prompt': 'Ucapkan pertanyaan untuk OXORA Buddy...'},
       );
       final text = (result ?? '').toString().trim();
       if (text.isEmpty) {

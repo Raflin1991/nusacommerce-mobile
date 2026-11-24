@@ -81,6 +81,7 @@ class AuthCubit extends Cubit<AuthState> {
   }
 
   static String _hashPin(String pin) {
+    // Legacy domain salt retained unchanged so stored offline PIN hashes remain valid across OXORA upgrade.
     final digest = SecureLicenseVault.sha256(
       Uint8List.fromList(utf8.encode('OXO.ID::OFFLINE_PIN::${pin.trim()}')),
     );
@@ -243,7 +244,7 @@ class AuthCubit extends Cubit<AuthState> {
     await _offlineDb.saveStoreProfile({
       ...existing,
       'is_standalone': session.isLocalTrial,
-      'name': session.tenantName.isNotEmpty ? session.tenantName : 'OXO.ID POS',
+      'name': session.tenantName.isNotEmpty ? session.tenantName : 'OXORA POS',
       'code': session.activeStore.code.isNotEmpty ? session.activeStore.code : 'MAIN',
       'branch': session.activeStore.name,
       'address': (session.activeStore.address ?? '').trim().isNotEmpty

@@ -465,12 +465,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                     .toList(),
               ),
             ),
-            // OXO Copilot AI Quick Trigger on Tablet Rail
+            // OXORA Copilot AI Quick Trigger on Tablet Rail
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: IconButton.filledTonal(
                 key: const Key('rail_copilot_button'),
-                tooltip: 'OXO Copilot AI',
+                tooltip: 'OXORA Copilot AI',
                 style: IconButton.styleFrom(
                   backgroundColor: tokens.accentSoft,
                   foregroundColor: tokens.accent,
@@ -590,7 +590,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final capabilities = context.watch<PosCubit>().state.capabilities;
     final themeCubit = _maybeThemeCubit(context);
     final displayName =
-        session.userName.trim().isEmpty ? 'Operator OXO.ID' : session.userName.trim();
+        session.userName.trim().isEmpty ? 'Operator OXORA' : session.userName.trim();
     final roleLabel = session.userRole.isEmpty ? 'Operator' : session.userRole;
     final planLabel = session.planName.isEmpty ? 'Starter' : session.planName;
     final canSwitchWorkspaces = MobileWorkspaceResolver.canSwitchWorkspaces(session);
@@ -1138,7 +1138,7 @@ class _MobileCloudWebPortalTab extends StatelessWidget {
     final tokens = NusaThemeTokens.of(context);
     return Scaffold(
       backgroundColor: tokens.bgPage,
-      appBar: AppBar(title: const Text('Portal Cloud Web OXO.ID')),
+      appBar: AppBar(title: const Text('Portal Cloud Web OXORA')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -1168,7 +1168,7 @@ class _MobileCloudWebPortalTab extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   'Aplikasi Mobile difokuskan pada kecepatan Kasir POS, Operasional Toko Harian, Stok Gudang, Persetujuan Owner, dan 50 Laporan Bisnis.\n\n'
-                  'Pengelolaan absensi lengkap, penggajian (Payroll), PPh 21, BPJS, e-Faktur CoreTax XML, dan jurnal akuntansi lanjutan dapat diakses melalui OXO.ID Cloud Web (/admin).',
+                  'Pengelolaan absensi lengkap, penggajian (Payroll), PPh 21, BPJS, e-Faktur CoreTax XML, dan jurnal akuntansi lanjutan dapat diakses melalui OXORA Cloud Web (/admin).',
                   style: TextStyle(fontSize: 13, color: tokens.textSecondary, height: 1.45),
                 ),
               ],

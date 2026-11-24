@@ -5,9 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../bloc/auth_cubit.dart';
 
-/// LAYAR 1 — LAYAR PEMBUKA RESMI OXO.ID MOBILE
+/// LAYAR 1 — LAYAR PEMBUKA RESMI OXORA MOBILE
 /// Mengikuti panduan visual resmi `LogoRebranding/Mobile splash screen.jpg`:
-/// tema terang bersih, gelombang gradien biru & oranye di sudut, emblem X + wordmark OXO.ID,
+/// tema terang bersih, gelombang gradien biru & oranye di sudut, emblem X + wordmark OXORA,
 /// indikator cincin biru-oranye, serta penanda "Versi 2.0 • Powered by Autonomous AI".
 class SplashWelcomeScreen extends StatelessWidget {
   const SplashWelcomeScreen({super.key});
@@ -27,7 +27,7 @@ class SplashWelcomeScreen extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
-                painter: _OxoSplashWavesPainter(isDark: isDark),
+                painter: _OxoraSplashWavesPainter(isDark: isDark),
               ),
             ),
           ),
@@ -51,7 +51,7 @@ class SplashWelcomeScreen extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Image.asset(
-                              'assets/images/oxo_icon.png',
+                              'assets/images/oxora_icon.png',
                               width: 124,
                               height: 124,
                               fit: BoxFit.contain,
@@ -59,12 +59,12 @@ class SplashWelcomeScreen extends StatelessWidget {
                             const SizedBox(height: 10),
                             Image.asset(
                               isDark
-                                  ? 'assets/images/oxo_splash_wordmark_dark.png'
-                                  : 'assets/images/oxo_splash_wordmark_light.png',
+                                  ? 'assets/images/oxora_splash_wordmark_dark.png'
+                                  : 'assets/images/oxora_splash_wordmark_light.png',
                               height: 62,
                               fit: BoxFit.contain,
                               semanticLabel:
-                                  'OXO.ID — THE AI-POWERED BUSINESS OPERATING SYSTEM',
+                                  'OXORA — THE AI-POWERED BUSINESS OPERATING SYSTEM',
                             ),
                             const SizedBox(height: 22),
                             ConstrainedBox(
@@ -135,7 +135,7 @@ class SplashWelcomeScreen extends StatelessWidget {
                                 width: 34,
                                 height: 34,
                                 child: CustomPaint(
-                                  painter: _OxoDualToneRingPainter(),
+                                  painter: _OxoraDualToneRingPainter(),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -168,8 +168,8 @@ class SplashWelcomeScreen extends StatelessWidget {
   }
 }
 
-class _OxoDualToneRingPainter extends CustomPainter {
-  const _OxoDualToneRingPainter();
+class _OxoraDualToneRingPainter extends CustomPainter {
+  const _OxoraDualToneRingPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -191,7 +191,7 @@ class _OxoDualToneRingPainter extends CustomPainter {
 
     // Lower arc: vibrant blue
     canvas.drawArc(rect, 0.08, math.pi - 0.16, false, bluePaint);
-    // Upper arc: signature OXO orange
+    // Upper arc: signature OXORA orange
     canvas.drawArc(rect, -math.pi + 0.08, math.pi - 0.16, false, orangePaint);
   }
 
@@ -199,10 +199,10 @@ class _OxoDualToneRingPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _OxoSplashWavesPainter extends CustomPainter {
+class _OxoraSplashWavesPainter extends CustomPainter {
   final bool isDark;
 
-  const _OxoSplashWavesPainter({required this.isDark});
+  const _OxoraSplashWavesPainter({required this.isDark});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -304,6 +304,6 @@ class _OxoSplashWavesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OxoSplashWavesPainter oldDelegate) =>
+  bool shouldRepaint(covariant _OxoraSplashWavesPainter oldDelegate) =>
       oldDelegate.isDark != isDark;
 }

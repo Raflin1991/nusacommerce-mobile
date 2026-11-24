@@ -645,7 +645,7 @@ class MobileWorkspaceResolver {
           role: MobileWorkspaceRole.employeeEss,
           title: 'Portal Staf',
           shortTitle: 'Staf',
-          subtitle: 'Tugas cabang & pengaturan akun — HRD/Payroll tersedia di OXO Cloud Web',
+          subtitle: 'Tugas cabang & pengaturan akun — HRD/Payroll tersedia di OXORA Cloud Web',
           icon: Icons.badge_rounded,
           primaryCta: MobilePrimaryCtaSpec(
             label: 'Pengaturan',

@@ -189,7 +189,7 @@ class AuthSessionModel extends Equatable {
     return AuthSessionModel(
       userId: 999999,
       userName: 'Pemilik $normalizedName',
-      userEmail: 'owner@lokal.oxo.id',
+      userEmail: 'owner@lokal.oxora.id',
       userRole: 'Pemilik Usaha',
       isOwner: true,
       tenantName: normalizedName,
@@ -319,7 +319,7 @@ class AuthSessionModel extends Equatable {
   factory AuthSessionModel.defaultOwnerDemo() {
     const mainStore = StoreBranchModel(
       id: 1,
-      name: 'OXO Official Store Grand Sudirman',
+      name: 'OXORA Official Store Grand Sudirman',
       code: 'STORE-01',
       city: 'Jakarta Selatan',
       address: 'Jl. Jend. Sudirman Kav. 1, Jakarta',
@@ -331,7 +331,7 @@ class AuthSessionModel extends Equatable {
       userEmail: 'direktur@manunggal.co.id',
       userRole: 'Pemilik Usaha',
       isOwner: true,
-      tenantName: 'OXO.ID',
+      tenantName: 'OXORA',
       tenantSubdomain: 'manunggal',
       planName: 'Enterprise',
       tier: 'enterprise',

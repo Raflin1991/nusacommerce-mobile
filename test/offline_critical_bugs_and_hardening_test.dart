@@ -433,7 +433,7 @@ void main() {
       await db.saveAuthSession({
         'is_local_trial': false,
         'token': 'cloud-token',
-        'user': {'id': 1, 'name': 'Kasir Cloud', 'email': 'k@oxo.id'},
+        'user': {'id': 1, 'name': 'Kasir Cloud', 'email': 'k@oxora.id'},
         'active_store': {'id': 1, 'name': 'Cabang Utama', 'code': 'CBG'},
       });
 
@@ -669,7 +669,7 @@ void main() {
       await db.saveAuthSession({
         'is_local_trial': false,
         'token': 'cloud-token',
-        'user': {'id': 1, 'name': 'Kasir ACID', 'email': 'acid@oxo.id'},
+        'user': {'id': 1, 'name': 'Kasir ACID', 'email': 'acid@oxora.id'},
         'active_store': {'id': 1, 'name': 'Toko ACID', 'code': 'ACD'},
       });
 
@@ -832,7 +832,7 @@ void main() {
       await db.saveAuthSession({
         'is_local_trial': false,
         'token': 'cloud-tok',
-        'user': {'id': 1, 'name': 'Kasir DLQ', 'email': 'dlq@oxo.id'},
+        'user': {'id': 1, 'name': 'Kasir DLQ', 'email': 'dlq@oxora.id'},
         'active_store': {'id': 1, 'name': 'Toko DLQ', 'code': 'DLQ'},
       });
 

@@ -390,7 +390,7 @@ class _MobileReportDetailScreenState extends State<MobileReportDetailScreen> {
                   title: 'Ekspor PDF Ringkas (A4)',
                   subtitle: payload.isOfflineData || isLocalTrial
                       ? 'Perlu koneksi Cloud untuk render PDF A4 resmi'
-                      : 'Unduh PDF resmi berlogo OXO.ID dari server Cloud',
+                      : 'Unduh PDF resmi berlogo OXORA dari server Cloud',
                   busy: busy,
                   onTap: () async {
                     if (payload.isOfflineData || isLocalTrial) {

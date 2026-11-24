@@ -25,7 +25,7 @@ class WhatsAppService {
     required Map<String, dynamic> sale,
   }) async {
     final phone = normalizePhone(customerPhone);
-    final storeName = storeProfile['name'] ?? 'OXO.ID POS';
+    final storeName = storeProfile['name'] ?? 'OXORA POS';
     final number = sale['number'] ?? '#INV-0001';
     final dt = sale['sale_datetime'] ?? 'Hari Ini';
     final grandTotal = (sale['grand_total'] as num?) ?? 0;
@@ -101,7 +101,7 @@ class WhatsAppService {
         '• Uang Fisik Dihitung: *${IdrCurrencyFormatter.format(countedCash)}*\n'
         '• Selisih Kas: *${IdrCurrencyFormatter.format(variance)}*\n'
         '--------------------------------\n'
-        '_Dikirim otomatis dari OXO.ID Mobile POS_';
+        '_Dikirim otomatis dari OXORA Mobile POS_';
 
     return _launchWhatsApp(phone, message);
   }
@@ -135,7 +135,7 @@ class WhatsAppService {
         '• Transaksi Void: $voidCount | Retur: $refundCount\n'
         '• Selisih Kas Shift: $varianceCount peringatan\n'
         '--------------------------------\n'
-        '_Dikirim otomatis dari OXO.ID Mobile_';
+        '_Dikirim otomatis dari OXORA Mobile_';
 
     return _launchWhatsApp(phone, message);
   }

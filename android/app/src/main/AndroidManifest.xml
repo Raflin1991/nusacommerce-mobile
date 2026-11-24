@@ -18,7 +18,7 @@
     <!-- Haptic Feedback for POS Cashier -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Android 11+ (API 30+) Package Visibility for Native Speech Recognition (OXO Copilot Voice id-ID) -->
+    <!-- Android 11+ (API 30+) Package Visibility for Native Speech Recognition (OXORA Copilot Voice id-ID) -->
     <queries>
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
@@ -29,7 +29,7 @@
     </queries>
 
     <application
-        android:label="OXO.ID POS"
+        android:label="OXORA"
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">

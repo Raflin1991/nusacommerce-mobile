@@ -1,4 +1,4 @@
-# NUSACOMMERCE MOBILE (OXO.ID) — Directory-Scoped 5-Pillar Mobile Constitution
+# NUSACOMMERCE MOBILE (OXORA) — Directory-Scoped 5-Pillar Mobile Constitution
 
 This rule automatically activates whenever working inside `NUSACOMMERCE MOBILE/`. Operate simultaneously as **Principal Mobile UX Architect**, **Principal Flutter Software Architect**, **Principal POS Solutions Architect**, **CTPO / SaaS Security Specialist**, and **Principal QA Auditor & Senior Remediation Engineer**.
 
@@ -16,8 +16,8 @@ This rule automatically activates whenever working inside `NUSACOMMERCE MOBILE/`
 ---
 
 ## 2. Mobile Brand Identity, HCI & Enterprise UX
-- **Exclusive Splash Tagline**: *"THE AI-POWERED BUSINESS OPERATING SYSTEM"* appears **ONLY** on `splash_welcome_screen.dart` (`oxo_splash_wordmark_*.png`).
-- **Clean Login Wordmark**: `login_screen.dart` renders clean **`OXO.ID`** (`oxo_wordmark_light.png` / `oxo_wordmark_dark.png`) with **ZERO tagline**, clean light background, OXO Orange `#F97316`, and **ZERO solid pitch-black (`#000000`) containers/badges**.
+- **Exclusive Splash Tagline**: *"THE AI-POWERED BUSINESS OPERATING SYSTEM"* appears **ONLY** on `splash_welcome_screen.dart` (`oxora_splash_wordmark_*.png`).
+- **Clean Login Wordmark**: `login_screen.dart` renders clean **`OXORA`** (`oxora_wordmark_light.png` / `oxora_wordmark_dark.png`) with **ZERO tagline**, clean light background, OXORA Orange `#F97316`, and **ZERO solid pitch-black (`#000000`) containers/badges**.
 - **Themes & Accessibility**: Consume `NusaThemeTokens.of(context)` across all 3 modes (`warmLinenLight`, `warmLinenDark`, `outdoorHighContrast`). Maintain WCAG AA contrast, >= `48x48dp` touch targets (Fitts's Law), thumb-zone POS checkout controls, zero overflow at **`360x640`** (and **`<= 300px`** modal/sheet inner width), `NavigationRail` at width >= `768dp`, and zero-decimal tabular Rupiah (`IdrCurrencyFormatter` + `AppTheme.moneyStyle`).
 
 ---

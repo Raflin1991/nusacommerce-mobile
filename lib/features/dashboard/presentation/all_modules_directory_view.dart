@@ -8,7 +8,7 @@ import '../../../core/widgets/cascade_entitlement_teaser.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/models/auth_session_model.dart';
 
-/// Hub "Semua Menu" — Pusat direktori modul ERP & POS OXO.ID (Strict RBAC + CDO Warm Linen).
+/// Hub "Semua Menu" — Pusat direktori modul ERP & POS OXORA (Strict RBAC + CDO Warm Linen).
 /// Hanya menampilkan modul yang diizinkan oleh hak akses peran (RBAC) pengguna.
 class AllModulesDirectoryView extends StatefulWidget {
   final VoidCallback onOpenDrawer;

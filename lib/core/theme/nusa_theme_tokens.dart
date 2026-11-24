@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Visual appearance modes aligned 1:1 with OXO.ID Web CDO Warm Linen
+/// Visual appearance modes aligned 1:1 with OXORA Web CDO Warm Linen
 /// (`resources/css/tokens.css`) plus High-Contrast Outdoor POS ergonomics.
 enum NusaThemeMode {
   warmLinenLight,

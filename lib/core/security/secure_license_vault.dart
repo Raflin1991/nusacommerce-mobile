@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../features/auth/models/auth_session_model.dart';
 
-/// Cryptographic integrity & tamper-resistant local vault for OXO.ID PRO / Enterprise
+/// Cryptographic integrity & tamper-resistant local vault for OXORA PRO / Enterprise
 /// entitlement and offline license state.
 ///
 /// Combines:
@@ -22,7 +22,7 @@ class SecureLicenseVault {
   static const String _keyDeviceSalt = 'nusa_pro_license_device_salt_v1';
   static const String _keyPrefsMirror = 'nusa_pro_license_seal_v1';
 
-  // Application-level domain pepper (combined with per-device random Keystore salt).
+  // Legacy cryptographic domain pepper (retained unchanged to preserve existing sealed device vaults).
   static const String _appPepper = 'OXO.ID::PRO_ENTITLEMENT_VAULT::v1::9F3A7C2E1B8D';
 
   final FlutterSecureStorage _secureStorage;

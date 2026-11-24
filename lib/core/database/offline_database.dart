@@ -486,7 +486,7 @@ class OfflineDatabase {
     await _prefs.setString(_keyOfflineSalesQueue, jsonEncode(queue));
   }
 
-  /// Flush pending offline sales to OXO.ID Cloud POST /api/v1/pos/checkout.
+  /// Flush pending offline sales to OXORA Cloud POST /api/v1/pos/checkout.
   /// Guarded by an in-flight mutex (`_activeQueueSyncFuture`) and deterministic
   /// `X-Idempotency-Key` (= persisted `local_uuid`) so flaky retries never double-count.
   Future<int> syncOfflineQueue(ApiClient apiClient) {
@@ -936,7 +936,7 @@ class OfflineDatabase {
     final saved = getSavedStoreProfile();
     if (saved != null) return saved;
     return {
-      'name': 'OXO.ID POS',
+      'name': 'OXORA POS',
       'branch': 'Toko Utama',
       'address': '-',
       'phone': '-',

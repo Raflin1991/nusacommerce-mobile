@@ -15,7 +15,7 @@ import 'package:nusacommerce_mobile/features/auth/presentation/splash_welcome_sc
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  group('OXO.ID Mobile POS Core Unit & Visual Rebranding Tests', () {
+  group('OXORA Mobile POS Core Unit & Visual Rebranding Tests', () {
     test('IdrCurrencyFormatter formats Rupiah accurately', () {
       expect(IdrCurrencyFormatter.format(1250000), 'Rp 1.250.000');
       expect(IdrCurrencyFormatter.format(17000), 'Rp 17.000');
@@ -30,7 +30,7 @@ void main() {
       expect(parsed.weightKg, 1.5);
     });
 
-    testWidgets('NusaBrandLogo renders transparent official OXO.ID emblem without dark box', (WidgetTester tester) async {
+    testWidgets('NusaBrandLogo renders transparent official OXORA emblem without dark box', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
@@ -47,7 +47,12 @@ void main() {
       expect(find.byType(Image), findsOneWidget);
     });
 
-    testWidgets('SplashWelcomeScreen matches OXO.ID Light Theme visual guide & Version 2.0 badge', (WidgetTester tester) async {
+    testWidgets('SplashWelcomeScreen matches OXORA Light Theme visual guide & zero overflow at 360x640', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
       final apiClient = ApiClient(
@@ -71,6 +76,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(tester.takeException(), isNull);
       expect(find.text('Versi 2.0 • Powered by Autonomous AI'), findsOneWidget);
       final images = tester.widgetList<Image>(find.byType(Image)).toList();
       expect(images.length, 2);
@@ -78,13 +84,19 @@ void main() {
         images.any((img) =>
             img.image is AssetImage &&
             (img.image as AssetImage).assetName ==
-                'assets/images/oxo_splash_wordmark_light.png'),
+                'assets/images/oxora_splash_wordmark_light.png'),
         isTrue,
       );
       expect(find.textContaining('NusaCommerce'), findsNothing);
+      expect(find.textContaining('OXO.ID'), findsNothing);
     });
 
-    testWidgets('LoginScreen uses clean Light Theme OXO.ID wordmark (without tagline) and oxo.id server chip', (WidgetTester tester) async {
+    testWidgets('LoginScreen uses clean Light Theme OXORA wordmark (without tagline), oxora.id chip, and zero overflow at 360x640', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       SharedPreferences.setMockInitialValues({
         'nusa_mobile_base_url': 'http://nusacommerce.test/api/v1',
       });
@@ -108,13 +120,16 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(tester.takeException(), isNull);
       final loginImg = tester.widget<Image>(find.byType(Image));
       expect((loginImg.image as AssetImage).assetName,
-          'assets/images/oxo_wordmark_light.png');
-      expect(find.text('oxo.id'), findsOneWidget);
+          'assets/images/oxora_wordmark_light.png');
+      expect(find.text('oxora.id'), findsOneWidget);
       expect(find.text('Akun Cloud Toko'), findsOneWidget);
       expect(find.text('Toko Mandiri (Offline)'), findsOneWidget);
       expect(find.textContaining('THE AI-POWERED'), findsNothing);
+      expect(find.textContaining('OXO.ID'), findsNothing);
+      expect(find.textContaining('oxo.id'), findsNothing);
       expect(find.textContaining('nusacommerce'), findsNothing);
       expect(find.textContaining('nusco.id'), findsNothing);
 

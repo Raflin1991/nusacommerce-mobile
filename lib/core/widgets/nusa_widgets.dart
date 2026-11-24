@@ -576,8 +576,8 @@ class NusaSyncStatusPill extends StatelessWidget {
   }
 }
 
-/// Self-contained official OXO.ID transparent Infinity logo widget.
-/// Renders the official high-resolution transparent OXO Infinity emblem with
+/// Self-contained official OXORA transparent Infinity logo widget.
+/// Renders the official high-resolution transparent OXORA Infinity emblem with
 /// a crisp vector fallback painter — zero dark/black box on Light Theme.
 class NusaBrandLogo extends StatelessWidget {
   final double size;
@@ -618,14 +618,14 @@ class NusaBrandLogo extends StatelessWidget {
             )
           : null,
       child: Image.asset(
-        'assets/images/oxo_icon.png',
+        'assets/images/oxora_icon.png',
         width: size,
         height: size,
         fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => const Padding(
           padding: EdgeInsets.all(4),
           child: CustomPaint(
-            painter: _OxoInfinityLogoPainter(),
+            painter: _OxoraInfinityLogoPainter(),
           ),
         ),
       ),
@@ -633,8 +633,8 @@ class NusaBrandLogo extends StatelessWidget {
   }
 }
 
-class _OxoInfinityLogoPainter extends CustomPainter {
-  const _OxoInfinityLogoPainter();
+class _OxoraInfinityLogoPainter extends CustomPainter {
+  const _OxoraInfinityLogoPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -682,5 +682,5 @@ class _OxoInfinityLogoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OxoInfinityLogoPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _OxoraInfinityLogoPainter oldDelegate) => false;
 }

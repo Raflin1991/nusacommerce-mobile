@@ -452,7 +452,7 @@ class _ReceiptPreviewScreenState extends State<ReceiptPreviewScreen> {
                       ),
                     ],
                     Text(
-                      (storeProfile['name'] ?? 'OXO.ID POS').toString(),
+                      (storeProfile['name'] ?? 'OXORA POS').toString(),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 2),

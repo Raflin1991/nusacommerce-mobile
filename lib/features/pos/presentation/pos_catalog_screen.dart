@@ -15,7 +15,7 @@ import '../bloc/pos_cubit.dart';
 import '../models/pos_models.dart';
 
 /// LAYAR 3 — PENJUALAN BARU (POS CATALOG & FLOATING CART)
-/// OXO.ID Mobile Enterprise POS Catalog Screen
+/// OXORA Mobile Enterprise POS Catalog Screen
 class PosCatalogScreen extends StatefulWidget {
   const PosCatalogScreen({super.key});
 

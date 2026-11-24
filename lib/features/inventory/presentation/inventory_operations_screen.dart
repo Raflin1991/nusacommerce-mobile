@@ -735,7 +735,7 @@ class _InventoryOperationsScreenState extends State<InventoryOperationsScreen>
           NusaCard(
             child: Text(
               _isLocalStandalone
-                  ? 'Transfer antar cabang tersedia saat beralih ke OXO Cloud Multi-Cabang.'
+                  ? 'Transfer antar cabang tersedia saat beralih ke OXORA Cloud Multi-Cabang.'
                   : 'Belum ada dokumen transfer antar gudang/cabang.',
               style: const TextStyle(fontSize: 13, color: AppColors.slate600),
             ),

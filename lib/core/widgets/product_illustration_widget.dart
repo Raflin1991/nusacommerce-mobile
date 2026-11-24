@@ -3,7 +3,7 @@ import 'package:get_it/get_it.dart';
 import '../constants/app_colors.dart';
 import '../network/api_client.dart';
 
-/// Crisp Vector/Illustrated Product & Store Graphics for OXO.ID Mobile
+/// Crisp Vector/Illustrated Product & Store Graphics for OXORA Mobile
 class ProductIllustrationWidget extends StatelessWidget {
   final String iconType;
   final String? imageUrl;
@@ -233,7 +233,7 @@ class Store3DIllustrationWidget extends StatelessWidget {
             ),
             child: Column(
               children: [
-                // Blue Awning Roof (OXO.ID Storefront Banner)
+                // Blue Awning Roof (OXORA Storefront Banner)
                 Container(
                   height: height * 0.24,
                   decoration: const BoxDecoration(

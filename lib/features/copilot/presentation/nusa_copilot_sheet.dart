@@ -36,7 +36,7 @@ class CopilotMessage {
   });
 }
 
-/// Opens the OXO Copilot AI Mobile Bottom Sheet (Chat + Voice Input, RBAC-Scoped).
+/// Opens the OXORA Copilot AI Mobile Bottom Sheet (Chat + Voice Input, RBAC-Scoped).
 Future<void> showNusaCopilotSheet(
   BuildContext context, {
   MobileWorkspaceRole? workspace,
@@ -248,7 +248,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
 
       final body = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : <String, dynamic>{};
       if (body['success'] != true) {
-        final msg = (body['message'] ?? 'OXO Copilot tidak dapat memproses permintaan.').toString();
+        final msg = (body['message'] ?? 'OXORA Copilot tidak dapat memproses permintaan.').toString();
         if (!mounted) return;
         setState(() {
           _modalError = msg;
@@ -285,7 +285,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
           CopilotMessage(
             role: 'model',
             text: reply.isEmpty
-                ? 'OXO Copilot tidak menerima jawaban dari server. Coba ulangi pertanyaan Anda.'
+                ? 'OXORA Copilot tidak menerima jawaban dari server. Coba ulangi pertanyaan Anda.'
                 : reply,
             engineMode: engineMode,
             tokensUsed: tokensUsed,
@@ -302,7 +302,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
       final isOffline = ApiClient.isNetworkOfflineError(e);
       setState(() {
         _modalError = isOffline
-            ? 'Koneksi internet terputus. OXO Copilot Cloud membutuhkan koneksi aktif.'
+            ? 'Koneksi internet terputus. OXORA Copilot Cloud membutuhkan koneksi aktif.'
             : ApiClient.extractErrorMessage(e);
         _avatarState = 'guard';
         _sending = false;
@@ -334,7 +334,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
         ? GetIt.instance<OfflineDatabase>()
         : null;
     if (db == null) {
-      return '**OXO Copilot Lokal** — Mode Mandiri aktif pada ${session.activeStore.name}.';
+      return '**OXORA Copilot Lokal** — Mode Mandiri aktif pada ${session.activeStore.name}.';
     }
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
@@ -353,7 +353,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
     final monthTx = (monthRep['transactions_count'] as num?)?.toInt() ?? 0;
     final lowStock = (todayRep['low_stock_count'] as num?)?.toInt() ?? 0;
 
-    return '**OXO Copilot Lokal — ${session.activeStore.name}**\n'
+    return '**OXORA Copilot Lokal — ${session.activeStore.name}**\n'
         '- Omzet Hari Ini: **${IdrCurrencyFormatter.format(todayNet)}** ($todayTx transaksi)\n'
         '- Omzet Minggu Ini (WTD): **${IdrCurrencyFormatter.format(weekNet)}** ($weekTx transaksi)\n'
         '- Omzet Bulan Ini (MTD): **${IdrCurrencyFormatter.format(monthNet)}** ($monthTx transaksi)\n'
@@ -392,7 +392,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
         (cardTopPadding - activeMascotSize + overlapOnCard).clamp(0.0, cardTopPadding);
 
     final String statusLine = switch (_avatarState) {
-      'greeting' => 'Halo! OXO Buddy siap membantu Anda',
+      'greeting' => 'Halo! OXORA Buddy siap membantu Anda',
       'thinking' => 'Sedang mengetik & menyiapkan jawaban...',
       'success' => 'Jawaban siap! Ada lagi yang bisa dibantu?',
       _ =>
@@ -410,7 +410,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
           clipBehavior: Clip.none,
           alignment: Alignment.topCenter,
           children: [
-            // Rounded Chat Sheet Card (leaves clean transparent sky above for perched 3D OXO Buddy)
+            // Rounded Chat Sheet Card (leaves clean transparent sky above for perched 3D OXORA Buddy)
             Padding(
               padding: EdgeInsets.only(top: cardTopPadding),
               child: Container(
@@ -445,7 +445,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
                                   children: [
                                     Flexible(
                                       child: Text(
-                                        'OXO Buddy',
+                                        'OXORA Buddy',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -494,7 +494,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
                               icon: Icon(Icons.delete_sweep_outlined, color: tokens.textSecondary),
                             ),
                           IconButton(
-                            tooltip: 'Tutup OXO Copilot',
+                            tooltip: 'Tutup OXORA Copilot',
                             onPressed: () => Navigator.pop(context),
                             icon: Icon(Icons.close_rounded, color: tokens.textPrimary),
                           ),
@@ -779,7 +779,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
                         onSubmitted: (v) => _sendMessage(v),
                         style: TextStyle(fontSize: 13.5, color: tokens.textPrimary),
                         decoration: InputDecoration(
-                          hintText: 'Tanya OXO Buddy (omzet, stok, tugas)...',
+                          hintText: 'Tanya OXORA Buddy (omzet, stok, tugas)...',
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                           fillColor: tokens.bgElevated,
@@ -809,7 +809,7 @@ class _NusaCopilotSheetState extends State<NusaCopilotSheet> {
               ),
             ),
 
-            // Large Free-Floating 3D Animated OXO Buddy Perched Directly ON TOP of the Chat Card!
+            // Large Free-Floating 3D Animated OXORA Buddy Perched Directly ON TOP of the Chat Card!
             AnimatedPositioned(
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutCubic,
@@ -1018,7 +1018,7 @@ class _FormattedCopilotText extends StatelessWidget {
   }
 }
 
-/// Unified 3D Articulated Animated WebP mascot "OXO Buddy" (100% parity with Cloud Web).
+/// Unified 3D Articulated Animated WebP mascot "OXORA Buddy" (100% parity with Cloud Web).
 /// Perched free-floating directly above the chat card with transparent RGBA background:
 /// 1. greeting -> `buddy_greeting.webp` (full-body bear waving right arm -> auto-settle to idle)
 /// 2. idle/guiding/guard -> `buddy_idle.webp` (half-body peeking, 2.5D gaze left/right, blinking eyes)
@@ -1191,7 +1191,7 @@ class _NusaBuddyMascotState extends State<_NusaBuddyMascot>
       onTap: _triggerPoke,
       behavior: HitTestBehavior.translucent,
       child: Semantics(
-        label: 'OXO Buddy (${widget.state})',
+        label: 'OXORA Buddy (${widget.state})',
         child: AnimatedBuilder(
           animation: Listenable.merge([_greetingCtrl, _pokeCtrl]),
           builder: (ctx, child) {

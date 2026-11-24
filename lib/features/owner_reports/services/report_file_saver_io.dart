@@ -8,7 +8,7 @@ Future<String?> saveReportExportBytesImpl({
 }) async {
   try {
     final dir = await getApplicationDocumentsDirectory();
-    final exportDir = Directory(p.join(dir.path, 'oxo_reports'));
+    final exportDir = Directory(p.join(dir.path, 'oxora_reports'));
     if (!await exportDir.exists()) {
       await exportDir.create(recursive: true);
     }

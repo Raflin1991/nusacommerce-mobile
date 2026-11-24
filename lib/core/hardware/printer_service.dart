@@ -595,7 +595,7 @@ class PrinterService {
     final width = activeWidth == '80mm' ? 46 : 32;
     final divider = '-' * width;
     final doubleDivider = '=' * width;
-    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXORA POS').toString().toUpperCase();
     final deviceLabel = connectedPrinter?.name ?? 'Printer ($activeWidth)';
     final macLabel = connectedPrinter?.macAddress ?? savedMacAddress ?? '-';
 
@@ -647,7 +647,7 @@ class PrinterService {
     final divider = '-' * width;
     final doubleDivider = '=' * width;
 
-    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXORA POS').toString().toUpperCase();
     final storeAddress = (storeProfile['address'] ?? '-').toString();
     final storePhone = (storeProfile['phone'] ?? '-').toString();
     final footer = (storeProfile['receipt_footer'] ?? 'Terima kasih atas kunjungan Anda!').toString();
@@ -795,7 +795,7 @@ class PrinterService {
     }
     sb.writeln(doubleDivider);
     sb.writeln(_center(footer, width));
-    sb.writeln(_center('Powered by OXO.ID Cloud', width));
+    sb.writeln(_center('Powered by OXORA Cloud', width));
 
     return sb.toString();
   }
@@ -839,7 +839,7 @@ class PrinterService {
     final width = activeWidth == '80mm' ? 46 : 32;
     final divider = '-' * width;
     final doubleDivider = '=' * width;
-    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXORA POS').toString().toUpperCase();
     final variance = countedCash - expectedCash;
 
     final sb = StringBuffer();
@@ -862,7 +862,7 @@ class PrinterService {
       sb.writeln('Catatan: ${notes.trim()}');
     }
     sb.writeln(doubleDivider);
-    sb.writeln(_center('Powered by OXO.ID Cloud', width));
+    sb.writeln(_center('Powered by OXORA Cloud', width));
     return sb.toString();
   }
 
@@ -883,7 +883,7 @@ class PrinterService {
     final width = activeWidth == '80mm' ? 46 : 32;
     final divider = '-' * width;
     final doubleDivider = '=' * width;
-    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString().toUpperCase();
+    final storeName = (storeProfile['name'] ?? 'OXORA POS').toString().toUpperCase();
     final isReceivable = type == 'receivable';
     final title = isReceivable ? '*** KWITANSI PIUTANG ***' : '*** BUKTI BAYAR HUTANG ***';
     final statusText = remainingBalance <= 0 ? 'LUNAS' : 'CICILAN / SEBAGIAN';

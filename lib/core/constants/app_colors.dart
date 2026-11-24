@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// OXO.ID Official Enterprise Color Palette & CDO Warm Linen Design Tokens
+/// OXORA Official Enterprise Color Palette & CDO Warm Linen Design Tokens
 /// Synchronized 1:1 with `resources/css/tokens.css` (Gelombang 5 Mobile Parity).
 class AppColors {
   AppColors._();

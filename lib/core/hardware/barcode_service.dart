@@ -1,4 +1,4 @@
-/// Smart Barcode & Digital Scale Prefix 20/21 Parser for OXO.ID POS
+/// Smart Barcode & Digital Scale Prefix 20/21 Parser for OXORA POS
 class ParsedBarcodeResult {
   final String rawBarcode;
   final bool isWeightScaleBarcode;

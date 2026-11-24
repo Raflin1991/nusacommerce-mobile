@@ -24,11 +24,11 @@ import '../../copilot/presentation/nusa_copilot_sheet.dart';
 import '../../notifications/presentation/alert_notifications_modal.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
-/// LAYAR 2 — PUSAT KENDALI OPERASIONAL ROLE-ADAPTIVE OXO.ID (Gelombang 5)
+/// LAYAR 2 — PUSAT KENDALI OPERASIONAL ROLE-ADAPTIVE OXORA (Gelombang 5)
 /// - Role-Adaptive Workspaces: Owner Pulse, Manager Desk, POS Fast-Lane, Warehouse Workbench, ESS & HR
 /// - Parallel API Fetch (`Future.wait`) eliminating 5-call serial waterfall
 /// - Shimmer Skeleton Loading + CDO Warm Linen (Light / Dark / High-Contrast Outdoor POS)
-/// - OXO Copilot Mobile AI trigger + Inline Modal Error Guard
+/// - OXORA Copilot Mobile AI trigger + Inline Modal Error Guard
 class HomeDashboardScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
   final ValueChanged<int> onSwitchTab;
@@ -811,7 +811,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     final isOutdoor = tokens.isHighContrast;
     final canCustomers = MobileWorkspaceResolver.canViewCustomers(session);
     final storeName = session.activeStore.name.isEmpty
-        ? 'OXO.ID POS'
+        ? 'OXORA POS'
         : session.activeStore.name;
 
     return Column(
@@ -1244,7 +1244,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Administrasi HRD, absensi, slip gaji, PPh 21 & BPJS dikelola secara terpusat di OXO.ID Cloud Web (/admin).',
+                'Administrasi HRD, absensi, slip gaji, PPh 21 & BPJS dikelola secara terpusat di OXORA Cloud Web (/admin).',
                 style: TextStyle(color: Colors.white70, fontSize: 12),
               ),
               if (canApprovals) ...[
@@ -1432,7 +1432,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Tanya OXO Copilot AI (Chat & Suara)',
+                  'Tanya OXORA Copilot AI (Chat & Suara)',
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w800,
@@ -1493,7 +1493,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           varianceShiftsCount: _varianceShiftsCount,
           overdueReceivables: _overdueReceivables,
           storeName: session.activeStore.name.isEmpty
-              ? 'OXO.ID POS'
+              ? 'OXORA POS'
               : session.activeStore.name,
           approvals: _approvalsList,
           tasks: _tasksList,
@@ -1645,7 +1645,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     List<Map<String, dynamic>> mergedConflicts,
   ) {
     final storeName = session.activeStore.name.isEmpty
-        ? 'OXO.ID POS'
+        ? 'OXORA POS'
         : session.activeStore.name;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1706,7 +1706,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             const SizedBox(width: 4),
             IconButton(
               key: const Key('home_copilot_button'),
-              tooltip: 'OXO Copilot AI',
+              tooltip: 'OXORA Copilot AI',
               visualDensity: VisualDensity.compact,
               onPressed: () => _openCopilot(session),
               icon: Icon(Icons.auto_awesome_rounded, size: 21, color: tokens.accent),
@@ -3169,7 +3169,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Cadangkan ke OXO Cloud agar aman jika HP ganti atau rusak.',
+                      'Cadangkan ke OXORA Cloud agar aman jika HP ganti atau rusak.',
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,

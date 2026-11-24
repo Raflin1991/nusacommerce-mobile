@@ -2788,7 +2788,7 @@ class PosCubit extends Cubit<PosState> {
         data: {
           if (reasonCodeId != null) 'reason_code_id': reasonCodeId,
           'restock': true,
-          'notes': notes ?? 'Retur Pelanggan via OXO.ID Mobile POS',
+          'notes': notes ?? 'Retur Pelanggan via OXORA Mobile POS',
         },
       );
     } catch (_) {}
@@ -2973,7 +2973,7 @@ class PosCubit extends Cubit<PosState> {
   Future<({bool ok, bool syncedToCloud, String? errorMessage})> saveProductInventory(
     ProductModel product, {
     bool isNew = false,
-    String notes = 'Stock Opname via OXO.ID Mobile POS',
+    String notes = 'Stock Opname via OXORA Mobile POS',
   }) async {
     final bool isBrandNew =
         isNew || product.isLocalOnly || product.id <= 0 || product.id > 1000000000;
@@ -3246,7 +3246,7 @@ class PosCubit extends Cubit<PosState> {
     return {'success': true, 'offline': true};
   }
 
-  /// One-Click Local-to-Cloud Data Migration when upgrading Standalone Mode to OXO Cloud
+  /// One-Click Local-to-Cloud Data Migration when upgrading Standalone Mode to OXORA Cloud
   Future<Map<String, int>> migrateLocalStandaloneDataToCloud() async {
     int uploadedProducts = 0;
     int uploadedCustomers = 0;

@@ -14,7 +14,7 @@ import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
 
 /// LAYAR 7 — DATA BARANG & STOK (TAB 3 NAVIGASI)
-/// OXO.ID Mobile Enterprise Inventory & Stock Opname Screen
+/// OXORA Mobile Enterprise Inventory & Stock Opname Screen
 class ProductsInventoryScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
 

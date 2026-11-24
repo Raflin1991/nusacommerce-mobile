@@ -131,8 +131,8 @@ class _OperationalRadarSheetState extends State<_OperationalRadarSheet> {
       cloudConflictId,
       resolution: resolution,
       notes: resolution == 'keep_offline'
-          ? 'Disetujui fakta transaksi cabang via OXO Mobile POS'
-          : 'Menggunakan snapshot Cloud via OXO Mobile POS',
+          ? 'Disetujui fakta transaksi cabang via OXORA Mobile POS'
+          : 'Menggunakan snapshot Cloud via OXORA Mobile POS',
     );
     if (!mounted) return;
     setState(() {

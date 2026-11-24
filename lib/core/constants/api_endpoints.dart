@@ -1,5 +1,5 @@
-/// Complete REST API v1 Endpoints for OXO.ID Cloud Multi-Tenant Gateway
-/// Matches routes/api.php in OXO.ID Cloud Laravel Backend.
+/// Complete REST API v1 Endpoints for OXORA Cloud Multi-Tenant Gateway
+/// Matches routes/api.php in OXORA Cloud Laravel Backend.
 class ApiEndpoints {
   ApiEndpoints._();
 
@@ -121,7 +121,7 @@ class ApiEndpoints {
   static const String hrEmployees = '/hr/employees';
   static const String hrClock = '/hr/attendance/clock';
 
-  // 9. Autonomous Branch Edge (OXO Edge LAN & Cloud Sync)
+  // 9. Autonomous Branch Edge (OXORA Edge LAN & Cloud Sync)
   static const String edgeHealth = '/edge/health';
   static const String edgeHeartbeat = '/edge/lease/heartbeat';
   static const String edgeSyncPush = '/edge/sync/push';

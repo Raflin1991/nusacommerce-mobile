@@ -69,13 +69,13 @@ class _FixedConnectivityService extends NetworkConnectivityService {
 AuthSessionModel _ownerSession() {
   return const AuthSessionModel(
     userId: 10,
-    userName: 'Owner OXO',
-    userEmail: 'owner@oxo.test',
+    userName: 'Owner OXORA',
+    userEmail: 'owner@oxora.test',
     userRole: 'Pemilik Usaha',
     isOwner: true,
     permissions: ['*'],
-    tenantName: 'Toko OXO Jaya',
-    tenantSubdomain: 'oxojaya',
+    tenantName: 'Toko OXORA Jaya',
+    tenantSubdomain: 'oxorajaya',
     planName: 'Enterprise',
     tier: 'enterprise',
     activeStore: StoreBranchModel(id: 1, name: 'Cabang Pusat', code: 'HQ-01'),
@@ -123,7 +123,7 @@ void main() {
       const cashierOnly = AuthSessionModel(
         userId: 2,
         userName: 'Kasir',
-        userEmail: 'kasir@oxo.test',
+        userEmail: 'kasir@oxora.test',
         userRole: 'Cashier',
         isOwner: false,
         permissions: ['reports.view_sales'],
@@ -234,7 +234,7 @@ void main() {
         isOfflineData: true,
         lastSyncLabel: salesPayload.lastSyncLabel,
       );
-      expect(waText, contains('OXO.ID'));
+      expect(waText, contains('OXORA'));
       expect(waText, contains('Cabang Pusat'));
       expect(waText, contains('Data Offline'));
 
@@ -579,7 +579,7 @@ void main() {
                     'status': 'pending',
                     'amount': 500000,
                     'reason': 'Kirim stok ke Cabang Selatan',
-                    'requested_by': 'Owner OXO',
+                    'requested_by': 'Owner OXORA',
                     'requested_by_id': 10, // Same as owner session userId -> Maker-Checker SoD guard
                     'created_at': '2026-11-22T10:00:00+07:00',
                   },

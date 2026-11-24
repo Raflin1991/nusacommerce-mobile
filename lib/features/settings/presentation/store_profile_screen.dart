@@ -6,7 +6,7 @@ import '../../../core/database/offline_database.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../auth/bloc/auth_cubit.dart';
 
-/// LAYAR 10 — PROFIL TOKO & HEADER STRUK OXO.ID
+/// LAYAR 10 — PROFIL TOKO & HEADER STRUK OXORA
 class StoreProfileScreen extends StatefulWidget {
   final OfflineDatabase offlineDb;
 
@@ -35,7 +35,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
 
     final fallbackName = session.tenantName.trim().isNotEmpty
         ? session.tenantName.trim()
-        : (session.activeStore.name.trim().isNotEmpty ? session.activeStore.name.trim() : 'OXO.ID POS');
+        : (session.activeStore.name.trim().isNotEmpty ? session.activeStore.name.trim() : 'OXORA POS');
     final fallbackAddress = (session.activeStore.address ?? '').trim().isNotEmpty
         ? session.activeStore.address!.trim()
         : '-';
@@ -44,7 +44,7 @@ class _StoreProfileScreenState extends State<StoreProfileScreen> {
         : '-';
 
     _nameController = TextEditingController(
-      text: (storedName.isEmpty || storedName == 'NusaCommerce POS' || storedName == 'OXO.ID POS') ? fallbackName : storedName,
+      text: (storedName.isEmpty || storedName == 'NusaCommerce POS' || storedName == 'OXO.ID POS' || storedName == 'OXORA POS') ? fallbackName : storedName,
     );
     _addressController = TextEditingController(
       text: (storedAddress.isEmpty || storedAddress == '-') ? fallbackAddress : storedAddress,

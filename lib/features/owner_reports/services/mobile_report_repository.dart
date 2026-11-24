@@ -220,7 +220,7 @@ class MobileReportRepository {
       throw const MobileReportApiException('File PDF dari server kosong.');
     }
     final ts = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
-    final filename = 'oxo_${definition.id}_$ts.pdf';
+    final filename = 'oxora_${definition.id}_$ts.pdf';
     final path = await saveReportExportBytes(filename: filename, bytes: bytes);
     return MobileReportExportResult(
       filename: filename,
@@ -238,7 +238,7 @@ class MobileReportRepository {
         : buildCsvFromPayload(payload);
     final bomBytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(csv)];
     final ts = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
-    final filename = 'oxo_${payload.reportId}_$ts.csv';
+    final filename = 'oxora_${payload.reportId}_$ts.csv';
     final path = await saveReportExportBytes(filename: filename, bytes: bomBytes);
     return MobileReportExportResult(
       filename: filename,
@@ -301,7 +301,7 @@ class MobileReportRepository {
     String? lastSyncLabel,
   }) {
     final buf = StringBuffer();
-    buf.writeln('📊 *${definition.title.toUpperCase()} — OXO.ID*');
+    buf.writeln('📊 *${definition.title.toUpperCase()} — OXORA*');
     buf.writeln('🏪 Cabang: $storeLabel');
     buf.writeln('📅 Periode: $periodLabel');
     if (isOfflineData && lastSyncLabel != null) {
@@ -337,7 +337,7 @@ class MobileReportRepository {
     }
 
     buf.writeln('━━━━━━━━━━━━━━━━━━━━');
-    buf.writeln('_Dikirim dari OXO.ID Mobile BI Center_');
+    buf.writeln('_Dikirim dari OXORA Mobile BI Center_');
     return buf.toString();
   }
 
@@ -1304,7 +1304,7 @@ class MobileReportRepository {
 
       default:
         offlineNotice =
-            'Laporan "${definition.title}" membutuhkan agregasi langsung dari server OXO.ID Cloud (Buku Besar / Multi-Cabang / Pajak). Hubungkan perangkat ke internet atau LAN Edge untuk menarik data lengkap.';
+            'Laporan "${definition.title}" membutuhkan agregasi langsung dari server OXORA Cloud (Buku Besar / Multi-Cabang / Pajak). Hubungkan perangkat ke internet atau LAN Edge untuk menarik data lengkap.';
         kpis = [
           MobileReportKpi(
             label: 'Omzet Lokal Tersimpan',

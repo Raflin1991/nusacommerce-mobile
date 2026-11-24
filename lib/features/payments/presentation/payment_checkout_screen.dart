@@ -43,7 +43,7 @@ class _MultiTenderLine {
 }
 
 /// LAYAR 4 — PEMBAYARAN / CHECKOUT SCREEN
-/// OXO.ID Mobile Enterprise Payment Checkout Screen
+/// OXORA Mobile Enterprise Payment Checkout Screen
 class PaymentCheckoutScreen extends StatefulWidget {
   final OfflineDatabase offlineDb;
 
@@ -1028,7 +1028,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          'QRIS Dinamis OXO.ID',
+                          'QRIS Dinamis OXORA',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: tokens.textPrimary),
@@ -1677,7 +1677,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'QRIS $_qrisType OXO.ID',
+                                  'QRIS $_qrisType OXORA',
                                   style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
                                 ),
                                 Text(

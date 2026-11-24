@@ -14,7 +14,7 @@ import '../../auth/bloc/auth_cubit.dart';
 import '../../auth/presentation/cloud_upgrade_sheet.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
-/// LAYAR 9 — PENGATURAN SISTEM OXO.ID (TAB 5 NAVIGASI)
+/// LAYAR 9 — PENGATURAN SISTEM OXORA (TAB 5 NAVIGASI)
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -159,7 +159,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Server Cloud, OXO Edge & Kode Terminal',
+                'Server Cloud, OXORA Edge & Kode Terminal',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
@@ -179,7 +179,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextField(
                 controller: edgeUrlCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'URL OXO Edge LAN Cabang (Opsional)',
+                  labelText: 'URL OXORA Edge LAN Cabang (Opsional)',
                   hintText: 'http://192.168.1.10/api/v1',
                   prefixIcon: Icon(Icons.router_outlined),
                 ),
@@ -1061,7 +1061,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'OXO.ID Mobile',
+                'OXORA Mobile',
                 style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
               ),
             ),
@@ -1085,7 +1085,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text('Status Cloud: ${posState.isOnline ? 'Online & Sinkron' : 'Mode Offline Aman'}', style: const TextStyle(fontSize: 12.5)),
             const SizedBox(height: 10),
             const Text(
-              'Platform Kasir POS Offline-First, Operasional Toko & 50 Laporan Bisnis oleh OXO.ID.',
+              'Platform Kasir POS Offline-First, Operasional Toko & 50 Laporan Bisnis oleh OXORA.',
               style: TextStyle(fontSize: 11.5, color: AppColors.slate500),
             ),
           ],
@@ -1109,7 +1109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           content: Text(
             syncedCount > 0
                 ? '$syncedCount item offline berhasil disinkronkan ke Cloud!'
-                : 'Seluruh data usaha sudah 100% tersinkronisasi dengan OXO Cloud.',
+                : 'Seluruh data usaha sudah 100% tersinkronisasi dengan OXORA Cloud.',
           ),
         ),
       );
@@ -1702,11 +1702,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final posState = context.watch<PosCubit>().state;
     final offlinePending = posState.offlinePendingCount;
     final displayName = session.userName.trim().isEmpty
-        ? 'Pengguna OXO.ID'
+        ? 'Pengguna OXORA'
         : session.userName.trim();
     final tenantLabel = session.isLocalTrial
         ? 'Mode Toko Mandiri (Offline Lokal)'
-        : (session.tenantName.trim().isEmpty ? 'OXO.ID' : session.tenantName.trim());
+        : (session.tenantName.trim().isEmpty ? 'OXORA' : session.tenantName.trim());
 
     return Scaffold(
       backgroundColor: tokens.bgPage,
@@ -1807,7 +1807,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Upgrade & Cadangkan ke OXO Cloud',
+                                'Upgrade & Cadangkan ke OXORA Cloud',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w800,
@@ -1962,9 +1962,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       showDialog(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Pusat Bantuan OXO.ID'),
+                          title: const Text('Pusat Bantuan OXORA'),
                           content: const Text(
-                            'Aplikasi ini terhubung otomatis ke OXO Cloud Multi-Tenant.\n\n'
+                            'Aplikasi ini terhubung otomatis ke OXORA Cloud Multi-Tenant.\n\n'
                             '• Scan Barcode mendukung EAN-13 & Timbangan Digital Prefix 20/21.\n'
                             '• Saat internet terputus, transaksi tetap tersimpan aman di memori perangkat.',
                           ),
@@ -1979,7 +1979,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSettingsTile(
                     tokens,
                     icon: Icons.info_outline_rounded,
-                    title: 'Tentang OXO.ID Mobile',
+                    title: 'Tentang OXORA Mobile',
                     subtitle: 'Versi 2.0.0 Enterprise',
                     onTap: () => _showAboutDialog(context, posState),
                   ),

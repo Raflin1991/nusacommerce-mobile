@@ -10,7 +10,7 @@ import '../../../core/widgets/nusa_widgets.dart';
 import '../../pos/bloc/pos_cubit.dart';
 
 /// LAYAR 6 — RIWAYAT TRANSAKSI (TAB 2 NAVIGASI)
-/// OXO.ID Mobile Enterprise Sales History Screen
+/// OXORA Mobile Enterprise Sales History Screen
 class TransactionsHistoryScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
 

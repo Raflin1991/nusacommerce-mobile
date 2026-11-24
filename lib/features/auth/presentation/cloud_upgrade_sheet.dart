@@ -78,7 +78,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
       setState(() {
         _submitting = false;
         _localError = authCubit.state.errorMessage ??
-            'Gagal terhubung ke OXO Cloud. Data lokal Anda tetap aman di perangkat.';
+            'Gagal terhubung ke OXORA Cloud. Data lokal Anda tetap aman di perangkat.';
       });
       return;
     }
@@ -142,7 +142,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Hubungkan ke OXO Cloud',
+                          'Hubungkan ke OXORA Cloud',
                           style: TextStyle(
                             fontSize: 16.5,
                             fontWeight: FontWeight.w800,
@@ -229,7 +229,7 @@ class _CloudMigrationSheetBodyState extends State<_CloudMigrationSheetBody> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
-                  labelText: 'Email Akun OXO.ID *',
+                  labelText: 'Email Akun OXORA *',
                   prefixIcon: Icon(Icons.email_outlined),
                 ),
               ),

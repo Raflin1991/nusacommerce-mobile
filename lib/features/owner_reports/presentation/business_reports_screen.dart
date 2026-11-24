@@ -352,7 +352,7 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
 
   Future<void> _shareExecutiveWhatsApp() async {
     final storeProfile = _offlineDb.getStoreProfile();
-    final storeName = (storeProfile['name'] ?? 'OXO.ID POS').toString();
+    final storeName = (storeProfile['name'] ?? 'OXORA POS').toString();
     final branchLabel = _currentStoreLabel();
     final syncTag = _isOfflineMode
         ? '\n📡 _Data Offline (Sinkronisasi Terakhir: ${_repo.formatLastSyncLabel(isLocalTrial: context.read<AuthCubit>().state.session.isLocalTrial)})_'
@@ -370,7 +370,7 @@ class _BusinessReportsScreenState extends State<BusinessReportsScreen> {
         '📦 Hutang Supplier: ${IdrCurrencyFormatter.format(_payablesTotal)}\n'
         '🛡️ Audit Kasir: Void $_voidCount | Refund $_refundCount | Selisih Shift $_varianceShiftsCount\n'
         '━━━━━━━━━━━━━━━━━━━━\n'
-        '_Dikirim dari OXO.ID Mobile BI (50 Laporan)_';
+        '_Dikirim dari OXORA Mobile BI (50 Laporan)_';
 
     await Clipboard.setData(ClipboardData(text: message));
     final launched = await WhatsAppService.shareToAnyChat(text: message);
@@ -1638,7 +1638,7 @@ class _AiCopilotSheetState extends State<_AiCopilotSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'OXO.ID AI Copilot',
+                            'OXORA AI Copilot',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
