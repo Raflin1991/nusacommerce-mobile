@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -13,6 +12,7 @@ import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
+import '../../../core/network/repositories/sale_repository.dart';
 
 /// SURAT PENAWARAN HARGA (QUOTATIONS) & 1-KLIK LANJUT KE KASIR POS
 class QuotationsScreen extends StatefulWidget {
@@ -23,7 +23,7 @@ class QuotationsScreen extends StatefulWidget {
 }
 
 class _QuotationsScreenState extends State<QuotationsScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final SaleRepository _saleRepo = SaleRepository.resolve();
   final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
 
   bool _loading = true;
@@ -42,7 +42,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
     var local = _offlineDb.getLocalQuotations();
     if (!_isLocalStandalone) {
       try {
-        final res = await _api.dio.get(ApiEndpoints.quotations);
+        final res = await _saleRepo.fetchQuotations();
         final raw = res.data['data'] as List<dynamic>?;
         if (raw != null) {
           local = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -266,7 +266,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                             bool cloudOk = false;
                             if (!_isLocalStandalone) {
                               try {
-                                await _api.dio.post(ApiEndpoints.quotations, data: {
+                                await _saleRepo.createQuotation({
                                   if (custId != null && custId > 0) 'customer_id': custId,
                                   'customer_name': custName,
                                   'valid_until': validUntil,

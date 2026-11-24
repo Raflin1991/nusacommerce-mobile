@@ -8,9 +8,17 @@ import 'core/database/offline_database.dart';
 import 'core/hardware/printer_service.dart';
 import 'core/network/api_client.dart';
 import 'core/network/network_connectivity_service.dart';
+import 'core/network/repositories/backoffice_repository.dart';
+import 'core/network/repositories/product_repository.dart';
+import 'core/network/repositories/restaurant_table_repository.dart';
+import 'core/network/repositories/sale_repository.dart';
 import 'core/theme/theme_cubit.dart';
 import 'features/auth/bloc/auth_cubit.dart';
+import 'features/pos/bloc/cart_cubit.dart';
+import 'features/pos/bloc/catalog_cubit.dart';
 import 'features/pos/bloc/pos_cubit.dart';
+import 'features/pos/bloc/restaurant_table_cubit.dart';
+import 'features/pos/bloc/sync_cubit.dart';
 
 final GetIt sl = GetIt.instance;
 
@@ -54,11 +62,20 @@ Future<void> main() async {
   final printerService = PrinterService();
   await printerService.initialize(prefs);
 
+  final productRepo = ProductRepository(apiClient);
+  final saleRepo = SaleRepository(apiClient);
+  final tableRepo = RestaurantTableRepository(apiClient);
+  final backofficeRepo = BackofficeRepository(apiClient);
+
   sl.registerSingleton<SharedPreferences>(prefs);
   sl.registerSingleton<OfflineDatabase>(offlineDb);
   sl.registerSingleton<ApiClient>(apiClient);
   sl.registerSingleton<NetworkConnectivityService>(connectivityService);
   sl.registerSingleton<PrinterService>(printerService);
+  sl.registerSingleton<ProductRepository>(productRepo);
+  sl.registerSingleton<SaleRepository>(saleRepo);
+  sl.registerSingleton<RestaurantTableRepository>(tableRepo);
+  sl.registerSingleton<BackofficeRepository>(backofficeRepo);
 
   final authCubit = AuthCubit(apiClient: apiClient, offlineDb: offlineDb);
   final posCubit = PosCubit(
@@ -66,10 +83,18 @@ Future<void> main() async {
     offlineDb: offlineDb,
     connectivityService: connectivityService,
   );
+  final catalogCubit = CatalogCubit(posCubit: posCubit, productRepository: productRepo);
+  final cartCubit = CartCubit(posCubit: posCubit, saleRepository: saleRepo);
+  final syncCubit = SyncCubit(posCubit: posCubit, offlineDb: offlineDb);
+  final tableCubit = RestaurantTableCubit(repository: tableRepo);
   final themeCubit = ThemeCubit(prefs: prefs);
 
   sl.registerSingleton<AuthCubit>(authCubit);
   sl.registerSingleton<PosCubit>(posCubit);
+  sl.registerSingleton<CatalogCubit>(catalogCubit);
+  sl.registerSingleton<CartCubit>(cartCubit);
+  sl.registerSingleton<SyncCubit>(syncCubit);
+  sl.registerSingleton<RestaurantTableCubit>(tableCubit);
   sl.registerSingleton<ThemeCubit>(themeCubit);
 
   // Bootstrap Session & local SQLite catalog immediately without blocking offline cold start

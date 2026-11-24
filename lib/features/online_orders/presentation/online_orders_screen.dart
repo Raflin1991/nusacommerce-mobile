@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -9,6 +7,7 @@ import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../../core/network/repositories/sale_repository.dart';
 
 /// PESANAN TOKO ONLINE (WEBSTORE ORDERS + NO. RESI + STATUS PEMENUHAN)
 class OnlineOrdersScreen extends StatefulWidget {
@@ -19,7 +18,7 @@ class OnlineOrdersScreen extends StatefulWidget {
 }
 
 class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final SaleRepository _saleRepo = SaleRepository.resolve();
 
   bool _loading = true;
   String _statusFilter = 'all';
@@ -43,10 +42,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
     }
 
     try {
-      final res = await _api.dio.get(
-        ApiEndpoints.onlineOrders,
-        queryParameters: _statusFilter == 'all' ? null : {'online_order_status': _statusFilter},
-      );
+      final res = await _saleRepo.fetchOnlineOrders(statusFilter: _statusFilter);
       final raw = res.data['data'] as List<dynamic>?;
       if (!mounted) return;
       setState(() {
@@ -164,7 +160,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                           modalError = null;
                         });
                         try {
-                          await _api.dio.post(ApiEndpoints.updateOnlineOrderStatus(id), data: {
+                          await _saleRepo.updateOnlineOrderStatus(id, {
                             'online_order_status': nextStatus,
                             if (resiCtrl.text.trim().isNotEmpty)
                               'shipping_tracking_number': resiCtrl.text.trim(),

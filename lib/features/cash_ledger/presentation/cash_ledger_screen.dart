@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -9,6 +8,7 @@ import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../../core/network/repositories/backoffice_repository.dart';
 
 /// BUKU KAS & ARUS KAS HARIAN (TUNAI LACI vs REKENING BANK / QRIS)
 class CashLedgerScreen extends StatefulWidget {
@@ -19,7 +19,7 @@ class CashLedgerScreen extends StatefulWidget {
 }
 
 class _CashLedgerScreenState extends State<CashLedgerScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final BackofficeRepository _repo = BackofficeRepository.resolve();
   final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
 
   bool _loading = true;
@@ -41,10 +41,7 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
 
     if (!_isLocalStandalone) {
       try {
-        final res = await _api.dio.get(
-          ApiEndpoints.cashLedger,
-          queryParameters: {'channel': _channel},
-        );
+        final res = await _repo.fetchCashLedger(channel: _channel);
         final data = res.data['data'];
         if (data is Map) {
           if (!mounted) return;
@@ -191,7 +188,7 @@ class _CashLedgerScreenState extends State<CashLedgerScreen> {
                         bool cloudOk = false;
                         if (!_isLocalStandalone) {
                           try {
-                            await _api.dio.post(ApiEndpoints.cashLedger, data: {
+                            await _repo.recordCashLedgerEntry({
                               'type': direction == 'in' ? 'pay_in' : 'pay_out',
                               'category': channel == 'non_cash' ? 'bank_deposit' : 'other',
                               'reason': notesCtrl.text.trim().isNotEmpty

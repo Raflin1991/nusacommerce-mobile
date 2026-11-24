@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/hardware/printer_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../pos/bloc/pos_cubit.dart';
+import '../../../core/network/repositories/restaurant_table_repository.dart';
 
 /// MODUL RESTORAN & F&B — DENAH MEJA (Live API Bound — `PRD-07`)
 class RestaurantTablesScreen extends StatefulWidget {
@@ -21,7 +20,7 @@ class RestaurantTablesScreen extends StatefulWidget {
 }
 
 class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final RestaurantTableRepository _tableRepo = RestaurantTableRepository.resolve();
 
   String _selectedSection = 'Semua';
   bool _loading = true;
@@ -41,10 +40,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
     });
 
     try {
-      final res = await _api.dio.get(ApiEndpoints.restaurantTables);
-      final raw = (res.data['data'] as List<dynamic>? ?? [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      final raw = await _tableRepo.getTables();
 
       if (!mounted) return;
       setState(() {
@@ -66,10 +62,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
 
     if (status == 'available') {
       try {
-        await _api.dio.post(
-          ApiEndpoints.openTable(tableId),
-          data: {'pax': (table['capacity'] as num?)?.toInt() ?? 2},
-        );
+        await _tableRepo.openTable(tableId, pax: (table['capacity'] as num?)?.toInt() ?? 2);
         await _loadTables();
       } catch (e) {
         if (!mounted) return;
@@ -156,10 +149,7 @@ class _RestaurantTablesScreenState extends State<RestaurantTablesScreen> {
                           modalError = null;
                         });
                         try {
-                          await _api.dio.post(
-                            ApiEndpoints.transferTable(sourceId),
-                            data: {'destination_table_id': destId},
-                          );
+                          await _tableRepo.transferTable(sourceId, destId!);
                           if (ctx.mounted) Navigator.pop(ctx);
                           await _loadTables();
                         } catch (e) {

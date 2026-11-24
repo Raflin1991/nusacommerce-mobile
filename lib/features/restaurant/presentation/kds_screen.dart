@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
-import '../../../core/constants/api_endpoints.dart';
-import '../../../core/network/api_client.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../pos/bloc/pos_cubit.dart';
 import '../../pos/models/pos_models.dart';
+import '../../../core/network/repositories/restaurant_table_repository.dart';
 
 /// KITCHEN DISPLAY SYSTEM (KDS DAPUR RESTORAN & F&B)
 /// Menampilkan antrian tiket dapur: Menunggu -> Sedang Dimasak -> Siap Saji.
@@ -19,7 +17,7 @@ class KdsScreen extends StatefulWidget {
 }
 
 class _KdsScreenState extends State<KdsScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final RestaurantTableRepository _tableRepo = RestaurantTableRepository.resolve();
   bool _loading = true;
   String _tabStatus = 'all'; // all, pending, cooking, ready
   List<Map<String, dynamic>> _tickets = [];
@@ -36,16 +34,13 @@ class _KdsScreenState extends State<KdsScreen> {
     setState(() => _loading = true);
     if (!_isLocalStandalone) {
       try {
-        final res = await _api.dio.get(ApiEndpoints.kdsQueue);
-        final raw = res.data['data'] as List<dynamic>?;
-        if (raw != null) {
-          if (!mounted) return;
-          setState(() {
-            _tickets = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-            _loading = false;
-          });
-          return;
-        }
+        final raw = await _tableRepo.getKdsQueue();
+        if (!mounted) return;
+        setState(() {
+          _tickets = raw;
+          _loading = false;
+        });
+        return;
       } catch (_) {}
     }
 
@@ -90,10 +85,7 @@ class _KdsScreenState extends State<KdsScreen> {
     });
     if (!_isLocalStandalone && id > 0) {
       try {
-        await _api.dio.post(
-          ApiEndpoints.updateKdsStatus(id),
-          data: {'kitchen_status': nextStatus},
-        );
+        await _tableRepo.updateKdsStatus(id, nextStatus);
       } catch (_) {}
     }
   }

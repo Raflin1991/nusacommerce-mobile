@@ -163,7 +163,7 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
 
     if (!isLocalTrial && custId > 0) {
       try {
-        final res = await _api.dio.get(ApiEndpoints.customerStatement(custId));
+        final res = await _repo.fetchCustomerStatement(custId);
         final data = res.data['data'];
         if (data is Map) {
           final rawEntries = data['entries'] as List<dynamic>?;
@@ -307,7 +307,7 @@ extension _CustomerParityModalsExt on _CustomerListScreenState {
               Navigator.pop(ctx);
               if (!isLocalTrial && custId > 0) {
                 try {
-                  await _api.dio.post(ApiEndpoints.customerStoreCreditTopup(custId), data: {
+                  await _repo.topupCustomerStoreCredit(custId, {
                     'amount': amt,
                     'notes': notesCtrl.text.trim(),
                   });

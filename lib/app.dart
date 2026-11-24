@@ -5,11 +5,18 @@ import 'package:go_router/go_router.dart';
 import 'core/database/offline_database.dart';
 import 'core/hardware/printer_service.dart';
 import 'core/network/api_client.dart';
+import 'core/network/repositories/product_repository.dart';
+import 'core/network/repositories/restaurant_table_repository.dart';
+import 'core/network/repositories/sale_repository.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/nusa_theme_tokens.dart';
 import 'core/theme/theme_cubit.dart';
 import 'features/approvals/presentation/owner_approvals_screen.dart';
 import 'features/auth/bloc/auth_cubit.dart';
+import 'features/pos/bloc/cart_cubit.dart';
+import 'features/pos/bloc/catalog_cubit.dart';
+import 'features/pos/bloc/restaurant_table_cubit.dart';
+import 'features/pos/bloc/sync_cubit.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/splash_welcome_screen.dart';
 import 'features/cash_ledger/presentation/cash_ledger_screen.dart';
@@ -244,6 +251,29 @@ class _NusaCommerceMobileAppState extends State<NusaCommerceMobileApp> {
       providers: [
         BlocProvider<AuthCubit>.value(value: widget.authCubit),
         BlocProvider<PosCubit>.value(value: widget.posCubit),
+        BlocProvider<CatalogCubit>(
+          create: (_) => CatalogCubit(
+            posCubit: widget.posCubit,
+            productRepository: ProductRepository.resolve(widget.apiClient),
+          ),
+        ),
+        BlocProvider<CartCubit>(
+          create: (_) => CartCubit(
+            posCubit: widget.posCubit,
+            saleRepository: SaleRepository.resolve(widget.apiClient),
+          ),
+        ),
+        BlocProvider<SyncCubit>(
+          create: (_) => SyncCubit(
+            posCubit: widget.posCubit,
+            offlineDb: widget.offlineDb,
+          ),
+        ),
+        BlocProvider<RestaurantTableCubit>(
+          create: (_) => RestaurantTableCubit(
+            repository: RestaurantTableRepository.resolve(widget.apiClient),
+          ),
+        ),
         BlocProvider<ThemeCubit>.value(value: _effectiveThemeCubit),
       ],
       child: BlocBuilder<ThemeCubit, NusaThemeMode>(

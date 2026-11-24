@@ -138,7 +138,7 @@ void main() {
 
       expect(cubit.state, NusaThemeMode.warmLinenLight);
       expect(NusaThemeTokens.warmLinenLight.bgPage, const Color(0xFFFAF8F5));
-      expect(NusaThemeTokens.warmLinenLight.accent, const Color(0xFFEA580C));
+      expect(NusaThemeTokens.warmLinenLight.accent, const Color(0xFFF97316));
 
       await cubit.setThemeMode(NusaThemeMode.warmLinenDark);
       expect(cubit.state, NusaThemeMode.warmLinenDark);

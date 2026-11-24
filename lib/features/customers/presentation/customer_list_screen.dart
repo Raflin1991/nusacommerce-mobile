@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/database/offline_database.dart';
 import '../../../core/hardware/whatsapp_service.dart';
 import '../../../core/network/api_client.dart';
@@ -11,6 +10,7 @@ import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../auth/bloc/auth_cubit.dart';
 import '../../pos/bloc/pos_cubit.dart';
+import '../../../core/network/repositories/backoffice_repository.dart';
 
 part 'customer_parity_modals.dart';
 
@@ -25,7 +25,7 @@ class CustomerListScreen extends StatefulWidget {
 class _CustomerListScreenState extends State<CustomerListScreen> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final TextEditingController _searchCtrl = TextEditingController();
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final BackofficeRepository _repo = BackofficeRepository.resolve();
   final OfflineDatabase _offlineDb = GetIt.instance<OfflineDatabase>();
 
   @override
@@ -432,7 +432,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
 
   Future<void> _openInstallmentFromReceivables(int custId, String custName) async {
     try {
-      final res = await _api.dio.get(ApiEndpoints.receivables);
+      final res = await _repo.fetchReceivables();
       final raw = (res.data['data'] as List?) ?? [];
       final matching = raw
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -472,9 +472,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> with SingleTick
                 final amount = IdrCurrencyFormatter.parse(payCtrl.text);
                 if (amount <= 0) return;
                 try {
-                  await _api.dio.post(
-                    ApiEndpoints.payReceivable((target['id'] as num).toInt()),
-                    data: {'amount': amount, 'payment_method_id': 1},
+                  await _repo.payReceivable(
+                    (target['id'] as num).toInt(),
+                    {'amount': amount, 'payment_method_id': 1},
                   );
                   if (dCtx.mounted) Navigator.pop(dCtx);
                   if (mounted) {

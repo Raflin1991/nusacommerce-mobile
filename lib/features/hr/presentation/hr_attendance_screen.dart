@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
-import '../../../core/constants/api_endpoints.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/nusa_theme_tokens.dart';
 import '../../../core/widgets/nusa_widgets.dart';
 import '../../auth/bloc/auth_cubit.dart';
+import '../../../core/network/repositories/backoffice_repository.dart';
 
 /// MODUL HRD, DIREKTORI KARYAWAN & PRESENSI CABANG (Live API Bound)
 class HrAttendanceScreen extends StatefulWidget {
@@ -16,7 +15,7 @@ class HrAttendanceScreen extends StatefulWidget {
 }
 
 class _HrAttendanceScreenState extends State<HrAttendanceScreen> {
-  final ApiClient _api = GetIt.instance<ApiClient>();
+  final BackofficeRepository _repo = BackofficeRepository.resolve();
 
   bool _loading = true;
   bool _clockSubmitting = false;
@@ -65,10 +64,7 @@ class _HrAttendanceScreenState extends State<HrAttendanceScreen> {
         params['store_id'] = _selectedStoreFilter;
       }
 
-      final results = await Future.wait([
-        _api.dio.get(ApiEndpoints.hrSummary, queryParameters: params),
-        _api.dio.get(ApiEndpoints.hrEmployees, queryParameters: params),
-      ]);
+      final results = await _repo.fetchHrSummaryAndEmployees(params);
 
       final sumData = Map<String, dynamic>.from((results[0].data?['data'] as Map?) ?? {});
       final rawStores = (sumData['stores'] as List<dynamic>? ?? [])
@@ -144,7 +140,7 @@ class _HrAttendanceScreenState extends State<HrAttendanceScreen> {
 
     setState(() => _clockSubmitting = true);
     try {
-      final res = await _api.dio.post(ApiEndpoints.hrClock, data: {
+      final res = await _repo.submitHrClock({
         'action': action,
         if (employeeId != null) 'employee_id': employeeId,
         if (notesCtrl.text.trim().isNotEmpty) 'notes': notesCtrl.text.trim(),

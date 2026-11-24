@@ -97,7 +97,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
         final endpoint = isReceivable
             ? ApiEndpoints.receivablePayments(id)
             : ApiEndpoints.payablePayments(id);
-        final res = await _api.dio.get(endpoint);
+        final res = await _repo.getEndpoint(endpoint);
         final raw = res.data['data'] as List<dynamic>?;
         if (raw != null && raw.isNotEmpty) {
           logs = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -343,7 +343,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
                                     (s, r) => s + ((r['balance_due'] as num?)?.toDouble() ?? 0.0),
                                   );
                                   if (groupTotal <= 0) continue;
-                                  await _api.dio.post(
+                                  await _repo.postEndpoint(
                                     endpoint,
                                     data: {
                                       if (isReceivable) 'customer_id': entry.key else 'supplier_id': entry.key,
@@ -544,7 +544,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
               Navigator.pop(ctx);
               if (!_isLocalStandalone && (await _connectivity.checkOnline())) {
                 try {
-                  await _api.dio.put(ApiEndpoints.expenseDetail(id), data: {
+                  await _repo.updateExpense(id, {
                     'description': descCtrl.text.trim(),
                     'amount': amt,
                   });
@@ -586,7 +586,7 @@ extension _DebtBookParityModalsExt on _DebtBookScreenState {
     if (confirmed != true) return;
     if (!_isLocalStandalone && (await _connectivity.checkOnline())) {
       try {
-        await _api.dio.delete(ApiEndpoints.expenseDetail(id));
+        await _repo.deleteExpense(id);
       } catch (_) {}
     } else {
       await _offlineDb.deleteLocalExpense(id);
