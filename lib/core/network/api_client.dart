@@ -30,9 +30,14 @@ class ApiClient {
   })  : _secureStorage = secureStorage,
         _prefs = prefs {
     this.edgeDiscovery = edgeDiscovery ?? EdgeDiscoveryService(prefs);
+    // SEC-MT-04: Migrate any legacy plaintext SharedPreferences token into memory/Keystore and purge plaintext XML on native mobile
     final storedToken = _prefs.getString(_keyToken);
     if (_isValidTokenFormat(storedToken)) {
       _cachedToken = storedToken;
+      if (!kIsWeb) {
+        _prefs.remove(_keyToken);
+        _secureStorage.write(key: _keyToken, value: storedToken!).catchError((_) {});
+      }
     } else if (storedToken != null && storedToken.isNotEmpty) {
       _cachedToken = null;
       _prefs.remove(_keyToken);
@@ -201,11 +206,17 @@ class ApiClient {
       return;
     }
     _cachedToken = token;
-    await _prefs.setString(_keyToken, token);
+    if (!kIsWeb) {
+      // SEC-MT-04: Never persist live Bearer tokens in plaintext SharedPreferences XML on Android/iOS/Desktop
+      await _prefs.remove(_keyToken);
+    }
     try {
       await _secureStorage.write(key: _keyToken, value: token);
     } catch (_) {
-      // Safe fallback when WebCrypto / secure storage is unavailable in browser contexts
+      // Fallback strictly for browser contexts without WebCrypto
+      if (kIsWeb) {
+        await _prefs.setString(_keyToken, token);
+      }
     }
   }
 
@@ -214,25 +225,30 @@ class ApiClient {
       return _cachedToken;
     }
 
-    final prefToken = _prefs.getString(_keyToken);
-    if (_isValidTokenFormat(prefToken)) {
-      _cachedToken = prefToken;
-      return prefToken;
-    } else if (prefToken != null && prefToken.isNotEmpty) {
-      await _prefs.remove(_keyToken);
-    }
-
     try {
       final secToken = await _secureStorage.read(key: _keyToken);
       if (_isValidTokenFormat(secToken)) {
         _cachedToken = secToken;
-        await _prefs.setString(_keyToken, secToken!);
         return secToken;
       } else if (secToken != null && secToken.isNotEmpty) {
         await _secureStorage.delete(key: _keyToken);
       }
     } catch (_) {
-      // Safe fallback when secure storage read/decrypt fails (e.g. WebCrypto mismatch)
+      // Safe fallback when secure storage read/decrypt fails in headless/web contexts
+    }
+
+    final prefToken = _prefs.getString(_keyToken);
+    if (_isValidTokenFormat(prefToken)) {
+      _cachedToken = prefToken;
+      if (!kIsWeb) {
+        await _prefs.remove(_keyToken);
+        try {
+          await _secureStorage.write(key: _keyToken, value: prefToken!);
+        } catch (_) {}
+      }
+      return prefToken;
+    } else if (prefToken != null && prefToken.isNotEmpty) {
+      await _prefs.remove(_keyToken);
     }
 
     _cachedToken = null;
