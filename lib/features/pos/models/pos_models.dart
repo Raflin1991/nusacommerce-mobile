@@ -152,7 +152,7 @@ class ProductVariantModel extends Equatable {
       name: label,
       sku: (json['sku'] ?? '').toString(),
       sellingPrice: (json['selling_price'] as num?)?.toDouble() ?? 0.0,
-      stock: (json['stock'] as num?)?.toDouble() ?? 20.0,
+      stock: (json['stock'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -357,32 +357,6 @@ class ProductModel extends Equatable {
           ),
         );
       }
-    } else if (!soldByWeight &&
-        type != 'digital' &&
-        sellingPrice > 0 &&
-        !const {'kg', 'gram', 'g', 'liter', 'l'}.contains(unitCode.toLowerCase())) {
-      final lusinPrice = ((sellingPrice * 12 * 0.95) / 100).round() * 100.0;
-      final dusPrice = ((sellingPrice * 24 * 0.90) / 100).round() * 100.0;
-      unitConversionsList = [
-        ProductUnitConversion(
-          unitCode: unitCode,
-          unitName: unitCode.toUpperCase(),
-          multiplier: 1.0,
-          price: sellingPrice,
-        ),
-        ProductUnitConversion(
-          unitCode: 'lusin',
-          unitName: 'Lusin (12 $unitCode)',
-          multiplier: 12.0,
-          price: lusinPrice > 0 ? lusinPrice : sellingPrice * 12,
-        ),
-        ProductUnitConversion(
-          unitCode: 'dus',
-          unitName: 'Dus (24 $unitCode)',
-          multiplier: 24.0,
-          price: dusPrice > 0 ? dusPrice : sellingPrice * 24,
-        ),
-      ];
     }
 
     final stockVal = (json['stock'] as num?)?.toDouble() ?? 0.0;
@@ -442,7 +416,7 @@ class ProductModel extends Equatable {
       digitalTargetLabel: digitalMap != null
           ? digitalMap['target_label']?.toString()
           : json['digital_target_label']?.toString(),
-      shelfLocation: shelfStr ?? 'Rak Utama A1',
+      shelfLocation: (shelfStr != null && shelfStr.trim().isNotEmpty) ? shelfStr.trim() : null,
       iconType: inferredIcon,
       imageUrl: json['image_url']?.toString(),
       variants: variantsList,

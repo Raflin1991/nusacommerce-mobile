@@ -3,10 +3,16 @@
 class ApiEndpoints {
   ApiEndpoints._();
 
-  /// Default base URL pointing to VPS Cloud Server.
-  /// Can be overridden dynamically in Login / Settings Screen.
-  static const String defaultBaseUrl = 'https://sambalengine.my.id/api/v1';
-  static const String vpsServerUrl = 'https://sambalengine.my.id/api/v1';
+  /// Default base URL configurable at compile-time via `--dart-define=OXORA_API_BASE_URL=...`
+  /// and overridable dynamically in Login / Settings Screen.
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'OXORA_API_BASE_URL',
+    defaultValue: 'http://nusacommerce.test/api/v1',
+  );
+  static const String vpsServerUrl = String.fromEnvironment(
+    'OXORA_CLOUD_VPS_URL',
+    defaultValue: 'https://cloud.oxora.id/api/v1',
+  );
   static const String laragonDomainUrl = 'http://nusacommerce.test/api/v1';
 
   // 1. Auth & Multi-Store Session
